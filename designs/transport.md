@@ -1,6 +1,6 @@
 # Emacs Transport Design
 
-**Status:** Proposed. No implementation exists yet.
+**Status:** Initial transport implementation exists in `omnigent-transport.el`. Frontend integration remains out of scope.
 
 This document covers how the Emacs client talks to the Omnigent server. It is separate from the frontend design (`designs/frontend.md`), which covers views and window behavior.
 
@@ -14,7 +14,7 @@ This document covers how the Emacs client talks to the Omnigent server. It is se
 
 ### REST: `url-retrieve`
 
-Use the built-in `url-retrieve` for one-shot requests. Parse responses with built-in `json-parse-buffer`. No external dependency.
+Use the built-in `url-retrieve` for one-shot requests. `omnigent-request` handles JSON encoding, auth headers, and response parsing. The endpoint helpers cover session snapshots, top-level lists, child lists, and posted events.
 
 ### Session stream: a `curl` subprocess
 
@@ -22,29 +22,33 @@ Run `curl -N <url>` as an Emacs subprocess. Attach a process filter to the curl 
 
 curl is an external dependency, not a guaranteed platform tool. At connect time, check `executable-find`. If curl is missing, refuse to open a session stream and report an error that names curl as the requirement. REST through `url-retrieve` keeps working without it.
 
-Rationale: curl handles chunked encoding, TLS, proxies, and redirects natively. Emacs code parses only complete frames.
+curl handles chunked transfer, TLS, and proxies. Emacs code parses only complete frames. Set `omnigent-server-url` to the canonical server URL because curl does not follow redirects.
 
-The API document is ambiguous about `data: [DONE]`. One passage says the stream stays open until the client disconnects or the conversation closes. Another says the stream terminates with `[DONE]`, and the example stream shows `[DONE]` after a turn reaches `idle`. Do not resolve the ambiguity by guessing. Treat a `[DONE]` frame and a curl process exit as the same event: the connection is closed. Then resubscribe after a short minimum delay (for example, one second), since the API states that subscribing is safe at any point in the session lifecycle. Follow the reconnect contract on every resubscribe: GET the snapshot, dedupe by item id. Apply the minimum delay to every close, including clean `[DONE]` resubscribes, so an idle session that returns `[DONE]` immediately on every connection cannot drive a reconnect loop. Use longer backoff for failed connects. This is correct under either interpretation. Keep this ambiguity listed as an upstream contract risk until the server document fixes the contradiction.
+The API document is ambiguous about `data: [DONE]`. One passage says the stream stays open until the client disconnects or the conversation closes. Another says the stream terminates with `[DONE]`, and the example stream shows `[DONE]` after a turn reaches `idle`. Treat a `[DONE]` frame and a curl process exit as connection close. Resubscribe after a one-second minimum delay, since subscribing is safe at any point in the session lifecycle. The snapshot callback runs after each connection starts. The caller deduplicates snapshot items and stream events by item id. Apply the minimum delay to every close; use capped exponential backoff for failed connects. Keep the contradiction as an upstream contract risk until the server document resolves it.
 
 ### Session-list updates: poll REST
 
-Poll REST endpoints at a fixed interval: `GET /v1/sessions/{id}/child_sessions` refreshes the child-session tree of one parent, and `GET /v1/sessions` handles top-level session discovery. Both return the liveness signals, `runner_online` and `host_online`, that the tree needs. Use `url-retrieve` for these requests; the long-lived curl process is only for the SSE session stream.
+Use `omnigent-list-child-sessions` to refresh one parent's child tree and `omnigent-list-sessions` for top-level session discovery. The caller schedules these REST requests at a fixed interval and can stop polling when the view closes. The long-lived curl process is only for the SSE session stream.
 
 ## Authentication
 
 A local single-user server needs no credentials. A shared server checks a bearer token: a login token from `POST /auth/login` or a machine token from `POST /oauth/token`, sent as `Authorization: Bearer <token>`.
 
-Keep the token in one user option, for example `omnigent-token`, or read it from a file path in a user option. For REST requests, `url-retrieve` sets the header directly. For the curl subprocess, do not put the token in the curl command line: process listings can expose command-line arguments. Instead, write one header file per curl process in `temporary-file-directory`, set its mode to `0600` before writing the token into it, and pass it with `-H @<header-file>` or a curl config file (`-K`). Delete the file in the curl process sentinel when the process exits. Do not log the header value.
+Keep the token in one user option, for example `omnigent-token`, or read it from a file path in a user option. For REST requests, `url-retrieve` sets the header directly. For the curl subprocess, do not put the token in the curl command line: process listings can expose command-line arguments. Instead, write one header file per curl process in `temporary-file-directory`, set its mode to `0600` before writing the token into it, and pass it with `-H @<header-file>`. Delete the file in the curl process sentinel when the process exits. Do not log the header value.
 
 ## Event dispatch
 
-The SSE filter parses a frame into an event name and a JSON payload. Dispatch on the `type` field of the payload, as the server does. One entry function receives every event and routes it. Buffer-level rendering stays out of the transport layer.
+`omnigent-start-session-stream` calls the event callback with the SSE event name and parsed JSON payload. Dispatch on the payload's `type` field. Keep buffer rendering outside the transport layer.
 
 ## Non-goals
 
 - Do not stream SSE through `url-retrieve`.
-- Do not build a general HTTP client wrapper. `url-retrieve` calls stay inline until a second caller needs the same shape.
+- Do not add endpoint-specific policy to the shared request helper.
 - Do not implement client-side replay. The server has none; the snapshot and item-id dedupe are the contract.
+
+## Checks
+
+Run `make test` for the unit and integration tests. The integration test starts an isolated Omnigent server with a temporary database and artifact directory, then checks REST and SSE without starting an agent turn.
 
 ## Open decisions
 

@@ -2,7 +2,7 @@
 
 This project will bring [Omnigent](https://github.com/omnigent-ai/omnigent) to Emacs.
 
-This README records the upstream features. It does not describe an Emacs implementation. No implementation exists yet.
+This README records upstream features, not project status. An initial Emacs transport module exists; frontend integration remains unimplemented.
 
 ## Omnigent features
 
