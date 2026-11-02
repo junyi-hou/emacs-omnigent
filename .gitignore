@@ -1,1 +1,3 @@
-.agent-shell/**
+.tools/
+.pixi/
+.agent-shell/

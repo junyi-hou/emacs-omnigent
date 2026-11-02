@@ -1,0 +1,14 @@
+[workspace]
+name = "omnigent-emacs"
+version = "0.0.1"
+description = "Emacs Frontend for Omnigent"
+
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
+
+[dependencies]
+tmux = "*"
+python = "3.14"
+
+[pypi-dependencies]
+omnigent = "*"
