@@ -1,7 +1,7 @@
 ;;; omnigent-transport-server-test.el --- Omnigent server integration test -*- lexical-binding: t; -*-
 
 (require 'ert)
-(require 'omnigent-transport)
+(require 'omnigent)
 
 (setq omnigent-server-url
       (or (getenv "OMNIGENT_TEST_SERVER_URL")
@@ -21,52 +21,43 @@
     (should (equal (cdr (assq 'object (cdr result))) "list"))
     (should (vectorp (cdr (assq 'data (cdr result)))))))
 
-(ert-deftest omnigent-transport-receives-server-sse-event ()
-  "Receive a transient SSE event from a local Omnigent session."
-  (let (agent-response session-response snapshot acknowledgement received stream-error
-        stream)
-    (omnigent-request "GET" "/v1/agents"
-                      (lambda (status body)
-                        (setq agent-response (cons status body))))
+(ert-deftest omnigent-connect-creates-default-session-and-receives-event ()
+  "Select New session, then receive a transient SSE event from the server."
+  (let ((omnigent-current-session-id nil)
+        snapshot acknowledgement received stream-error stream)
     (unwind-protect
-        (with-timeout (20 (ert-fail "Timed out waiting for a server SSE event"))
-          (while (not agent-response)
-            (accept-process-output nil 0.1))
-          (should (equal (car agent-response) 200))
-          (let* ((agents (cdr (assq 'data (cdr agent-response))))
-                 (agent-id (cdr (assq 'id (aref agents 0)))))
-            (omnigent-request "POST" "/v1/sessions"
-                              (lambda (status body)
-                                (setq session-response (cons status body)))
-                              `(("agent_id" . ,agent-id)))
-            (while (not session-response)
+        (progn
+          (cl-letf (((symbol-function 'completing-read)
+                     (lambda (_prompt _choices &rest args) (nth 4 args))))
+            (omnigent-connect omnigent-server-url)
+            (with-timeout (20 (ert-fail "Timed out creating a new session"))
+              (while (not omnigent-current-session-id)
+                (accept-process-output nil 0.1))))
+          (setq stream
+                (omnigent-start-session-stream
+                 omnigent-current-session-id
+                 (lambda (name data)
+                   (when (equal name "response.output_text.delta")
+                     (setq received data)))
+                 (lambda (status body)
+                   (setq snapshot (cons status body)))
+                 (lambda (error)
+                   (setq stream-error error))))
+          (with-timeout (20 (ert-fail "Timed out waiting for a server SSE event"))
+            (while (not snapshot)
               (accept-process-output nil 0.1))
-            (should (equal (car session-response) 201))
-            (let ((session-id (cdr (assq 'id (cdr session-response)))))
-              (setq stream
-                    (omnigent-start-session-stream
-                     session-id
-                     (lambda (name data)
-                       (when (equal name "response.output_text.delta")
-                         (setq received data)))
-                     (lambda (status body)
-                       (setq snapshot (cons status body)))
-                     (lambda (error)
-                       (setq stream-error error))))
-              (while (not snapshot)
-                (accept-process-output nil 0.1))
-              (should (equal (car snapshot) 200))
-              (omnigent-post-session-event
-               session-id
-               '(("type" . "external_output_text_delta")
-                 ("data" . (("delta" . "transport-test"))))
-               (lambda (status body)
-                 (setq acknowledgement (cons status body))))
-              (while (not (and acknowledgement received))
-                (accept-process-output nil 0.1))
-              (should (equal (car acknowledgement) 202))
-              (should (equal (cdr (assq 'delta received)) "transport-test"))
-              (should-not stream-error))))
+            (should (equal (car snapshot) 200))
+            (omnigent-post-session-event
+             omnigent-current-session-id
+             '(("type" . "external_output_text_delta")
+               ("data" . (("delta" . "transport-test"))))
+             (lambda (status body)
+               (setq acknowledgement (cons status body))))
+            (while (not (and acknowledgement received))
+              (accept-process-output nil 0.1)))
+          (should (equal (car acknowledgement) 202))
+          (should (equal (cdr (assq 'delta received)) "transport-test"))
+          (should-not stream-error))
       (when stream
         (omnigent-stop-session-stream stream)))))
 

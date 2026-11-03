@@ -1,8 +1,13 @@
 # Emacs Transport Design
 
-**Status:** Initial transport implementation exists in `omnigent-transport.el`. Frontend integration remains out of scope.
+**Status:** Transport and server/session-selection entry points are implemented. Conversation buffers and side views remain proposed.
 
 This document covers how the Emacs client talks to the Omnigent server. It is separate from the frontend design (`designs/frontend.md`), which covers views and window behavior.
+
+## Entry points
+
+- `M-x omnigent-start-server` runs `omnigent server --background --no-open`, then connects to the local server. The CLI reuses an existing local server when possible.
+- `M-x omnigent-connect` prompts for a server URL, lists accessible sessions, and prompts for one to select. `New session` is the default choice; it prompts for an agent and creates a session. Selecting an existing session loads its snapshot. Set `omnigent-token` before connecting to a shared server.
 
 ## What the server offers
 

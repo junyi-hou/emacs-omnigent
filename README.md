@@ -2,7 +2,7 @@
 
 This project will bring [Omnigent](https://github.com/omnigent-ai/omnigent) to Emacs.
 
-This README records upstream features, not project status. An initial Emacs transport module exists; frontend integration remains unimplemented.
+This README records upstream features and current Emacs scope. The transport and server/session-selection entry points exist; the chat UI remains unimplemented.
 
 ## Omnigent features
 
@@ -49,6 +49,18 @@ This README records upstream features, not project status. An initial Emacs tran
 - Provides a Python client and SDK.
 - Provides a REST API for sessions and other server resources.
 - Streams session events over server-sent events (SSE).
+
+## Emacs design
+
+### Session selection
+
+The current completion prompt is temporary. After the user starts or connects to a server, the future UI should open a session-tree side panel. It should show top-level sessions as roots and child sessions under their parent. It should offer `New session` and let the user resume an existing session.
+
+### Child sessions
+
+The parent agent is the main orchestrator. It can create child sessions for delegated work and pass each child the context it needs. Child sessions have separate histories and statuses.
+
+The first Emacs version will show child sessions and let users inspect or message them. It will not add a manual child-creation action. The parent agent can create children through Omnigent's delegation tools. A manual action can be added when users need it and Omnigent documents a clear client API.
 
 ## Sources
 

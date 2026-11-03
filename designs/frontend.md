@@ -1,6 +1,6 @@
 # Emacs Frontend Design
 
-**Status:** Proposed. No implementation exists yet.
+**Status:** Proposed. Session start and selection exist; conversation buffers and side views are not implemented.
 
 ## Decision
 
@@ -10,21 +10,27 @@ The UI does not need to copy the Omnigent web app. Users can manage agent and po
 
 ## Views
 
-### Conversation
+### Session Tree
 
-The main conversation belongs to one Omnigent session. For an orchestrator session, this is the parent session and the initial default message target. Selecting a child changes the active conversation and message target.
+After the user starts or connects to a server, open a session tree in a left side window. Keep it available while the user works. Show top-level sessions as roots and nest child sessions under their parent. Put `New session` first. Selecting a top-level session loads it. The current `completing-read` prompt is temporary.
 
-Build `omnigent-conversation-mode` as a major mode derived from `text-mode`. Render the transcript as read-only text and keep an editable prompt region at the end. Use markers to insert streamed output before the prompt. Keep Omnigent session items and event IDs as session state; treat the buffer as a view, not the source of truth. Use text properties to mark messages and tool activity. See gptel as a chat-buffer design reference, not a dependency.
+Use the tree to select and monitor sessions. Show each child’s agent, status, and whether it needs attention.
 
-### Child Sessions
+#### Child nodes
 
-Show the Omnigent parent and child sessions in a tree in an optional side window. Show each child’s agent, status, and whether it needs attention. Open a selected child in its own conversation buffer.
+Open a selected child in its own conversation buffer.
 
 Selecting a child makes it the active conversation. Use the same composer to send messages directly to that child. The main session is the default when the user opens the session view. Show the active session clearly so users know where a message will go. Keep the parent and child transcripts separate. Do not merge child output into the parent transcript.
 
 Use Omnigent’s child-session data and events as the source of truth. Do not infer child sessions from text or tool calls alone. A harness can have internal subtasks that Omnigent does not expose as child sessions. A child may share its parent’s runner; the client must target the selected child session ID.
 
 For v1, support direct messages and interrupt. Send interrupt through `POST /v1/sessions/{id}/events` with `{"type":"interrupt","data":{}}`. Omit `stop_session` for now, although the API supports it: it is owner-only and terminates the live process. Add it only if users need a distinct terminate action. Do not add a close action: `sys_session_close` is an agent tool, not a client REST route. Do not use session deletion as close; it deletes the conversation.
+
+### Conversation
+
+The main conversation belongs to one Omnigent session. For an orchestrator session, this is the parent session.
+
+Build `omnigent-conversation-mode` as a major mode derived from `text-mode`. Render the transcript as read-only text and keep an editable prompt region at the end. Use markers to insert streamed output before the prompt. Keep Omnigent session items and event IDs as session state; treat the buffer as a view, not the source of truth. Use text properties to mark messages and tool activity. See gptel as a chat-buffer design reference, not a dependency.
 
 ### Workspace Changes
 
@@ -46,9 +52,9 @@ Keep agent and policy definitions in config files. Use Emacs to edit those files
 
 ## Window Behavior
 
-Keep the conversation as the main view. Place the child-session and workspace side windows on the left. Let users show or hide each view.
+Keep the conversation as the main view. Place the session tree and workspace view on the left. Let users show or hide each view.
 
-When both views are open, stack them vertically on the left. Put the child-session view above the workspace view. Use the child-session view as a live status surface. Use Transient for actions. A temporary menu is not a replacement for visible run state.
+When both views are open, stack them vertically on the left. Put the session tree above the workspace view. Use the session tree as a live status surface. Use Transient for actions. A temporary menu is not a replacement for visible run state.
 
 ## Nongoals
 
