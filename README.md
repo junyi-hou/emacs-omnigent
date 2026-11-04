@@ -1,70 +1,53 @@
 # Omnigent for Emacs
 
-This project will bring [Omnigent](https://github.com/omnigent-ai/omnigent) to Emacs.
+[Omnigent](https://github.com/omnigent-ai/omnigent) is a platform for running
+coding agents: multiple supported agents, persistent sessions, sandboxes, and
+policies. This project brings Omnigent to Emacs as an interactive frontend.
 
-This README records upstream features and current Emacs scope. The transport and server/session-selection entry points exist; the chat UI remains unimplemented.
+The goal of this project is to create a chat-centered omnignt interface in
+emacs: connect to an Omnigent server, pick a session, chat with the agent,
+and follow child sessions and workspace changes from inside Emacs. See
+[designs/frontend.md](designs/frontend.md) for the UI plan and
+[designs/transport.md](designs/transport.md) for the transport layer.
 
-## Omnigent features
+## Project status
 
-### Agent support
+Alpha. The foundation works, the UI does not exist yet.
 
-- Runs supported coding agents, including Claude Code, Codex, Cursor, OpenCode, Hermes, and Pi.
-- Supports custom agents defined in YAML.
-- Runs multiple agents in one session, including reviewer and sub-agent workflows.
-- Lets users select different model providers and credential types.
+What works:
 
-### Sessions
+- HTTP REST client and SSE session-stream client with auto-reconnect
+  (`omnigent-transport.el`).
+- Start a local server from the Omnigent CLI, or connect to a remote one
+  (`omnigent-connect`, `omnigent-start`).
+- List, select, and create sessions through a `completing-read` prompt.
 
-- Stores conversations as persistent sessions.
-- Lets users resume or fork a session.
-- Lets users continue a conversation with a different agent by cloning or forking it.
-- Streams agent output and tool activity while the agent works.
-- Keeps session data in sync across supported interfaces.
+What does not exist yet: conversation buffers, session tree, streaming chat
+output, and the composer. Session selection is currently the end of the line.
 
-### User interfaces
+## TODO
 
-- Provides a keyboard-first terminal interface.
-- Provides a web interface and a macOS desktop app.
-- Supports access from mobile browsers.
-- Shows session files and diffs in the web interface.
-- Supports inline comments in the web interface.
+- [ ] Conversation buffer (`omnigent-conversation-mode`): read-only transcript,
+      editable prompt region, streamed output inserted via markers.
+- [ ] Composer: send user messages to the active session, render agent replies
+      and tool activity.
+- [ ] Session tree side panel: top-level sessions as roots, child sessions
+      nested, `New session` entry; replaces the current `completing-read` prompt.
+- [ ] Child sessions: show agent and status per child, open a child in its own
+      conversation buffer, message or interrupt a selected child.
+- [ ] Workspace changes view: list changed files, show before/after contents
+      (Omnigent environments API).
+- [ ] Message the active session from any buffer context, not just the
+      conversation buffer.
+- [ ] Interrupt action via `POST /v1/sessions/{id}/events`.
 
-### Collaboration
+Later, if needed:
 
-- Lets users share sessions with other people.
-- Lets collaborators watch a session and send messages.
-- Lets users fork a shared conversation.
-- Supports multi-user accounts and invite-based access.
-
-### Sandboxes and policies
-
-- Runs agents in local operating-system sandboxes or remote cloud sandboxes.
-- Supports several sandbox providers, including Modal, Daytona, E2B, and Kubernetes.
-- Applies policies at the server, agent, or session level.
-- Can restrict tools, require approval for actions, and set spend limits.
-
-### Programmatic access
-
-- Provides a command-line interface.
-- Provides a Python client and SDK.
-- Provides a REST API for sessions and other server resources.
-- Streams session events over server-sent events (SSE).
-
-## Emacs design
-
-### Session selection
-
-The current completion prompt is temporary. After the user starts or connects to a server, the future UI should open a session-tree side panel. It should show top-level sessions as roots and child sessions under their parent. It should offer `New session` and let the user resume an existing session.
-
-### Child sessions
-
-The parent agent is the main orchestrator. It can create child sessions for delegated work and pass each child the context it needs. Child sessions have separate histories and statuses.
-
-The first Emacs version will show child sessions and let users inspect or message them. It will not add a manual child-creation action. The parent agent can create children through Omnigent's delegation tools. A manual action can be added when users need it and Omnigent documents a clear client API.
+- [ ] Manual child-session creation (requires a documented client API upstream).
+- [ ] `stop_session` action (owner-only; only if users need a distinct terminate).
 
 ## Sources
 
 - [Omnigent repository and README](https://github.com/omnigent-ai/omnigent)
-- [Programmatic usage](https://omnigent.ai/docs/programmatic)
-- [Terminal interface](https://omnigent.ai/docs/interact/terminal)
 - [Server API](https://github.com/omnigent-ai/omnigent/blob/main/omnigent/server/API.md)
+- [Programmatic usage](https://omnigent.ai/docs/programmatic)
