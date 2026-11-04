@@ -12,7 +12,9 @@ The UI does not need to copy the Omnigent web app. Users can manage agent and po
 
 ### Session Tree
 
-After the user starts or connects to a server, open a session tree in a left side window. Keep it available while the user works. Show top-level sessions as roots and nest child sessions under their parent. Put `New session` first. Selecting a top-level session loads it. The current `completing-read` prompt is temporary.
+After the user starts or connects to a server, open a session tree in a left side window. Keep it available while the user works. Show top-level sessions as roots and nest child sessions under their parent. Put `New session` first. Selecting a top-level session loads it. The current `completing_read` prompt is temporary.
+
+The full tree design (transport helpers, major mode, keymap, faces, refresh) lives in [session-tree.md](session-tree.md).
 
 Use the tree to select and monitor sessions. Show each child’s agent, status, and whether it needs attention.
 
@@ -24,7 +26,7 @@ Selecting a child makes it the active conversation. Use the same composer to sen
 
 Use Omnigent’s child-session data and events as the source of truth. Do not infer child sessions from text or tool calls alone. A harness can have internal subtasks that Omnigent does not expose as child sessions. A child may share its parent’s runner; the client must target the selected child session ID.
 
-For v1, support direct messages and interrupt. Send interrupt through `POST /v1/sessions/{id}/events` with `{"type":"interrupt","data":{}}`. Omit `stop_session` for now, although the API supports it: it is owner-only and terminates the live process. Add it only if users need a distinct terminate action. Do not add a close action: `sys_session_close` is an agent tool, not a client REST route. Do not use session deletion as close; it deletes the conversation.
+For v1, support direct messages and interrupt. Send interrupt through `POST /v1/sessions/{id}/events` with `{"type":"interrupt","data":{}}`. Session-tree actions (fork, stop, retry, archive, unarchive, delete) are now in scope; see [session-tree.md](session-tree.md) for their semantics. Stop is owner-only and non-sticky: it kills the live process, and the next message relaunches the session. Do not add a close action: `sys_session_close` is an agent tool, not a client REST route. Do not use session deletion as close; it deletes the conversation.
 
 ### Conversation
 
@@ -46,7 +48,7 @@ The current web UI uses these endpoints, but the checked-in server API reference
 
 ### Session Actions and Configuration
 
-Use Transient for short-lived actions, such as selecting, sharing, forking, or archiving a session. The menu is temporary. The action can change persistent server state.
+Use Transient for short-lived actions, such as selecting, sharing, forking, or archiving a session. The menu is temporary. The action can change persistent server state. For v1, the session tree uses direct keymap actions and plain prompts (`completing-read` for the agent, `read-string` for the title); the Transient menu arrives with the advanced creation options (workspace, host, sandbox, model, reasoning effort).
 
 Keep agent and policy definitions in config files. Use Emacs to edit those files. Do not build a second policy editor in Transient. Add a transient action for a policy only when Omnigent exposes a clear session-level operation for it.
 

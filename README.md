@@ -7,8 +7,8 @@ policies. This project brings Omnigent to Emacs as an interactive frontend.
 The goal of this project is to create a chat-centered omnignt interface in
 emacs: connect to an Omnigent server, pick a session, chat with the agent,
 and follow child sessions and workspace changes from inside Emacs. See
-[designs/frontend.md](designs/frontend.md) for the UI plan and
-[designs/transport.md](designs/transport.md) for the transport layer.
+[docs/frontend.md](docs/frontend.md) for the UI plan and
+[docs/transport.md](docs/transport.md) for the transport layer.
 
 ## Project status
 
@@ -33,6 +33,7 @@ output, and the composer. Session selection is currently the end of the line.
       and tool activity.
 - [ ] Session tree side panel: top-level sessions as roots, child sessions
       nested, `New session` entry; replaces the current `completing-read` prompt.
+      See [docs/session-tree.md](docs/session-tree.md) for the full design.
 - [ ] Child sessions: show agent and status per child, open a child in its own
       conversation buffer, message or interrupt a selected child.
 - [ ] Workspace changes view: list changed files, show before/after contents
@@ -43,8 +44,12 @@ output, and the composer. Session selection is currently the end of the line.
 
 Later, if needed:
 
+- [ ] Row ordering in the session tree (`updated_at` vs. `created_at`).
+- [ ] Advanced session-creation options in a Transient menu: workspace,
+      host, sandbox, model override, reasoning effort, launch args, and
+      fork options (harness switch, fork-from-response).
 - [ ] Manual child-session creation (requires a documented client API upstream).
-- [ ] `stop_session` action (owner-only; only if users need a distinct terminate).
+- [ ] `delete_worktree` option on archive (removes the session worktree).
 
 ## Sources
 

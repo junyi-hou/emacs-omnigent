@@ -2,7 +2,7 @@
 
 **Status:** Transport and server/session-selection entry points are implemented. Conversation buffers and side views remain proposed.
 
-This document covers how the Emacs client talks to the Omnigent server. It is separate from the frontend design (`designs/frontend.md`), which covers views and window behavior.
+This document covers how the Emacs client talks to the Omnigent server. It is separate from the frontend design (`docs/frontend.md`), which covers views and window behavior.
 
 ## Entry points
 
@@ -31,9 +31,22 @@ curl handles chunked transfer, TLS, and proxies. Emacs code parses only complete
 
 The API document is ambiguous about `data: [DONE]`. One passage says the stream stays open until the client disconnects or the conversation closes. Another says the stream terminates with `[DONE]`, and the example stream shows `[DONE]` after a turn reaches `idle`. Treat a `[DONE]` frame and a curl process exit as connection close. Resubscribe after a one-second minimum delay, since subscribing is safe at any point in the session lifecycle. The snapshot callback runs after each connection starts. The caller deduplicates snapshot items and stream events by item id. Apply the minimum delay to every close; use capped exponential backoff for failed connects. Keep the contradiction as an upstream contract risk until the server document resolves it.
 
-### Session-list updates: poll REST
+### Session-list updates: the session-updates websocket
 
-Use `omnigent-list-child-sessions` to refresh one parent's child tree and `omnigent-list-sessions` for top-level session discovery. The caller schedules these REST requests at a fixed interval and can stop polling when the view closes. The long-lived curl process is only for the SSE session stream.
+Subscribe to `WS /v1/sessions/updates` for session-list changes; do not
+poll. The connection uses the `websocket` package from GNU ELPA:
+`url-retrieve` cannot speak WebSocket, the curl build on macOS has no
+WebSocket support, and the protocol needs bidirectional watch-set updates
+anyway. `omnigent-start-session-updates` and
+`omnigent-stop-session-updates` mirror the SSE stream API: frame and error
+callbacks, reconnect with the shared backoff constants, watch-set re-sent
+on reconnect. The bearer token goes in a handshake header; the connection
+runs in-process, so the curl header-file scheme does not apply.
+
+REST list calls remain for the initial load, for manual refresh, and for
+child lists: `omnigent-list-child-sessions` refreshes one parent's child
+tree when a watched child changes. See
+[session-tree.md](session-tree.md) for the frame handling.
 
 ## Authentication
 
@@ -57,9 +70,8 @@ Run `make test` for the unit and integration tests. The integration test starts 
 
 ## Open decisions
 
-1. Poll interval for the session list, and whether it polls only while the child-session tree is visible.
-2. Token storage: plain user option, auth-source, or a file path.
-3. Whether the SSE parser needs an `Accept: text/event-stream` header workaround for any Emacs-side proxy in front of the server.
+1. Token storage: plain user option, auth-source, or a file path.
+2. Whether the SSE parser needs an `Accept: text/event-stream` header workaround for any Emacs-side proxy in front of the server.
 
 ## References
 
