@@ -1,8 +1,8 @@
 # Session Tree Design
 
-**Status:** Accepted. Not implemented. This document rounds
-up the session tree design: the transport functions it needs, the buffer and
-major mode, the lineage display, the keymap, and the faces. See
+**Status:** Accepted. The session-updates WebSocket transport is implemented.
+The session tree is not implemented. This document rounds up the tree design:
+the buffer and major mode, the lineage display, the keymap, and the faces. See
 [frontend.md](frontend.md) for the overall UI plan and
 [transport.md](transport.md) for the transport layer.
 
@@ -100,11 +100,13 @@ buffer is gone. The tree closes its session-updates connection on
 
 ## Refresh: the session-updates websocket
 
-The tree subscribes to `WS /v1/sessions/updates` and does no polling. The
-transport gains `omnigent-start-session-updates` and
-`omnigent-stop-session-updates`, built on the `websocket` package from
-GNU ELPA. The API mirrors the SSE stream: frame and error callbacks,
-reconnect with the same backoff constants, and the watch-set re-sent on
+The tree will subscribe to `WS /v1/sessions/updates` and do no polling.
+The transport provides `omnigent-start-session-updates`,
+`omnigent-set-session-updates-watch`, and
+`omnigent-stop-session-updates`, built on the required `websocket` package
+from GNU ELPA. The frame callback receives each parsed JSON frame. The
+optional error callback receives an error string. The transport reconnects
+with the same backoff constants and re-sends the latest watch set after
 reconnect.
 
 Protocol: the client sends `{"type":"watch","session_ids":[...]}`;
@@ -126,8 +128,8 @@ Manual `g` re-lists through REST and re-renders; it stays as the force
 re-sync key. REST also does the initial load on first open.
 
 Dependency: `websocket` from GNU ELPA. It is not bundled with Emacs. The
-tree reports an error that names the package when it is missing. REST
-and the SSE session stream keep working without it.
+transport reports an error that names the package if it is missing. REST
+and SSE calls do not load WebSocket functions until a connection starts.
 
 ## Connection lifecycle
 
@@ -266,19 +268,19 @@ buffer works in any window first.
 
 ## Checks
 
-One unit test file, `test/omnigent-session-tree-test.el`, runs in batch
-Emacs with no server. It feeds fixture frames and fixture list and child
-JSON to the frame handler and the renderer, and asserts the tree
-structure, faces, text properties, point restore by session id, and the
-dirty-parent refetch scheduling. No framework; it matches the style of
-the existing tests.
+The planned tree unit tests will run in batch Emacs with no server. They
+will feed fixture frames and fixture list and child JSON to the frame
+handler and renderer. They will check the tree structure, faces, text
+properties, point restore by session ID, and dirty-parent refetch scheduling.
 
-The integration script (`test/run-server-integration.sh`) gains one
-websocket passage: it installs the `websocket` package from GNU ELPA
-into a temporary package directory, connects to the test server, sends a
-watch, asserts the `snapshot` frame, triggers a change through a REST
-action already under test, and asserts the `changed` frame. This covers
-the handshake, auth, and frame path end to end.
+`test/omnigent-transport-test.el` tests the WebSocket transport with a
+mocked connection. It checks URL construction, auth headers, watch messages,
+frame parsing, missing-package errors, and reconnect behavior.
+`test/omnigent-transport-server-test.el` also connects to the test server with
+the GNU ELPA client. It checks the handshake, a watch snapshot, and a changed
+frame. The integration script installs `websocket` into a temporary package
+directory. Set `OMNIGENT_WEBSOCKET_LOAD_PATH` to an existing source directory
+to run the integration test without a package download.
 
 Keymap commands are thin wrappers over tested functions and get no tests
 of their own.

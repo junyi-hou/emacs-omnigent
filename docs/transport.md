@@ -1,6 +1,6 @@
 # Emacs Transport Design
 
-**Status:** Transport and server/session-selection entry points are implemented. Conversation buffers and side views remain proposed.
+**Status:** REST, SSE, and session-updates WebSocket transport are implemented, as are the server and session-selection entry points. Conversation buffers and side views remain proposed.
 
 This document covers how the Emacs client talks to the Omnigent server. It is separate from the frontend design (`docs/frontend.md`), which covers views and window behavior.
 
@@ -34,14 +34,25 @@ The API document is ambiguous about `data: [DONE]`. One passage says the stream 
 ### Session-list updates: the session-updates websocket
 
 Subscribe to `WS /v1/sessions/updates` for session-list changes; do not
-poll. The connection uses the `websocket` package from GNU ELPA:
-`url-retrieve` cannot speak WebSocket, the curl build on macOS has no
-WebSocket support, and the protocol needs bidirectional watch-set updates
-anyway. `omnigent-start-session-updates` and
-`omnigent-stop-session-updates` mirror the SSE stream API: frame and error
-callbacks, reconnect with the shared backoff constants, watch-set re-sent
-on reconnect. The bearer token goes in a handshake header; the connection
-runs in-process, so the curl header-file scheme does not apply.
+poll. The connection uses the GNU ELPA `websocket` package, which this
+project declares as a dependency.
+`url-retrieve` cannot speak WebSocket, and the protocol needs bidirectional
+watch-set updates.
+
+`omnigent-start-session-updates` takes a frame callback and an optional
+error callback. The frame callback receives one parsed JSON frame. The
+error callback receives an error string. The function returns a handle.
+`omnigent-set-session-updates-watch` replaces the full watch set. It accepts
+up to 500 session ID strings. The transport sends the current set when the
+connection opens and re-sends it after reconnect. It stores watch-set changes
+made while the connection is opening. `omnigent-stop-session-updates` closes
+the connection and stops reconnects.
+
+The connection uses the `ws` or `wss` scheme that matches the server URL.
+The bearer token goes in the handshake header. The connection runs
+in-process, so the curl header-file scheme does not apply. A missing
+`websocket` package produces an error that names the package. REST and SSE
+transport code does not load WebSocket functions until a connection starts.
 
 REST list calls remain for the initial load, for manual refresh, and for
 child lists: `omnigent-list-child-sessions` refreshes one parent's child
@@ -66,7 +77,7 @@ Keep the token in one user option, for example `omnigent-token`, or read it from
 
 ## Checks
 
-Run `make test` for the unit and integration tests. The integration test starts an isolated Omnigent server with a temporary database and artifact directory, then checks REST and SSE without starting an agent turn.
+Run `make test` for the unit and integration tests. The transport unit tests use a mocked WebSocket connection to check URL, auth, watch messages, frame parsing, and reconnect behavior. The integration test starts an isolated Omnigent server with a temporary database and artifact directory. It checks REST and SSE without starting an agent turn, and it checks the WebSocket handshake, snapshot, and changed frame with the GNU ELPA client.
 
 ## Open decisions
 

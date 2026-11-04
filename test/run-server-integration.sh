@@ -52,5 +52,28 @@ if [ "$ready" != true ]; then
   tail -n 80 "$tmp/server.log" >&2
   exit 1
 fi
-OMNIGENT_TEST_SERVER_URL=$url "$emacs_bin" -Q --batch -L . -L test \
-  -l test/omnigent-transport-server-test.el -f ert-run-tests-batch-and-exit
+package_dir="$tmp/elpa"
+websocket_load_path=${OMNIGENT_WEBSOCKET_LOAD_PATH:-}
+if [ -z "$websocket_load_path" ]; then
+  OMNIGENT_TEST_PACKAGE_DIR="$package_dir" "$emacs_bin" -Q --batch \
+    --eval '(require (quote package))' \
+    --eval '(setq package-user-dir (getenv "OMNIGENT_TEST_PACKAGE_DIR") package-archives (quote (("gnu" . "https://elpa.gnu.org/packages/"))))' \
+    --eval '(package-refresh-contents)' \
+    --eval '(package-install (quote websocket))'
+fi
+run_integration_tests() {
+  if [ -n "$websocket_load_path" ]; then
+    OMNIGENT_TEST_SERVER_URL="$url" "$emacs_bin" -Q --batch \
+      -L "$websocket_load_path" -L . -L test \
+      -l test/omnigent-transport-server-test.el -f ert-run-tests-batch-and-exit
+  else
+    OMNIGENT_TEST_PACKAGE_DIR="$package_dir" OMNIGENT_TEST_SERVER_URL="$url" \
+      "$emacs_bin" -Q --batch \
+      --eval '(require (quote package))' \
+      --eval '(setq package-user-dir (getenv "OMNIGENT_TEST_PACKAGE_DIR"))' \
+      --eval '(package-initialize)' \
+      -L . -L test -l test/omnigent-transport-server-test.el \
+      -f ert-run-tests-batch-and-exit
+  fi
+}
+run_integration_tests

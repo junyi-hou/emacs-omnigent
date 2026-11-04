@@ -16,8 +16,8 @@ Alpha. The foundation works, the UI does not exist yet.
 
 What works:
 
-- HTTP REST client and SSE session-stream client with auto-reconnect
-  (`omnigent-transport.el`).
+- HTTP REST requests, plus reconnecting SSE session streams and session-updates
+  WebSocket connections (`omnigent-transport.el`).
 - Start a local server from the Omnigent CLI, or connect to a remote one
   (`omnigent-connect`, `omnigent-start`).
 - List, select, and create sessions through a `completing-read` prompt.

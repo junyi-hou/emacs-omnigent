@@ -2,6 +2,7 @@
 
 (require 'ert)
 (require 'omnigent)
+(require 'websocket)
 
 (setq omnigent-server-url
       (or (getenv "OMNIGENT_TEST_SERVER_URL")
@@ -20,6 +21,63 @@
     (should (equal (car result) 200))
     (should (equal (cdr (assq 'object (cdr result))) "list"))
     (should (vectorp (cdr (assq 'data (cdr result)))))))
+
+(ert-deftest omnigent-transport-session-updates-uses-live-websocket ()
+  "Receive session snapshots and changes over a live WebSocket connection."
+  (let ((omnigent-current-session-id nil)
+        (omnigent-current-session nil)
+        frames stream-error updates patch-result)
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'completing-read)
+                     (lambda (_prompt _choices &rest args) (nth 4 args))))
+            (omnigent-connect omnigent-server-url)
+            (with-timeout (20 (ert-fail "Timed out creating a session"))
+              (while (not omnigent-current-session-id)
+                (accept-process-output nil 0.1))))
+          (setq updates
+                (omnigent-start-session-updates
+                 (lambda (frame) (push frame frames))
+                 (lambda (error) (setq stream-error error))))
+          (omnigent-set-session-updates-watch
+           updates (list omnigent-current-session-id))
+          (with-timeout (15 (ert-fail "Timed out waiting for WebSocket snapshot"))
+            (while (not (cl-some (lambda (frame)
+                                   (equal (cdr (assq 'type frame)) "snapshot"))
+                                 frames))
+              (accept-process-output nil 0.1)))
+          (let* ((snapshot (cl-find-if
+                            (lambda (frame)
+                              (equal (cdr (assq 'type frame)) "snapshot"))
+                            frames))
+                 (items (cdr (assq 'items snapshot))))
+            (should (cl-some (lambda (item)
+                               (equal (cdr (assq 'id item))
+                                      omnigent-current-session-id))
+                             (append items nil))))
+          (omnigent-request
+           "PATCH"
+           (omnigent-transport--session-path omnigent-current-session-id)
+           (lambda (status body) (setq patch-result (cons status body)))
+           '(("title" . "websocket-updated")))
+          (with-timeout (10 (ert-fail "Timed out updating session title"))
+            (while (not patch-result) (accept-process-output nil 0.1)))
+          (should (equal (car patch-result) 200))
+          (with-timeout (15 (ert-fail "Timed out waiting for WebSocket change"))
+            (while (not (cl-some
+                         (lambda (frame)
+                           (and (equal (cdr (assq 'type frame)) "changed")
+                                (cl-some
+                                 (lambda (item)
+                                   (and (equal (cdr (assq 'id item))
+                                               omnigent-current-session-id)
+                                        (equal (cdr (assq 'title item))
+                                               "websocket-updated")))
+                                 (append (cdr (assq 'items frame)) nil))))
+                         frames))
+              (accept-process-output nil 0.1)))
+          (should-not stream-error))
+      (when updates (omnigent-stop-session-updates updates)))))
 
 (ert-deftest omnigent-connect-creates-default-session-and-receives-event ()
   "Select New session, then receive a transient SSE event from the server."

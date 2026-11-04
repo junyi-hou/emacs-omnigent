@@ -1,10 +1,10 @@
-;;; omnigent-transport.el --- Omnigent HTTP and SSE transport -*- lexical-binding: t; -*-
+;;; omnigent-transport.el --- Omnigent HTTP, SSE, and WebSocket transport -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026
-;; Package-Requires: ((emacs "27.1"))
+;; Package-Requires: ((emacs "27.1") (websocket "1.16"))
 
 ;;; Commentary:
-;; Small REST and session-stream client for Omnigent.
+;; Small REST, session-stream, and session-updates client for Omnigent.
 ;;
 ;; REST callbacks receive (STATUS BODY).  STATUS is the HTTP status code, or
 ;; url-retrieve's status plist when no HTTP response arrived.  BODY is parsed
@@ -41,6 +41,11 @@
 (cl-defstruct (omnigent-stream (:constructor omnigent-transport--make-stream))
   session-id event-callback snapshot-callback error-callback process timer
   stopped failures attempt)
+
+(cl-defstruct (omnigent-session-updates
+               (:constructor omnigent-transport--make-session-updates))
+  frame-callback error-callback websocket timer session-ids stopped failures
+  attempt connected failed)
 
 (defun omnigent-transport--url (path)
   (concat (string-remove-suffix "/" omnigent-server-url) path))
@@ -305,6 +310,164 @@ error string.  Return a stream handle for `omnigent-stop-session-stream'."
     (cancel-timer (omnigent-stream-timer stream)))
   (when (process-live-p (omnigent-stream-process stream))
     (delete-process (omnigent-stream-process stream))))
+
+(defun omnigent-transport--updates-url ()
+  (unless (string-match-p "\\`https?://" omnigent-server-url)
+    (user-error "Omnigent WebSocket URL must start with http:// or https://"))
+  (concat (if (string-prefix-p "https://" omnigent-server-url) "wss" "ws")
+          (substring (string-remove-suffix "/" omnigent-server-url)
+                     (if (string-prefix-p "https://" omnigent-server-url) 5 4))
+          "/v1/sessions/updates"))
+
+(defun omnigent-transport--updates-current-p (updates attempt)
+  (and (not (omnigent-session-updates-stopped updates))
+       (= attempt (omnigent-session-updates-attempt updates))))
+
+(defun omnigent-transport--updates-notify-error (updates error)
+  (when (omnigent-session-updates-error-callback updates)
+    (condition-case nil
+        (funcall (omnigent-session-updates-error-callback updates) error)
+      (error nil))))
+
+(defun omnigent-transport--updates-send-watch (updates websocket attempt)
+  (when (and (omnigent-transport--updates-current-p updates attempt)
+             (websocket-openp websocket))
+    (condition-case err
+        (websocket-send-text
+         websocket
+         (json-encode `(("type" . "watch")
+                        ("session_ids" . ,(vconcat
+                                            (omnigent-session-updates-session-ids
+                                             updates))))))
+      (error
+       (setf (omnigent-session-updates-failed updates) t)
+       (omnigent-transport--updates-notify-error
+        updates (error-message-string err))
+       (ignore-errors (websocket-close websocket))))))
+
+(defun omnigent-transport--updates-schedule-reconnect (updates delay)
+  (unless (or (omnigent-session-updates-stopped updates)
+              (timerp (omnigent-session-updates-timer updates)))
+    (setf (omnigent-session-updates-timer updates)
+          (run-at-time delay nil
+                       #'omnigent-transport--updates-connect updates))))
+
+(defun omnigent-transport--updates-opened (updates websocket attempt)
+  (when (omnigent-transport--updates-current-p updates attempt)
+    (setf (omnigent-session-updates-websocket updates) websocket
+          (omnigent-session-updates-connected updates) t
+          (omnigent-session-updates-failed updates) nil
+          (omnigent-session-updates-failures updates) 0)
+    (omnigent-transport--updates-send-watch updates websocket attempt)))
+
+(defun omnigent-transport--updates-message (updates websocket attempt frame)
+  (when (omnigent-transport--updates-current-p updates attempt)
+    (let ((data
+           (condition-case err
+               (json-parse-string (websocket-frame-text frame)
+                                  :object-type 'alist :array-type 'array
+                                  :null-object nil :false-object :json-false)
+             (error
+              (omnigent-transport--updates-notify-error
+               updates (format "Invalid WebSocket JSON: %s"
+                               (error-message-string err)))
+              :invalid))))
+      (unless (eq data :invalid)
+        (funcall (omnigent-session-updates-frame-callback updates) data)))))
+
+(defun omnigent-transport--updates-error (updates attempt _websocket type err)
+  (when (omnigent-transport--updates-current-p updates attempt)
+    (setf (omnigent-session-updates-failed updates) t)
+    (omnigent-transport--updates-notify-error
+     updates (format "WebSocket %s: %s" type (error-message-string err)))))
+
+(defun omnigent-transport--updates-closed (updates attempt _websocket)
+  (when (omnigent-transport--updates-current-p updates attempt)
+    (setf (omnigent-session-updates-websocket updates) nil)
+    (let ((failed (or (omnigent-session-updates-failed updates)
+                      (not (omnigent-session-updates-connected updates)))))
+      (setf (omnigent-session-updates-failures updates)
+            (if failed (1+ (omnigent-session-updates-failures updates)) 0)
+            (omnigent-session-updates-connected updates) nil
+            (omnigent-session-updates-failed updates) nil)
+      (omnigent-transport--updates-schedule-reconnect
+       updates (omnigent-transport--reconnect-delay
+                (omnigent-session-updates-failures updates))))))
+
+(defun omnigent-transport--updates-connect (updates)
+  (unless (omnigent-session-updates-stopped updates)
+    (setf (omnigent-session-updates-timer updates) nil)
+    (let* ((attempt (1+ (omnigent-session-updates-attempt updates)))
+           (auth (omnigent-transport--auth-header))
+           websocket)
+      (setf (omnigent-session-updates-attempt updates) attempt
+            (omnigent-session-updates-connected updates) nil
+            (omnigent-session-updates-failed updates) nil)
+      (condition-case err
+          (setq websocket
+                (websocket-open
+                 (omnigent-transport--updates-url)
+                 :nowait t
+                 :custom-header-alist (when auth (list auth))
+                 :on-open (lambda (ws)
+                            (omnigent-transport--updates-opened
+                             updates ws attempt))
+                 :on-message (lambda (ws frame)
+                               (omnigent-transport--updates-message
+                                updates ws attempt frame))
+                 :on-close (lambda (ws)
+                             (omnigent-transport--updates-closed
+                              updates attempt ws))
+                 :on-error (lambda (ws type error)
+                             (omnigent-transport--updates-error
+                              updates attempt ws type error))))
+        (error
+         (setf (omnigent-session-updates-failures updates)
+               (1+ (omnigent-session-updates-failures updates)))
+         (omnigent-transport--updates-notify-error
+          updates (error-message-string err))
+         (omnigent-transport--updates-schedule-reconnect
+          updates (omnigent-transport--reconnect-delay
+                   (omnigent-session-updates-failures updates)))))
+      (when websocket
+        (setf (omnigent-session-updates-websocket updates) websocket)))))
+
+(defun omnigent-start-session-updates (on-frame &optional on-error)
+  "Connect to the session-updates WebSocket.
+
+ON-FRAME receives each parsed JSON frame.  ON-ERROR, when non-nil, receives
+an error string.  Return a handle for `omnigent-stop-session-updates'."
+  (unless (require 'websocket nil t)
+    (user-error "Session updates require the websocket package from GNU ELPA"))
+  (omnigent-transport--updates-url)
+  (omnigent-transport--auth-header)
+  (let ((updates (omnigent-transport--make-session-updates
+                  :frame-callback on-frame :error-callback on-error
+                  :session-ids nil :stopped nil :failures 0 :attempt 0)))
+    (omnigent-transport--updates-connect updates)
+    updates))
+
+(defun omnigent-set-session-updates-watch (updates session-ids)
+  "Set UPDATES' watched SESSION-IDS and send the full set to the server.
+SESSION-IDS must be a list of at most 500 strings."
+  (unless (and (listp session-ids) (<= (length session-ids) 500)
+               (cl-every #'stringp session-ids))
+    (user-error "Session watch must be a list of at most 500 session IDs"))
+  (setf (omnigent-session-updates-session-ids updates) (copy-sequence session-ids))
+  (when (omnigent-session-updates-websocket updates)
+    (omnigent-transport--updates-send-watch
+     updates (omnigent-session-updates-websocket updates)
+     (omnigent-session-updates-attempt updates))))
+
+(defun omnigent-stop-session-updates (updates)
+  "Stop UPDATES and prevent automatic reconnection."
+  (setf (omnigent-session-updates-stopped updates) t)
+  (when (timerp (omnigent-session-updates-timer updates))
+    (cancel-timer (omnigent-session-updates-timer updates)))
+  (let ((websocket (omnigent-session-updates-websocket updates)))
+    (setf (omnigent-session-updates-websocket updates) nil)
+    (when websocket
+      (ignore-errors (websocket-close websocket)))))
 
 (provide 'omnigent-transport)
 ;;; omnigent-transport.el ends here
