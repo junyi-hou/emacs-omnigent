@@ -34,6 +34,9 @@ The main conversation belongs to one Omnigent session. For an orchestrator sessi
 
 Build `omnigent-conversation-mode` as a major mode derived from `text-mode`. Render the transcript as read-only text and keep an editable prompt region at the end. Use markers to insert streamed output before the prompt. Keep Omnigent session items and event IDs as session state; treat the buffer as a view, not the source of truth. Use text properties to mark messages and tool activity. See gptel as a chat-buffer design reference, not a dependency.
 
+The conversation buffer design (transcript, folding, queue, steer) lives in
+[conversation-buffer.md](conversation-buffer.md).
+
 ### Workspace Changes
 
 Show workspace files and diffs in an optional side window. Use Omnigent’s workspace environment API for this view:

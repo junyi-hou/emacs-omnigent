@@ -45,11 +45,12 @@ standalone session. It never appears under its source.
 | Unarchive | Same route with `{"archived":false}` | Owner-only. |
 | Delete | `DELETE /v1/sessions/{id}` | Deletes the conversation permanently. Ask for confirmation before calling it. |
 
-There is no resume endpoint. "Resume" means open the session: a snapshot GET
-plus the SSE stream. `omnigent-resume-session` already does this. Do not add
-a `stop_session`-like dedicated helper for resume. A stopped session
-relaunches on the next message, so resume and "send a message" are the same
-path.
+There is no resume endpoint. Loading a session is opening it: a snapshot
+GET plus the SSE stream, and the conversation buffer is that open state
+(see [conversation-buffer.md](conversation-buffer.md)). Do not name a
+helper "resume" and do not add a `stop_session`-like helper for it. A
+stopped session relaunches on the next message, so loading and "send a
+message" are the same path.
 
 `delete_worktree: true` also removes the session worktree directory when
 archiving. Skip it in v1; add it only when a user asks.
@@ -136,8 +137,8 @@ and SSE calls do not load WebSocket functions until a connection starts.
 The frontend is connected to one server at a time. `omnigent-connect`
 (and `omnigent-start-server`, which ends in a connect) resets everything
 first: stop every SSE stream, stop the session-updates websocket, kill
-the tree buffer, kill conversation buffers, clear the active session.
-Then it connects and opens the tree. The reset runs even when the URL is
+the tree buffer, kill conversation buffers. Then it connects and opens
+the tree. The reset runs even when the URL is
 unchanged: a restarted server or stale expansion state is cheaper to
 rebuild than to reconcile.
 
@@ -147,12 +148,13 @@ was killed.
 
 ## Active session
 
-The active session is the session of the conversation buffer point is in.
-When point is in any other buffer, the active session is the most recently
-used conversation buffer's session. `omnigent-current-session-id` holds
-that fallback and nothing more. Messages sent from a non-conversation
-buffer go to the active session. The tree highlights the active session's
-row.
+The active session is the session of the conversation buffer point is
+in, per CONTEXT.md. There is no global variable holding it: no
+`omnigent-current-session-id`, no most-recently-used fallback. Every
+conversation buffer is self-contained and reads its own buffer-local
+session id. If a future command needs "the active session" from
+outside a conversation buffer, it can set one variable on buffer focus
+then; do not build the tracking first.
 
 A conversation buffer belongs to exactly one session; there is one buffer
 per session and no shared transcript. Each open conversation buffer keeps
@@ -165,7 +167,7 @@ is not on a session line, the command signals an error that names the key.
 
 | Key | Action |
 |-----|--------|
-| `RET` | Open the session: pop to its conversation buffer, or create the buffer when none exists. The opened session becomes the active session. |
+| `RET` | Open the session: pop to its conversation buffer, or create the buffer when none exists. |
 | `TAB` | Expand or collapse the node under point. |
 | `n` | New session: pick an agent, read a title, create. |
 | `f` | Fork the session under point. |
@@ -194,7 +196,7 @@ v1 uses plain prompts, no Transient menu. `n` (the command also works
 outside the tree): one `completing-read` over `GET /v1/agents`, then one
 `read-string` for the title; an empty title lets the server derive one.
 Then `POST /v1/sessions` with `agent_id` and, when given, `title`. After
-the create returns, the new session becomes the active session and
+the create returns, the new session's conversation buffer opens and
 behaves like `RET` on its row; the row itself arrives through the push
 channel.
 

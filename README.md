@@ -38,8 +38,10 @@ output, and the composer. Session selection is currently the end of the line.
       conversation buffer, message or interrupt a selected child.
 - [ ] Workspace changes view: list changed files, show before/after contents
       (Omnigent environments API).
-- [ ] Message the active session from any buffer context, not just the
-      conversation buffer.
+- [ ] Track queued messages client-side: show messages sent while the
+      session is busy (the server queues them; v1 renders them only
+      after a snapshot refresh). See
+      [docs/conversation-buffer.md](docs/conversation-buffer.md).
 - [ ] Interrupt action via `POST /v1/sessions/{id}/events`.
 
 Later, if needed:

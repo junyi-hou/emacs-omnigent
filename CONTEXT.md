@@ -40,6 +40,17 @@ The buffer that shows one session's transcript and takes input for that
 session. One buffer per session.
 _Avoid_: chat buffer, session buffer
 
+**Load a session**:
+Open the session's conversation buffer: a snapshot GET plus the SSE
+stream. Omnigent has no resume operation; loading and sending a message
+are the same path.
+_Avoid_: resume a session
+
+**Fold block**:
+A transcript block with a visible header line and a collapsible body
+(a tool call or reasoning). Collapsed by default.
+_Avoid_: fragment, foldable region
+
 **Active session**:
 The session of the conversation buffer point is in; when point is
 elsewhere, the most recently used conversation buffer's session.
