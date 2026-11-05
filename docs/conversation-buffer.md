@@ -35,6 +35,9 @@ Facts come from the server API document and the installed server.
     `response.reasoning_text.delta` / `response.reasoning_summary_text.delta`
     for streamed text.
   - `session.interrupted` after a user interrupt.
+  - `response.elicitation_request` when the agent needs a user response.
+  - `response.elicitation_resolved` when a request is answered or ends.
+- A session snapshot includes outstanding requests in `pending_elicitations`.
 - `POST /v1/sessions/{id}/events` with `{"type":"message",...}` returns
   202 `{"queued":true}`. While the session is `running`, the server
   queues the message behind the current turn and consumes it at the
@@ -60,6 +63,8 @@ Buffer-local state:
   rendered block and the fold state.
   This table is the dedupe index: an item that is already present is
   never rendered twice, from the snapshot or the stream.
+- Pending elicitations, keyed by elicitation id, stored separately from
+  transcript items.
 
 The buffer is a view. The snapshot plus the stream is the source of
 truth, per the reconnect contract in [transport.md](transport.md). The
@@ -245,6 +250,11 @@ The composer is always enabled; the session status never blocks typing.
   the server does with unconsumed messages is the server's business; a
   snapshot refresh shows the truth.
 
+## Elicitations
+
+See [elicitation.md](elicitation.md) for request state, inline forms,
+and resolution.
+
 ## Faces
 
 - `omnigent-user`, `omnigent-agent`: message labels.
@@ -257,7 +267,8 @@ The composer is always enabled; the session status never blocks typing.
 | Key | Action |
 |-----|--------|
 | C-c RET (prompt) | Send message. Plain RET types a newline. |
-| RET, TAB, mouse-1 (fold header) | Toggle fold. |
+| zc | Close fold. |
+| zo | Open fold. |
 | C-c C-c | Interrupt. |
 | C-c g | Refresh from snapshot (re-render buffer, preserving folds and point). |
 
@@ -265,8 +276,6 @@ The composer is always enabled; the session status never blocks typing.
 
 - No markdown rendering of message bodies in v1. Plain text only. Add
   when a workflow needs it.
-- No elicitation cards in this document. They use the resolve route and
-  need their own design.
 - No editing or resending past messages.
 - No todos or plan panel, no usage display.
 - No client-side replay or diffing of the transcript; a refresh
