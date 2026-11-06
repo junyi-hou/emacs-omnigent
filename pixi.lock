@@ -104,6 +104,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/88/f9/16491d7ed2a919954993e48aa941b200f38040928474c9e85ea9e64222c3/pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/8a/cf/e3ad894ed5909a7c44b0707e89bc25d19a3d78b3a7aec846119443b6ae56/watchfiles-1.3.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/8f/db/d7282caf7ab03af44d5d6fdbaa019b35c7d7f1c90588b839c07cba640d6a/markupsafe-3.0.4-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/8f/ed/c284543c08aa443a4ef2c8bd120be51da8433dd174c01749b5d87c333f22/agent_client_protocol-0.9.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/95/35/77ed86be430bd179d34905d62cdb5ba6747c635737092088fcf03c753c61/types_requests-2.33.0.20261030-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/99/91/8acff4f5e50511b911bbccb72b8628a49c68ce14148cd9f6431094859a90/annotated_types-0.8.0-py3-none-any.whl
@@ -220,6 +221,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/83/16/b603274617b3e6728da3a0133d4fba1ea8d7fbe0c4ea5fef9cbffa398b8b/pillow-13.0.0-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl
       - pypi: https://files.pythonhosted.org/packages/88/2e/947cfe02def9371c07cd5bf5b6b61c829e9aecb9904db02a66cfafbc1eec/starlette-1.10.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/89/29/92a1120a12e4bcf2d5464350d1a91b68a433d63ce656bb7f806c27aec09c/tiktoken-0.14.0-cp314-cp314-manylinux_2_28_aarch64.whl
+      - pypi: https://files.pythonhosted.org/packages/8f/ed/c284543c08aa443a4ef2c8bd120be51da8433dd174c01749b5d87c333f22/agent_client_protocol-0.9.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/91/ff/1117a3cccabb67305bd98d992a84eaf275939a9a043b4f14126ed7252e4f/pydantic_core-2.50.4-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.whl
       - pypi: https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/92/b5/47e807c2623074914e29dabd16cbbdd4bf5e9b2db9f8090fa64411fc5382/pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
@@ -335,6 +337,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/82/3d/14ce75ef66813643812f3093ab17e46d3a206942ce7376d31ec2d36229e7/lark-1.3.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/88/2e/947cfe02def9371c07cd5bf5b6b61c829e9aecb9904db02a66cfafbc1eec/starlette-1.10.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/8d/09/d0a2a14fc3439c5f874042dca72a79c70a532090b7ba0003be73fee37ae2/zstandard-0.25.0-cp314-cp314-macosx_11_0_arm64.whl
+      - pypi: https://files.pythonhosted.org/packages/8f/ed/c284543c08aa443a4ef2c8bd120be51da8433dd174c01749b5d87c333f22/agent_client_protocol-0.9.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/95/35/77ed86be430bd179d34905d62cdb5ba6747c635737092088fcf03c753c61/types_requests-2.33.0.20261030-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/96/5d/33ce9cf53c0a12774426d16f6cc5d2f258caf05272cf4652afd726085e73/sqlalchemy-2.1.8-cp314-cp314-macosx_11_0_arm64.whl
@@ -2132,6 +2135,15 @@ packages:
   version: 3.0.4
   sha256: a8e9f292fcda89b324f2f5c91d13f1424a153e40fc2756f38ee23b15835ff300
   requires_python: '>=3.9'
+- pypi: https://files.pythonhosted.org/packages/8f/ed/c284543c08aa443a4ef2c8bd120be51da8433dd174c01749b5d87c333f22/agent_client_protocol-0.9.0-py3-none-any.whl
+  name: agent-client-protocol
+  version: 0.9.0
+  sha256: 06911500b51d8cb69112544e2be01fc5e7db39ef88fecbc3848c5c6f194798ee
+  requires_dist:
+  - pydantic>=2.7
+  - logfire>=0.14 ; extra == 'logfire'
+  - opentelemetry-sdk>=1.28.0 ; extra == 'logfire'
+  requires_python: '>=3.10,<3.15'
 - pypi: https://files.pythonhosted.org/packages/91/ff/1117a3cccabb67305bd98d992a84eaf275939a9a043b4f14126ed7252e4f/pydantic_core-2.50.4-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.whl
   name: pydantic-core
   version: 2.50.4
