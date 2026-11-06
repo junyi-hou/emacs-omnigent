@@ -1,7 +1,7 @@
 # Session Management Design
 
-**Status:** Proposed. Session selection exists; the session list and its
-management actions are not implemented. This document owns session-list data,
+**Status:** Proposed. The session list, selection, and management actions are
+not implemented. This document owns session-list data,
 actions, and update-frame handling. It calls the APIs in
 [transport.md](transport.md) for all server input and output. Transport parses
 and forwards frames; this component interprets them and updates list state.
@@ -14,7 +14,7 @@ return a status and response body to their callback.
 
 | Operation | Server API | Client helper |
 |---|---|---|
-| List sessions | `GET /v1/sessions?limit=1000&include_archived=true&sort_by=updated_at&order=desc` | `omnigent-transport-list-sessions` (extend existing helper) |
+| List sessions | `GET /v1/sessions?limit=1000&include_archived=true&sort_by=updated_at&order=desc` | `omnigent-transport-list-sessions` |
 | List agents | `GET /v1/agents` | `omnigent-transport-request` |
 | Create session | `POST /v1/sessions` with `agent_id` and optional `title` | `omnigent-transport-request` |
 | Interrupt | `POST /v1/sessions/{id}/events`, type `interrupt` | `omnigent-transport-post-session-event` |

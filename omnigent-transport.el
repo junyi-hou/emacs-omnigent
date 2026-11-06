@@ -114,7 +114,9 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
 
 (defun omnigent-transport-list-sessions (callback)
   "List sessions and call CALLBACK with status and response body."
-  (omnigent-transport-request "GET" "/v1/sessions" callback))
+  (omnigent-transport-request
+   "GET" "/v1/sessions?limit=1000&include_archived=true&sort_by=updated_at&order=desc"
+   callback))
 
 (defun omnigent-transport-list-child-sessions (parent-id callback)
   "List children of PARENT-ID and call CALLBACK with status and response body."

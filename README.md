@@ -20,10 +20,9 @@ What works:
   WebSocket connections (`omnigent-transport.el`).
 - Start a local server from the Omnigent CLI, or connect to a remote one
   (`omnigent-connect`, `omnigent-start`).
-- List, select, and create sessions through a `completing-read` prompt.
 
-What does not exist yet: conversation buffers, session tree, streaming chat
-output, and the composer. Session selection is currently the end of the line.
+What does not exist yet: conversation buffers, session tree, session selection,
+streaming chat output, and the composer.
 
 The planned client can open at most 500 conversation buffers at once, because the
 server limits the WebSocket watch set to 500 sessions. This should be more than enough
