@@ -78,5 +78,19 @@
       (when stream (omnigent-transport-stop-session-stream stream))
       (when updates (omnigent-transport-stop-session-updates updates)))))
 
+(ert-deftest omnigent-session-list-refresh ()
+  "Load a session created on the temporary server."
+  (let ((id (omnigent-integration-create-session))
+        (omnigent-sessions nil)
+        (omnigent-sessions--refresh-number 0)
+        (omnigent-sessions--revision 0)
+        loaded)
+    (let ((omnigent-sessions-change-hook (list (lambda () (setq loaded t)))))
+      (omnigent-sessions-refresh)
+      (with-timeout (15 (ert-fail "Timed out loading session list"))
+        (while (not loaded) (accept-process-output nil 0.1)))
+      (should (cl-find id omnigent-sessions
+                       :key (lambda (row) (alist-get 'id row)) :test #'equal)))))
+
 (provide 'omnigent-functional-tests)
 ;;; omnigent-functional-tests.el ends here

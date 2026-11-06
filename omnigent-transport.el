@@ -54,7 +54,7 @@
 
 (cl-defstruct (omnigent-session-updates
                (:constructor omnigent-transport--make-session-updates))
-  frame-callback error-callback websocket timer session-ids stopped failures
+  frame-callback error-callback open-callback websocket timer session-ids stopped failures
   attempt connected failed)
 
 (defun omnigent-transport--url (path)
@@ -117,6 +117,12 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
   (omnigent-transport-request
    "GET" "/v1/sessions?limit=1000&include_archived=true&sort_by=updated_at&order=desc"
    callback))
+
+(defun omnigent-transport-delete-session (session-id callback)
+  "Delete SESSION-ID and call CALLBACK with status and response body."
+  (omnigent-transport-request "DELETE"
+                              (omnigent-transport--session-path session-id)
+                              callback))
 
 (defun omnigent-transport-list-child-sessions (parent-id callback)
   "List children of PARENT-ID and call CALLBACK with status and response body."
@@ -342,7 +348,9 @@ error string.  Return a stream handle for `omnigent-transport-stop-session-strea
           (omnigent-session-updates-connected updates) t
           (omnigent-session-updates-failed updates) nil
           (omnigent-session-updates-failures updates) 0)
-    (omnigent-transport--updates-send-watch updates websocket attempt)))
+    (omnigent-transport--updates-send-watch updates websocket attempt)
+    (when (omnigent-session-updates-open-callback updates)
+      (funcall (omnigent-session-updates-open-callback updates)))))
 
 (defun omnigent-transport--updates-message (updates websocket attempt frame)
   (when (omnigent-transport--updates-current-p updates attempt)
@@ -414,16 +422,17 @@ error string.  Return a stream handle for `omnigent-transport-stop-session-strea
       (when websocket
         (setf (omnigent-session-updates-websocket updates) websocket)))))
 
-(defun omnigent-transport-start-session-updates (on-frame &optional on-error)
+(defun omnigent-transport-start-session-updates (on-frame &optional on-error on-open)
   "Connect to the session-updates WebSocket.
 
 ON-FRAME receives each parsed JSON frame.  ON-ERROR, when non-nil, receives
-an error string.  Return a handle for `omnigent-transport-stop-session-updates'."
+an error string.  ON-OPEN, when non-nil, runs after each connection opens.
+Return a handle for `omnigent-transport-stop-session-updates'."
   (unless (require 'websocket nil t)
     (user-error "Session updates require the websocket package from GNU ELPA"))
   (omnigent-transport--updates-url)
   (let ((updates (omnigent-transport--make-session-updates
-                  :frame-callback on-frame :error-callback on-error
+                  :frame-callback on-frame :error-callback on-error :open-callback on-open
                   :session-ids nil :stopped nil :failures 0 :attempt 0)))
     (push updates omnigent-transport--updates)
     (omnigent-transport--updates-connect updates)

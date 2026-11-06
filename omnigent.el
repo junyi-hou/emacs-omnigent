@@ -9,6 +9,7 @@
 
 (require 'subr-x)
 (require 'omnigent-transport)
+(require 'omnigent-sessions)
 
 (defgroup omnigent nil
   "Interact with Omnigent servers."
