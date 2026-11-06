@@ -10,6 +10,12 @@
 (require 'subr-x)
 (require 'omnigent-transport)
 (require 'omnigent-sessions)
+(require 'omnigent-conversation)
+
+(add-hook 'omnigent-sessions-open-hook
+          (lambda (session)
+            (omnigent-conversation-open (alist-get 'id session)
+                                       (alist-get 'title session))))
 
 (defgroup omnigent nil
   "Interact with Omnigent servers."
@@ -33,6 +39,10 @@
   (interactive (list (read-string "Omnigent server URL: " omnigent-server-url)))
   (unless (string-match-p "\\`https?://" url)
     (user-error "Server URL must start with http:// or https://"))
+  (mapc (lambda (entry)
+          (when (buffer-live-p (cdr entry)) (kill-buffer (cdr entry))))
+        (copy-sequence omnigent-sessions--buffers))
+  (omnigent-sessions-reset)
   (omnigent-transport-reset)
   (setq omnigent-server-url (string-remove-suffix "/" url))
   (message "Using Omnigent server %s" omnigent-server-url))

@@ -49,7 +49,7 @@
 (defconst omnigent-transport--reconnect-max-delay 15.0)
 
 (cl-defstruct (omnigent-stream (:constructor omnigent-transport--make-stream))
-  session-id event-callback snapshot-callback error-callback process timer
+  session-id event-callback snapshot-callback error-callback connect-callback process timer
   stopped failures attempt)
 
 (cl-defstruct (omnigent-session-updates
@@ -268,6 +268,8 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
                 (omnigent-transport--reconnect-delay (omnigent-stream-failures stream))
                 nil #'omnigent-transport--stream-connect stream))))
       (when process
+        (when (omnigent-stream-connect-callback stream)
+          (funcall (omnigent-stream-connect-callback stream)))
         (process-put process 'omnigent-stream stream)
         (process-put process 'omnigent-stderr stderr)
         (setf (omnigent-stream-process stream) process)
@@ -276,18 +278,19 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
          (lambda (status body)
            (omnigent-transport--stream-snapshot stream attempt status body)))))))
 
-(defun omnigent-transport-start-session-stream (session-id on-event on-snapshot &optional on-error)
+(defun omnigent-transport-start-session-stream (session-id on-event on-snapshot &optional on-error on-connect)
   "Start the SSE stream for SESSION-ID.
 
 ON-EVENT receives (EVENT-NAME DATA).  ON-SNAPSHOT receives (STATUS BODY)
 after each stream connection starts.  ON-ERROR, when non-nil, receives an
-error string.  Return a stream handle for `omnigent-transport-stop-session-stream'."
+error string.  ON-CONNECT runs before each snapshot request.
+Return a stream handle for `omnigent-transport-stop-session-stream'."
   (unless (executable-find "curl")
     (user-error "Omnigent session streams require curl"))
   (let ((stream (omnigent-transport--make-stream
                  :session-id session-id :event-callback on-event
                  :snapshot-callback on-snapshot :error-callback on-error
-                 :stopped nil :failures 0 :attempt 0)))
+                 :connect-callback on-connect :stopped nil :failures 0 :attempt 0)))
     (push stream omnigent-transport--streams)
     (omnigent-transport--stream-connect stream)
     stream))

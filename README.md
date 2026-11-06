@@ -12,7 +12,7 @@ and follow child sessions and workspace changes from inside Emacs. See
 
 ## Project status
 
-Alpha. The foundation works, the UI does not exist yet.
+Alpha. The conversation frontend is not implemented yet.
 
 What works:
 
@@ -21,8 +21,11 @@ What works:
 - Start a local server from the Omnigent CLI, or connect to a remote one
   (`omnigent-connect`, `omnigent-start`).
 
-What does not exist yet: conversation buffers, session tree, session selection,
-streaming chat output, and the composer.
+- Conversation state, snapshot parsing, and message and interrupt requests
+  (`omnigent-conversation.el`).
+
+The conversation frontend, including transcript display, is not implemented.
+The session tree and session selection are also not implemented.
 
 The planned client can open at most 500 conversation buffers at once, because the
 server limits the WebSocket watch set to 500 sessions. This should be more than enough

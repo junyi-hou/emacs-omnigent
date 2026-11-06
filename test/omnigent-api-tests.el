@@ -41,5 +41,37 @@
           (should-not failure))
       (when updates (omnigent-transport-stop-session-updates updates)))))
 
+(ert-deftest omnigent-api-session-message-event ()
+  "Post a message event and check the server response."
+  (let* ((id (omnigent-integration-create-session t))
+         (response
+          (omnigent-mock-test-request
+           "POST" (omnigent-transport--session-path id "/events")
+           '(("type" . "message")
+             ("data" . (("role" . "user")
+                        ("content" . [(("type" . "input_text")
+                                       ("text" . "test agent_message"))])))))))
+    (should (= (car response) 202))
+    (should (eq (alist-get 'queued (cdr response)) t))
+    (with-timeout (30 (ert-fail "Timed out waiting for committed message"))
+      (let (item)
+        (while (not item)
+          (let* ((snapshot (omnigent-mock-test-request
+                            "GET" (omnigent-transport--session-path id)))
+                 (items (append (alist-get 'items (cdr snapshot)) nil)))
+            (should (= (car snapshot) 200))
+            (setq item (cl-find-if
+                        (lambda (entry)
+                          (and (equal (alist-get 'type entry) "message")
+                               (equal (alist-get 'role (alist-get 'data entry)) "user")))
+                        items)))
+          (unless item (sleep-for 0.2)))
+        (with-temp-buffer
+          (setq omnigent-conversation--items (make-hash-table :test 'equal))
+          (omnigent-conversation--put-item item)
+          (let ((parsed (gethash (alist-get 'id item) omnigent-conversation--items)))
+            (should (equal (alist-get 'role parsed) "user"))
+            (should (equal (omnigent-conversation--text parsed) "test agent_message"))))))))
+
 (provide 'omnigent-api-tests)
 ;;; omnigent-api-tests.el ends here

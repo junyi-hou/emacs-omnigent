@@ -5,7 +5,7 @@ are implemented in `omnigent-sessions.el`. Conversation integration and frontend
 presentation remain incomplete. This document owns session-list data, actions, and
 update-frame handling. It calls the APIs in [transport.md](transport.md) for all server
 input and output. Transport parses and forwards frames; this component interprets them
-and updates list state.  [frontend.md](frontend.md) owns presentation.
+and updates list state. [frontend.md](frontend.md) owns presentation.
 
 ## Public APIs
 
@@ -32,7 +32,7 @@ not use deletion as a close operation.
 
 Create prompts for an agent and optional title. An empty title lets the server derive
 one. The `omnigent-sessions-open-hook` receives the new session; the conversation
-component opens its buffer. Refresh the list after a write completes.  Presentation of
+component opens its buffer. Refresh the list after a write completes. Presentation of
 failures belongs to [frontend.md](frontend.md).
 
 ## List and updates
