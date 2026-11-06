@@ -74,7 +74,7 @@
         omnigent-current-session-id nil
         omnigent-current-session nil)
   (message "Connecting to %s..." omnigent-server-url)
-  (omnigent-transport-request "GET" "/v1/sessions?limit=1000&visibility=all"
+  (omnigent-transport-request "GET" "/v1/sessions?limit=1000&include_archived=true&sort_by=updated_at&order=desc"
                     (apply-partially #'omnigent--select-session
                                      omnigent-server-url)))
 

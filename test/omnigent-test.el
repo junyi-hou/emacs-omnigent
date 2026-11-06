@@ -9,7 +9,7 @@
         default-choice new-session-selected)
     (cl-letf (((symbol-function 'omnigent-transport-request)
                (lambda (_method path callback)
-                 (should (equal path "/v1/sessions?limit=1000&visibility=all"))
+                 (should (equal path "/v1/sessions?limit=1000&include_archived=true&sort_by=updated_at&order=desc"))
                  (funcall callback 200
                           '((data . [((id . "conv-1") (title . "Work")
                                       (agent_name . "Pi") (status . "idle"))])))))

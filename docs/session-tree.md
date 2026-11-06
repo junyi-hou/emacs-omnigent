@@ -14,7 +14,7 @@ return a status and response body to their callback.
 
 | Operation | Server API | Client helper |
 |---|---|---|
-| List sessions | `GET /v1/sessions?limit=1000&include_archived=true` | `omnigent-transport-list-sessions` (extend existing helper) |
+| List sessions | `GET /v1/sessions?limit=1000&include_archived=true&sort_by=updated_at&order=desc` | `omnigent-transport-list-sessions` (extend existing helper) |
 | List agents | `GET /v1/agents` | `omnigent-transport-request` |
 | Create session | `POST /v1/sessions` with `agent_id` and optional `title` | `omnigent-transport-request` |
 | Interrupt | `POST /v1/sessions/{id}/events`, type `interrupt` | `omnigent-transport-post-session-event` |
@@ -38,7 +38,8 @@ list after a write completes. Presentation of failures belongs to
 ## List and updates
 
 Fetch active and archived sessions on initial load and manual refresh. The
-server defaults to 20 entries; request 1,000. Pagination beyond that is
+server defaults to 20 entries; request 1,000, sorted by most recently updated
+first. The server must sort before applying the limit. Pagination beyond that is
 post-v1. Do not silently represent a truncated result as complete.
 
 Subscribe to session updates. A watch message replaces the complete watch set,
@@ -63,8 +64,8 @@ post-v1; do not fetch child lists or open child conversations in v1.
 
 Use fixture list responses and update frames to check root updates, unknown IDs,
 removals, reconnect, buffer open and close, and refusal to open a 501st buffer.
-Check that a truncated list is
-not presented as complete. Existing transport tests cover the WebSocket.
+Check that the request selects the 1,000 most recently updated sessions and that
+a truncated list is not presented as complete. Existing transport tests cover the WebSocket.
 
 ## Deferred
 
