@@ -69,11 +69,12 @@
   (interactive (list (read-string "Omnigent server URL: " omnigent-server-url)))
   (unless (string-match-p "\\`https?://" url)
     (user-error "Server URL must start with http:// or https://"))
+  (omnigent-transport-reset)
   (setq omnigent-server-url (string-remove-suffix "/" url)
         omnigent-current-session-id nil
         omnigent-current-session nil)
   (message "Connecting to %s..." omnigent-server-url)
-  (omnigent-request "GET" "/v1/sessions?limit=1000&visibility=all"
+  (omnigent-transport-request "GET" "/v1/sessions?limit=1000&visibility=all"
                     (apply-partially #'omnigent--select-session
                                      omnigent-server-url)))
 
@@ -118,12 +119,12 @@
                (choice (completing-read "Agent for new session: " choices nil t nil nil
                                         (caar choices)))
                (agent (cdr (assoc choice choices))))
-          (omnigent-request
+          (omnigent-transport-request
            "POST" "/v1/sessions" #'omnigent--create-session-result
            `(("agent_id" . ,(cdr (assq 'id agent))))))))))
 
 (defun omnigent--new-session ()
-  (omnigent-request "GET" "/v1/agents?limit=1000"
+  (omnigent-transport-request "GET" "/v1/agents?limit=1000"
                     #'omnigent--select-agent))
 
 ;;;###autoload
@@ -134,7 +135,7 @@
     (user-error "Session ID must not be empty"))
   (setq omnigent-current-session-id nil
         omnigent-current-session nil)
-  (omnigent-get-session
+  (omnigent-transport-get-session
    session-id (apply-partially #'omnigent--resume-result session-id)))
 
 (defun omnigent--server-url-from-output (buffer)

@@ -30,6 +30,21 @@
   :type 'string
   :group 'omnigent-transport)
 
+(defvar omnigent-transport--generation 0
+  "Generation of the current server connection.")
+(defvar omnigent-transport--streams nil
+  "Session streams associated with the current server.")
+(defvar omnigent-transport--updates nil
+  "Session update connections associated with the current server.")
+
+(defun omnigent-transport-reset ()
+  "Stop connections and invalidate requests for the current server."
+  (cl-incf omnigent-transport--generation)
+  (mapc #'omnigent-transport-stop-session-stream omnigent-transport--streams)
+  (mapc #'omnigent-transport-stop-session-updates omnigent-transport--updates)
+  (setq omnigent-transport--streams nil
+        omnigent-transport--updates nil))
+
 (defconst omnigent-transport--reconnect-min-delay 1.0)
 (defconst omnigent-transport--reconnect-max-delay 15.0)
 
@@ -66,16 +81,17 @@
                                :null-object nil :false-object :json-false)
           (json-parse-error raw))))))
 
-(defun omnigent-transport--url-callback (status callback)
+(defun omnigent-transport--url-callback (status callback generation)
   (unwind-protect
       (let ((http-status (and (boundp 'url-http-response-status)
                                url-http-response-status)))
-        (funcall callback (or http-status status)
-                 (omnigent-transport--response-body)))
+        (when (= generation omnigent-transport--generation)
+          (funcall callback (or http-status status)
+                   (omnigent-transport--response-body))))
     (when (buffer-live-p (current-buffer))
       (kill-buffer (current-buffer)))))
 
-(defun omnigent-request (method path callback &optional data)
+(defun omnigent-transport-request (method path callback &optional data)
   "Send METHOD to PATH and call CALLBACK with status and response body.
 
 PATH is relative to `omnigent-server-url' and must start with `/'.  DATA,
@@ -89,25 +105,26 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
                             (encode-coding-string (json-encode data)
                                                   'utf-8))))
     (url-retrieve (omnigent-transport--url path)
-                  #'omnigent-transport--url-callback (list callback) t t)))
+                  #'omnigent-transport--url-callback
+                  (list callback omnigent-transport--generation) t t)))
 
-(defun omnigent-get-session (session-id callback)
+(defun omnigent-transport-get-session (session-id callback)
   "Get SESSION-ID and call CALLBACK with status and response body."
-  (omnigent-request "GET" (omnigent-transport--session-path session-id) callback))
+  (omnigent-transport-request "GET" (omnigent-transport--session-path session-id) callback))
 
-(defun omnigent-list-sessions (callback)
+(defun omnigent-transport-list-sessions (callback)
   "List sessions and call CALLBACK with status and response body."
-  (omnigent-request "GET" "/v1/sessions" callback))
+  (omnigent-transport-request "GET" "/v1/sessions" callback))
 
-(defun omnigent-list-child-sessions (parent-id callback)
+(defun omnigent-transport-list-child-sessions (parent-id callback)
   "List children of PARENT-ID and call CALLBACK with status and response body."
-  (omnigent-request "GET"
+  (omnigent-transport-request "GET"
                     (omnigent-transport--session-path parent-id "/child_sessions")
                     callback))
 
-(defun omnigent-post-session-event (session-id event callback)
+(defun omnigent-transport-post-session-event (session-id event callback)
   "Post EVENT to SESSION-ID and call CALLBACK with status and response body."
-  (omnigent-request "POST"
+  (omnigent-transport-request "POST"
                     (omnigent-transport--session-path session-id "/events")
                     callback event))
 
@@ -154,7 +171,8 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
                  (or (process-get process 'omnigent-pending) "") chunk)))
     (process-put process 'omnigent-pending (cdr split))
     (dolist (frame (car split))
-      (unless (process-get process 'omnigent-done)
+      (unless (or (omnigent-stream-stopped stream)
+                  (process-get process 'omnigent-done))
         (let ((parsed (omnigent-transport--parse-sse-frame frame)))
           (when parsed
             (let ((data (cdr parsed)))
@@ -245,29 +263,31 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
         (process-put process 'omnigent-stream stream)
         (process-put process 'omnigent-stderr stderr)
         (setf (omnigent-stream-process stream) process)
-        (omnigent-get-session
+        (omnigent-transport-get-session
          (omnigent-stream-session-id stream)
          (lambda (status body)
            (omnigent-transport--stream-snapshot stream attempt status body)))))))
 
-(defun omnigent-start-session-stream (session-id on-event on-snapshot &optional on-error)
+(defun omnigent-transport-start-session-stream (session-id on-event on-snapshot &optional on-error)
   "Start the SSE stream for SESSION-ID.
 
 ON-EVENT receives (EVENT-NAME DATA).  ON-SNAPSHOT receives (STATUS BODY)
 after each stream connection starts.  ON-ERROR, when non-nil, receives an
-error string.  Return a stream handle for `omnigent-stop-session-stream'."
+error string.  Return a stream handle for `omnigent-transport-stop-session-stream'."
   (unless (executable-find "curl")
     (user-error "Omnigent session streams require curl"))
   (let ((stream (omnigent-transport--make-stream
                  :session-id session-id :event-callback on-event
                  :snapshot-callback on-snapshot :error-callback on-error
                  :stopped nil :failures 0 :attempt 0)))
+    (push stream omnigent-transport--streams)
     (omnigent-transport--stream-connect stream)
     stream))
 
-(defun omnigent-stop-session-stream (stream)
+(defun omnigent-transport-stop-session-stream (stream)
   "Stop STREAM and prevent automatic reconnection."
   (setf (omnigent-stream-stopped stream) t)
+  (setq omnigent-transport--streams (delq stream omnigent-transport--streams))
   (when (timerp (omnigent-stream-timer stream))
     (cancel-timer (omnigent-stream-timer stream)))
   (when (process-live-p (omnigent-stream-process stream))
@@ -392,21 +412,22 @@ error string.  Return a stream handle for `omnigent-stop-session-stream'."
       (when websocket
         (setf (omnigent-session-updates-websocket updates) websocket)))))
 
-(defun omnigent-start-session-updates (on-frame &optional on-error)
+(defun omnigent-transport-start-session-updates (on-frame &optional on-error)
   "Connect to the session-updates WebSocket.
 
 ON-FRAME receives each parsed JSON frame.  ON-ERROR, when non-nil, receives
-an error string.  Return a handle for `omnigent-stop-session-updates'."
+an error string.  Return a handle for `omnigent-transport-stop-session-updates'."
   (unless (require 'websocket nil t)
     (user-error "Session updates require the websocket package from GNU ELPA"))
   (omnigent-transport--updates-url)
   (let ((updates (omnigent-transport--make-session-updates
                   :frame-callback on-frame :error-callback on-error
                   :session-ids nil :stopped nil :failures 0 :attempt 0)))
+    (push updates omnigent-transport--updates)
     (omnigent-transport--updates-connect updates)
     updates))
 
-(defun omnigent-set-session-updates-watch (updates session-ids)
+(defun omnigent-transport-set-session-updates-watch (updates session-ids)
   "Set UPDATES' watched SESSION-IDS and send the full set to the server.
 SESSION-IDS must be a list of at most 500 strings."
   (unless (and (listp session-ids) (<= (length session-ids) 500)
@@ -418,9 +439,10 @@ SESSION-IDS must be a list of at most 500 strings."
      updates (omnigent-session-updates-websocket updates)
      (omnigent-session-updates-attempt updates))))
 
-(defun omnigent-stop-session-updates (updates)
+(defun omnigent-transport-stop-session-updates (updates)
   "Stop UPDATES and prevent automatic reconnection."
   (setf (omnigent-session-updates-stopped updates) t)
+  (setq omnigent-transport--updates (delq updates omnigent-transport--updates))
   (when (timerp (omnigent-session-updates-timer updates))
     (cancel-timer (omnigent-session-updates-timer updates)))
   (let ((websocket (omnigent-session-updates-websocket updates)))

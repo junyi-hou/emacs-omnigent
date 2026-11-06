@@ -52,7 +52,7 @@
               ((symbol-function 'websocket-frame-text) #'identity)
               ((symbol-function 'websocket-close)
                (lambda (_websocket) (setq closed t))))
-      (let ((updates (omnigent-start-session-updates
+      (let ((updates (omnigent-transport-start-session-updates
                       (lambda (frame) (push frame frames))
                       (lambda (error) (push error errors)))))
         (should (equal (car open-args) "wss://example.test/v1/sessions/updates"))
@@ -61,8 +61,8 @@
         (should (equal (json-parse-string (car sent) :object-type 'alist
                                           :array-type 'array)
                        '((type . "watch") (session_ids . []))))
-        (omnigent-set-session-updates-watch updates '("s1" "s2"))
-        (should-error (omnigent-set-session-updates-watch
+        (omnigent-transport-set-session-updates-watch updates '("s1" "s2"))
+        (should-error (omnigent-transport-set-session-updates-watch
                        updates (make-list 501 "s"))
                       :type 'user-error)
         (should (equal (cdr (assq 'session_ids
@@ -76,7 +76,7 @@
         (funcall (plist-get (cdr open-args) :on-message)
                  'fake-websocket "not json")
         (should (string-match-p "Invalid WebSocket JSON" (car errors)))
-        (omnigent-stop-session-updates updates)
+        (omnigent-transport-stop-session-updates updates)
         (should closed)
         (should (omnigent-session-updates-stopped updates))))))
 
@@ -102,12 +102,12 @@
                  (setq scheduled (list delay function args))
                  (funcall real-run-at-time 3600 nil #'ignore)))
               ((symbol-function 'cancel-timer) #'ignore))
-      (let ((updates (omnigent-start-session-updates #'ignore)))
-        (omnigent-set-session-updates-watch updates '("old"))
+      (let ((updates (omnigent-transport-start-session-updates #'ignore)))
+        (omnigent-transport-set-session-updates-watch updates '("old"))
         (funcall (plist-get (car open-callbacks) :on-close)
                  'fake-websocket-1)
         (should (= (car scheduled) omnigent-transport--reconnect-min-delay))
-        (omnigent-set-session-updates-watch updates '("new"))
+        (omnigent-transport-set-session-updates-watch updates '("new"))
         (funcall (cadr scheduled) (car (caddr scheduled)))
         (should (= (length open-callbacks) 2))
         (funcall (plist-get (car open-callbacks) :on-open) 'fake-websocket-2)
@@ -116,7 +116,7 @@
                                                      :object-type 'alist
                                                      :array-type 'array)))
                        ["new"]))
-        (omnigent-stop-session-updates updates)))))
+        (omnigent-transport-stop-session-updates updates)))))
 
 (ert-deftest omnigent-transport-session-updates-requires-websocket-package ()
   "Report the optional GNU ELPA dependency when it is missing."
@@ -125,7 +125,7 @@
                (lambda (feature &optional filename noerror)
                  (if (eq feature 'websocket) nil
                    (funcall real-require feature filename noerror)))))
-      (should-error (omnigent-start-session-updates #'ignore)
+      (should-error (omnigent-transport-start-session-updates #'ignore)
                     :type 'user-error))))
 
 (provide 'omnigent-transport-test)

@@ -11,7 +11,7 @@
 (ert-deftest omnigent-transport-requests-session-list-from-server ()
   "Check that the REST client reads the session list from a live server."
   (let (done result)
-    (omnigent-list-sessions
+    (omnigent-transport-list-sessions
      (lambda (status body)
        (setq result (cons status body)
              done t)))
@@ -36,10 +36,10 @@
               (while (not omnigent-current-session-id)
                 (accept-process-output nil 0.1))))
           (setq updates
-                (omnigent-start-session-updates
+                (omnigent-transport-start-session-updates
                  (lambda (frame) (push frame frames))
                  (lambda (error) (setq stream-error error))))
-          (omnigent-set-session-updates-watch
+          (omnigent-transport-set-session-updates-watch
            updates (list omnigent-current-session-id))
           (with-timeout (15 (ert-fail "Timed out waiting for WebSocket snapshot"))
             (while (not (cl-some (lambda (frame)
@@ -55,7 +55,7 @@
                                (equal (cdr (assq 'id item))
                                       omnigent-current-session-id))
                              (append items nil))))
-          (omnigent-request
+          (omnigent-transport-request
            "PATCH"
            (omnigent-transport--session-path omnigent-current-session-id)
            (lambda (status body) (setq patch-result (cons status body)))
@@ -77,7 +77,7 @@
                          frames))
               (accept-process-output nil 0.1)))
           (should-not stream-error))
-      (when updates (omnigent-stop-session-updates updates)))))
+      (when updates (omnigent-transport-stop-session-updates updates)))))
 
 (ert-deftest omnigent-connect-creates-default-session-and-receives-event ()
   "Select New session, then receive a transient SSE event from the server."
@@ -92,7 +92,7 @@
               (while (not omnigent-current-session-id)
                 (accept-process-output nil 0.1))))
           (setq stream
-                (omnigent-start-session-stream
+                (omnigent-transport-start-session-stream
                  omnigent-current-session-id
                  (lambda (name data)
                    (when (equal name "response.output_text.delta")
@@ -105,7 +105,7 @@
             (while (not snapshot)
               (accept-process-output nil 0.1))
             (should (equal (car snapshot) 200))
-            (omnigent-post-session-event
+            (omnigent-transport-post-session-event
              omnigent-current-session-id
              '(("type" . "external_output_text_delta")
                ("data" . (("delta" . "transport-test"))))
@@ -117,7 +117,7 @@
           (should (equal (cdr (assq 'delta received)) "transport-test"))
           (should-not stream-error))
       (when stream
-        (omnigent-stop-session-stream stream)))))
+        (omnigent-transport-stop-session-stream stream)))))
 
 (provide 'omnigent-transport-server-test)
 ;;; omnigent-transport-server-test.el ends here

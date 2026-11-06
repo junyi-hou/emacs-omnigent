@@ -7,7 +7,7 @@
   "Offer New session as the default choice after connecting."
   (let ((omnigent-server-url "http://old.example")
         default-choice new-session-selected)
-    (cl-letf (((symbol-function 'omnigent-request)
+    (cl-letf (((symbol-function 'omnigent-transport-request)
                (lambda (_method path callback)
                  (should (equal path "/v1/sessions?limit=1000&visibility=all"))
                  (funcall callback 200
@@ -40,7 +40,7 @@
 (ert-deftest omnigent-new-session-creates-and-selects-an-agent-session ()
   "Create a session for the selected agent and select its snapshot."
   (let (omnigent-current-session-id omnigent-current-session)
-    (cl-letf (((symbol-function 'omnigent-request)
+    (cl-letf (((symbol-function 'omnigent-transport-request)
                (lambda (method path callback &optional data)
                  (cond
                   ((equal method "GET")
@@ -63,7 +63,7 @@
 (ert-deftest omnigent-resume-loads-session-snapshot ()
   "Set the selected session from the server snapshot."
   (let (omnigent-current-session-id omnigent-current-session)
-    (cl-letf (((symbol-function 'omnigent-get-session)
+    (cl-letf (((symbol-function 'omnigent-transport-get-session)
                (lambda (session-id callback)
                  (funcall callback 200
                           `((id . ,session-id) (status . "idle")))))
