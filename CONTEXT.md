@@ -41,20 +41,15 @@ session. One buffer per session.
 _Avoid_: chat buffer, session buffer
 
 **Load a session**:
-Open the session's conversation buffer: a snapshot GET plus the SSE
-stream. Omnigent has no resume operation; loading and sending a message
-are the same path.
+Open the session's conversation buffer: start its SSE stream and fetch its
+snapshot. Opening the buffer does not restart the agent. A message to a stopped
+session normally relaunches it on its online host.
 _Avoid_: resume a session
 
 **Fold block**:
 A transcript block with a visible header line and a collapsible body
 (a tool call or reasoning). Collapsed by default.
 _Avoid_: fragment, foldable region
-
-**Active session**:
-The session of the conversation buffer point is in; when point is
-elsewhere, the most recently used conversation buffer's session.
-_Avoid_: current session, selected session
 
 ### Connection
 

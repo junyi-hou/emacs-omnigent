@@ -25,33 +25,34 @@ What works:
 What does not exist yet: conversation buffers, session tree, streaming chat
 output, and the composer. Session selection is currently the end of the line.
 
-## TODO
+The planned client can open at most 500 conversation buffers at once, because the
+server limits the WebSocket watch set to 500 sessions. This should be more than enough
+for normal use. Close a conversation buffer to open another session.
 
+The planned v1 workspace diff treats missing file contents as empty. If Omnigent
+fails to read a Git baseline, the diff can show existing lines as additions or
+omit a deleted file. Omnigent does not distinguish that failure from a new file.
+
+## TODO (post-v1)
+
+- [ ] Design server-to-harness retry for a failed runner startup and its saved input.
+- [ ] Design client-to-server retry for requests with no confirmed response, including
+      messages the server may already have accepted.
+
+- [ ] Support workspace diffs for non-Git workspaces.
 - [ ] Design centralized authentication for remote servers, including token expiration.
-- [ ] Conversation buffer (`omnigent-conversation-mode`): read-only transcript,
-      editable prompt region, streamed output inserted via markers.
-- [ ] Composer: send user messages to the active session, render agent replies
-      and tool activity.
-- [ ] Session tree side panel: top-level sessions as roots, child sessions
-      nested, `New session` entry; replaces the current `completing-read` prompt.
-      See [docs/session-tree.md](docs/session-tree.md) for the full design.
-- [ ] Child sessions: show agent and status per child, open a child in its own
-      conversation buffer, message or interrupt a selected child.
-- [ ] Workspace changes view: list changed files, show before/after contents
-      (Omnigent environments API).
+- [ ] Support connections to multiple Omnigent servers.
 - [ ] Track queued messages client-side: show messages sent while the
       session is busy (the server queues them; v1 renders them only
       after a snapshot refresh). See
       [docs/conversation-buffer.md](docs/conversation-buffer.md).
-- [ ] Interrupt action via `POST /v1/sessions/{id}/events`.
-
-Later, if needed:
-
+- [ ] Fetch sessions incrementally: load 20 first, then let the user fetch more.
 - [ ] Row ordering in the session tree (`updated_at` vs. `created_at`).
 - [ ] Advanced session-creation options in a Transient menu: workspace,
       host, sandbox, model override, reasoning effort, launch args, and
       fork options (harness switch, fork-from-response).
-- [ ] Manual child-session creation (requires a documented client API upstream).
+- [ ] Child-session display and management.
+- [ ] Fork sessions, including fork options.
 - [ ] `delete_worktree` option on archive (removes the session worktree).
 
 ## Sources

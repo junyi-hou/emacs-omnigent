@@ -1,83 +1,98 @@
-# Emacs Frontend Design
+# Emacs Frontend Presentation
 
-**Status:** Proposed. Session start and selection exist; conversation buffers and side views are not implemented.
+**Status:** Proposed. Session selection, conversation, and side views are not
+implemented. This document owns presentation and window arrangement.
+[session-tree.md](session-tree.md) owns session management,
+[conversation-buffer.md](conversation-buffer.md) owns conversation behavior,
+and [elicitation.md](elicitation.md) owns request and response handling.
 
-## Decision
+## Arrangement
 
-Use a chat-centered interface. Keep the active Omnigent session in the main conversation buffer. Add optional views for child sessions and workspace changes. Use Transient for session actions.
+Use a chat-centered interface. Show one session per conversation buffer in the
+main window. Offer a session list and a workspace view as optional left side
+windows. When both are open, stack the session list above the workspace view.
+Users can show or hide each view. Do not merge transcripts.
 
-The UI does not need to copy the Omnigent web app. Users can manage agent and policy definitions in config files from Emacs.
+## Session list
 
-## Views
+Use `*omnigent-sessions*`, with a mode derived from `special-mode`. Show New
+session first, then root sessions and an Archived section. Show each session's
+title, agent, status, and an attention marker for pending elicitations. Preserve
+point by session ID on refresh. Child sessions are deferred.
 
-### Session Tree
+Use faces for busy, idle, failed, archived, and attention entries.
+Show failed actions with the action, session title, and HTTP status. Indicate
+sessions outside the watch limit. The list is a view of server data, not its
+source. A Transient menu for advanced creation options is deferred.
 
-After the user starts or connects to a server, open a session tree in a left side window. Keep it available while the user works. Show top-level sessions as roots and nest child sessions under their parent. Put `New session` first. Selecting a top-level session loads it. The current `completing_read` prompt is temporary.
+## Conversation
 
-The full tree design (transport helpers, major mode, keymap, faces, refresh) lives in [session-tree.md](session-tree.md).
+Use one buffer per session, named `*omnigent: TITLE [conv_XXXX]*`: the session
+title (or `Untitled`) and the first characters of the session ID. The name is
+for display only; identify buffers by their buffer-local session ID.
 
-Use the tree to select and monitor sessions. Show each child’s agent, status, and whether it needs attention.
+Use a mode derived from `text-mode`. Show a read-only transcript and an editable
+composer. Distinguish user, agent, tool, reasoning, and error text with faces.
+Show tool calls and reasoning in foldable blocks. Show streamed output before
+the composer. Keep the target session clear in each buffer. Detailed rendering
+and buffer behavior are in [conversation-buffer.md](conversation-buffer.md).
 
-#### Child nodes
+### Transcript and folds
 
-Open a selected child in its own conversation buffer.
+| Item | Presentation |
+|------|--------------|
+| User message | `You:` label, plain text, no fold. |
+| Assistant message | Agent name label, plain text, no fold; append streamed text. |
+| Reasoning | Foldable `Thinking` block with reasoning text. |
+| Function call | Foldable block with tool name, argument summary, and status in the header; full arguments and output in the body. |
+| Function call output | Merge into its function-call block. |
 
-Selecting a child makes it the active conversation. Use the same composer to send messages directly to that child. The main session is the default when the user opens the session view. Show the active session clearly so users know where a message will go. Keep the parent and child transcripts separate. Do not merge child output into the parent transcript.
+Separate blocks with a blank line. A fold has a `▶` or `▼` header followed
+by its body. Bodies are flush left in v1. Reasoning and tool folds start
+collapsed; only the user changes their fold state. Use the `invisible` text
+property for folded bodies and reapply it when streamed text is appended. Use the
+smallest folding implementation that works, following agent-shell's approach.
+Show running, done, or failed in the tool header. No groups, nested folds, or
+isearch fold integration in v1.
 
-Use Omnigent’s child-session data and events as the source of truth. Do not infer child sessions from text or tool calls alone. A harness can have internal subtasks that Omnigent does not expose as child sessions. A child may share its parent’s runner; the client must target the selected child session ID.
+Bound tool output for display: lines longer than 32,768 characters retain 200
+characters at each end and show the omitted count. Outputs longer than 1,000
+lines retain the first and last 400 lines and show the omitted count. Apply
+both limits deterministically on refresh. Fetching omitted content is deferred;
+mark the constants with a `ponytail:` comment naming that upgrade path.
 
-For v1, support direct messages and interrupt. Send interrupt through `POST /v1/sessions/{id}/events` with `{"type":"interrupt","data":{}}`. Session-tree actions (fork, stop, retry, archive, unarchive, delete) are now in scope; see [session-tree.md](session-tree.md) for their semantics. Stop is owner-only and non-sticky: it kills the live process, and the next message relaunches the session. Do not add a close action: `sys_session_close` is an agent tool, not a client REST route. Do not use session deletion as close; it deletes the conversation.
+Faces: `omnigent-user` and `omnigent-agent` for message labels,
+`omnigent-tool` for tool headers, `omnigent-reasoning` for reasoning, and
+`omnigent-error` for failed status and interrupt markers. Use plain text, not
+Markdown rendering, in v1. Do not add a plan panel or usage display in v1.
 
-### Conversation
+## Elicitations
 
-The main conversation belongs to one Omnigent session. For an orchestrator session, this is the parent session.
+Show each pending request in a separate inline block between the transcript and
+the composer. Show its message and available policy, phase, and content preview.
+Show Yes/No actions for approvals. Treat an internal `/approve/...` URL as an
+approval page; show an external URL as a browser link without in-buffer response
+actions.
 
-Build `omnigent-conversation-mode` as a major mode derived from `text-mode`. Render the transcript as read-only text and keep an editable prompt region at the end. Use markers to insert streamed output before the prompt. Keep Omnigent session items and event IDs as session state; treat the buffer as a view, not the source of truth. Use text properties to mark messages and tool activity. See gptel as a chat-buffer design reference, not a dependency.
+Show editable form fields, including boolean and selectable options. Show an
+editable field for an `isOther` option. Mask secret input: keep its clear value
+in request state, not buffer text, undo history, or the transcript. Indicate all
+invalid fields and their errors, and move point to the first invalid field.
+Disable response actions during submission. Request and draft state, validation,
+and server interactions belong to [elicitation.md](elicitation.md).
 
-The conversation buffer design (transcript, folding, queue, steer) lives in
-[conversation-buffer.md](conversation-buffer.md).
+The conversation implementation must keep separate boundaries for transcript,
+request blocks, and composer. Stream insertion and transcript refresh must not
+overwrite request drafts or composer text.
 
-### Workspace Changes
+## Workspace view
 
-Show workspace files and diffs in an optional side window. Use Omnigent’s workspace environment API for this view:
-
-- `GET /v1/sessions/{id}/resources/environments/default/changes` lists files created, modified, or deleted during the session.
-- `GET /v1/sessions/{id}/resources/environments/default/diff/{path}` returns the file’s `before` and `after` contents, not a unified patch. `before` can be null for a new file or an unknown baseline. `after` can be null for a deleted file.
-- `GET /v1/sessions/{id}/resources/environments/default/filesystem[/{path}]` lists workspace files and directories.
-
-Render the file diff in Emacs. Refresh the change list when the session stream reports `session.changed_files.invalidated`, and also when the session transitions from `running` or `waiting` to `idle`: the web client treats that end-of-turn refresh as a backstop because the invalidation event is throttled and runner-emitted. Handle HTTP 503 with error code `runner_unavailable` separately from 404: 503 means the runner is offline and a message can wake it, 404 means the session has no runner filesystem. These workspace endpoints are separate from `/resources/files`, which stores uploaded attachments.
-
-The current web UI uses these endpoints, but the checked-in server API reference does not document them. Confirm their contract before relying on them. Some sessions have no runner filesystem and may return 404.
-
-### Session Actions and Configuration
-
-Use Transient for short-lived actions, such as selecting, sharing, forking, or archiving a session. The menu is temporary. The action can change persistent server state. For v1, the session tree uses direct keymap actions and plain prompts (`completing-read` for the agent, `read-string` for the title); the Transient menu arrives with the advanced creation options (workspace, host, sandbox, model, reasoning effort).
-
-Keep agent and policy definitions in config files. Use Emacs to edit those files. Do not build a second policy editor in Transient. Add a transient action for a policy only when Omnigent exposes a clear session-level operation for it.
-
-## Window Behavior
-
-Keep the conversation as the main view. Place the session tree and workspace view on the left. Let users show or hide each view.
-
-When both views are open, stack them vertically on the left. Put the session tree above the workspace view. Use the session tree as a live status surface. Use Transient for actions. A temporary menu is not a replacement for visible run state.
+Show workspace files and diffs in an optional side window. The detailed UI,
+including selection, opening files, diff display, and unavailable states, is
+**open for discussion**. Data collection and API semantics belong to
+[workspace-changes.md](workspace-changes.md).
 
 ## Nongoals
 
-- Do not build a full Omnigent dashboard before a workflow requires it.
-- Do not show every child stream in the parent conversation.
-- Do not add Git staging or commit actions to the initial workspace view.
-- Do not add ETAF for a simple transcript. Reconsider it only if the UI needs richer layout or interaction than native Emacs buffers provide.
-
-## Open Decisions
-
-1. Confirm the workspace endpoint contract with Omnigent, since the web UI uses these routes but the checked-in server API reference does not document them.
-
-
-## References
-
-- [Omnigent programmatic usage](https://omnigent.ai/docs/programmatic)
-- [Omnigent server API](https://github.com/omnigent-ai/omnigent/blob/main/omnigent/server/API.md)
-- [Web UI changed-files implementation](https://github.com/omnigent-ai/omnigent/blob/main/web/src/hooks/useWorkspaceChangedFiles.ts)
-- [Web UI file-diff implementation](https://github.com/omnigent-ai/omnigent/blob/main/web/src/hooks/useFileDiff.ts)
-- [Transport design](transport.md)
-- [gptel](https://github.com/karthink/gptel)
+No full dashboard, policy editor, Git staging or commit actions in v1.
+Agent and policy definitions remain in configuration files.
