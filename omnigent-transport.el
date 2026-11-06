@@ -30,11 +30,6 @@
   :type 'string
   :group 'omnigent-transport)
 
-(defcustom omnigent-token nil
-  "Bearer token for a shared Omnigent server, or nil for a local server."
-  :type '(choice (const :tag "No token" nil) string)
-  :group 'omnigent-transport)
-
 (defconst omnigent-transport--reconnect-min-delay 1.0)
 (defconst omnigent-transport--reconnect-max-delay 15.0)
 
@@ -49,12 +44,6 @@
 
 (defun omnigent-transport--url (path)
   (concat (string-remove-suffix "/" omnigent-server-url) path))
-
-(defun omnigent-transport--auth-header ()
-  (when (and omnigent-token (not (string-empty-p omnigent-token)))
-    (when (string-match-p "[\r\n]" omnigent-token)
-      (user-error "Omnigent token must not contain a newline"))
-    (cons "Authorization" (concat "Bearer " omnigent-token))))
 
 (defun omnigent-transport--session-path (session-id &optional suffix)
   (concat "/v1/sessions/" (url-hexify-string session-id) (or suffix "")))
@@ -95,9 +84,7 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
     (error "Omnigent API path must start with /: %s" path))
   (let ((url-request-method method)
         (url-request-extra-headers
-         (delq nil
-               (append (when data '(("Content-Type" . "application/json")))
-                       (list (omnigent-transport--auth-header)))))
+         (when data '(("Content-Type" . "application/json"))))
         (url-request-data (when data
                             (encode-coding-string (json-encode data)
                                                   'utf-8))))
@@ -187,30 +174,11 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
                     stream (format "Invalid SSE JSON: %s"
                                    (error-message-string err)))))))))))))
 
-(defun omnigent-transport--curl-header-file ()
-  (let ((header (omnigent-transport--auth-header)))
-    (when header
-      (let ((file (make-temp-file "omnigent-headers-")))
-        (let ((written nil))
-          (unwind-protect
-              (progn
-                (set-file-modes file #o600)
-                (with-temp-buffer
-                  (insert (car header) ": " (cdr header) "\n")
-                  (let ((coding-system-for-write 'utf-8-unix))
-                    (write-region (point-min) (point-max) file nil 'silent)))
-                (setq written t)
-                file)
-            (unless written
-              (ignore-errors (delete-file file)))))))))
-
-(defun omnigent-transport--stream-command (session-id header-file)
-  (append (list (executable-find "curl") "--silent" "--show-error"
-                "--no-buffer" "--fail")
-          (when header-file (list "--header" (concat "@" header-file)))
-          (list (omnigent-transport--url
-                 (concat (omnigent-transport--session-path session-id)
-                         "/stream")))))
+(defun omnigent-transport--stream-command (session-id)
+  (list (executable-find "curl") "--silent" "--show-error"
+        "--no-buffer" "--fail"
+        (omnigent-transport--url
+         (concat (omnigent-transport--session-path session-id) "/stream"))))
 
 (defun omnigent-transport--stream-snapshot (stream attempt status body)
   (when (and (not (omnigent-stream-stopped stream))
@@ -226,10 +194,8 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
 (defun omnigent-transport--stream-sentinel (process _event)
   (when (memq (process-status process) '(exit signal))
     (let* ((stream (process-get process 'omnigent-stream))
-           (header-file (process-get process 'omnigent-header-file))
            (stderr (process-get process 'omnigent-stderr))
            (done (process-get process 'omnigent-done)))
-      (when header-file (ignore-errors (delete-file header-file)))
       (when (buffer-live-p stderr)
         (unless (or done
                     (and stream (omnigent-stream-stopped stream))
@@ -250,8 +216,7 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
 
 (defun omnigent-transport--stream-connect (stream)
   (unless (omnigent-stream-stopped stream)
-    (let* ((header-file (omnigent-transport--curl-header-file))
-           (stderr (generate-new-buffer " *omnigent-curl-stderr*"))
+    (let* ((stderr (generate-new-buffer " *omnigent-curl-stderr*"))
            (attempt (1+ (omnigent-stream-attempt stream)))
            process)
       (setf (omnigent-stream-attempt stream) attempt)
@@ -261,15 +226,14 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
                               :buffer nil
                               :stderr stderr
                               :command (omnigent-transport--stream-command
-                                        (omnigent-stream-session-id stream) header-file)
+                                        (omnigent-stream-session-id stream))
                               :connection-type 'pipe
                               :coding 'utf-8-unix
                               :noquery t
                               :filter #'omnigent-transport--stream-filter
                               :sentinel #'omnigent-transport--stream-sentinel))
         (error
-         (when header-file (ignore-errors (delete-file header-file)))
-         (when (buffer-live-p stderr) (kill-buffer stderr))
+            (when (buffer-live-p stderr) (kill-buffer stderr))
          (omnigent-transport--notify-error stream (error-message-string err))
          (setf (omnigent-stream-failures stream)
                (1+ (omnigent-stream-failures stream))
@@ -279,7 +243,6 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
                 nil #'omnigent-transport--stream-connect stream))))
       (when process
         (process-put process 'omnigent-stream stream)
-        (process-put process 'omnigent-header-file header-file)
         (process-put process 'omnigent-stderr stderr)
         (setf (omnigent-stream-process stream) process)
         (omnigent-get-session
@@ -295,7 +258,6 @@ after each stream connection starts.  ON-ERROR, when non-nil, receives an
 error string.  Return a stream handle for `omnigent-stop-session-stream'."
   (unless (executable-find "curl")
     (user-error "Omnigent session streams require curl"))
-  (omnigent-transport--auth-header)
   (let ((stream (omnigent-transport--make-stream
                  :session-id session-id :event-callback on-event
                  :snapshot-callback on-snapshot :error-callback on-error
@@ -398,7 +360,6 @@ error string.  Return a stream handle for `omnigent-stop-session-stream'."
   (unless (omnigent-session-updates-stopped updates)
     (setf (omnigent-session-updates-timer updates) nil)
     (let* ((attempt (1+ (omnigent-session-updates-attempt updates)))
-           (auth (omnigent-transport--auth-header))
            websocket)
       (setf (omnigent-session-updates-attempt updates) attempt
             (omnigent-session-updates-connected updates) nil
@@ -408,7 +369,6 @@ error string.  Return a stream handle for `omnigent-stop-session-stream'."
                 (websocket-open
                  (omnigent-transport--updates-url)
                  :nowait t
-                 :custom-header-alist (when auth (list auth))
                  :on-open (lambda (ws)
                             (omnigent-transport--updates-opened
                              updates ws attempt))
@@ -440,7 +400,6 @@ an error string.  Return a handle for `omnigent-stop-session-updates'."
   (unless (require 'websocket nil t)
     (user-error "Session updates require the websocket package from GNU ELPA"))
   (omnigent-transport--updates-url)
-  (omnigent-transport--auth-header)
   (let ((updates (omnigent-transport--make-session-updates
                   :frame-callback on-frame :error-callback on-error
                   :session-ids nil :stopped nil :failures 0 :attempt 0)))

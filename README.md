@@ -27,6 +27,7 @@ output, and the composer. Session selection is currently the end of the line.
 
 ## TODO
 
+- [ ] Design centralized authentication for remote servers, including token expiration.
 - [ ] Conversation buffer (`omnigent-conversation-mode`): read-only transcript,
       editable prompt region, streamed output inserted via markers.
 - [ ] Composer: send user messages to the active session, render agent replies

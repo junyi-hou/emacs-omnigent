@@ -7,7 +7,7 @@ This document covers how the Emacs client talks to the Omnigent server. It is se
 ## Entry points
 
 - `M-x omnigent-start-server` runs `omnigent server --background --no-open`, then connects to the local server. The CLI reuses an existing local server when possible.
-- `M-x omnigent-connect` prompts for a server URL, lists accessible sessions, and prompts for one to select. `New session` is the default choice; it prompts for an agent and creates a session. Selecting an existing session loads its snapshot. Set `omnigent-token` before connecting to a shared server.
+- `M-x omnigent-connect` prompts for a server URL, lists accessible sessions, and prompts for one to select. `New session` is the default choice; it prompts for an agent and creates a session. Selecting an existing session loads its snapshot.
 
 ## What the server offers
 
@@ -19,7 +19,7 @@ This document covers how the Emacs client talks to the Omnigent server. It is se
 
 ### REST: `url-retrieve`
 
-Use the built-in `url-retrieve` for one-shot requests. `omnigent-request` handles JSON encoding, auth headers, and response parsing. The endpoint helpers cover session snapshots, top-level lists, child lists, and posted events.
+Use the built-in `url-retrieve` for one-shot requests. `omnigent-request` handles JSON encoding and response parsing. The endpoint helpers cover session snapshots, top-level lists, child lists, and posted events.
 
 ### Session stream: a `curl` subprocess
 
@@ -49,8 +49,7 @@ made while the connection is opening. `omnigent-stop-session-updates` closes
 the connection and stops reconnects.
 
 The connection uses the `ws` or `wss` scheme that matches the server URL.
-The bearer token goes in the handshake header. The connection runs
-in-process, so the curl header-file scheme does not apply. A missing
+A missing
 `websocket` package produces an error that names the package. REST and SSE
 transport code does not load WebSocket functions until a connection starts.
 
@@ -61,9 +60,7 @@ tree when a watched child changes. See
 
 ## Authentication
 
-A local single-user server needs no credentials. A shared server checks a bearer token: a login token from `POST /auth/login` or a machine token from `POST /oauth/token`, sent as `Authorization: Bearer <token>`.
-
-Keep the token in one user option, for example `omnigent-token`, or read it from a file path in a user option. For REST requests, `url-retrieve` sets the header directly. For the curl subprocess, do not put the token in the curl command line: process listings can expose command-line arguments. Instead, write one header file per curl process in `temporary-file-directory`, set its mode to `0600` before writing the token into it, and pass it with `-H @<header-file>`. Delete the file in the curl process sentinel when the process exits. Do not log the header value.
+Authentication is not implemented. The client cannot connect directly to a server that requires authentication. A centralized authentication mechanism needs a design before implementation.
 
 ## Event dispatch
 
@@ -77,7 +74,7 @@ Keep the token in one user option, for example `omnigent-token`, or read it from
 
 ## Checks
 
-Run `make test` for the unit and integration tests. The transport unit tests use a mocked WebSocket connection to check URL, auth, watch messages, frame parsing, and reconnect behavior. The integration test starts an isolated Omnigent server with a temporary database and artifact directory. It checks REST and SSE without starting an agent turn, and it checks the WebSocket handshake, snapshot, and changed frame with the GNU ELPA client.
+Run `make test` for the unit and integration tests. The transport unit tests use a mocked WebSocket connection to check URL, watch messages, frame parsing, and reconnect behavior. The integration test starts an isolated Omnigent server with a temporary database and artifact directory. It checks REST and SSE without starting an agent turn, and it checks the WebSocket handshake, snapshot, and changed frame with the GNU ELPA client.
 
 ## Open decisions
 

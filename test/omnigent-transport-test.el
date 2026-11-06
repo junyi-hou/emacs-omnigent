@@ -36,7 +36,6 @@
   "Send watch sets and pass parsed server frames to the callback."
   (let ((real-require (symbol-function 'require))
         (omnigent-server-url "https://example.test")
-        (omnigent-token "secret")
         open-args sent frames errors closed)
     (cl-letf (((symbol-function 'require)
                (lambda (feature &optional filename noerror)
@@ -57,8 +56,7 @@
                       (lambda (frame) (push frame frames))
                       (lambda (error) (push error errors)))))
         (should (equal (car open-args) "wss://example.test/v1/sessions/updates"))
-        (should (equal (plist-get (cdr open-args) :custom-header-alist)
-                       '(("Authorization" . "Bearer secret"))))
+        (should-not (plist-get (cdr open-args) :custom-header-alist))
         (funcall (plist-get (cdr open-args) :on-open) 'fake-websocket)
         (should (equal (json-parse-string (car sent) :object-type 'alist
                                           :array-type 'array)
@@ -126,8 +124,7 @@
     (cl-letf (((symbol-function 'require)
                (lambda (feature &optional filename noerror)
                  (if (eq feature 'websocket) nil
-                   (funcall real-require feature filename noerror))))
-              ((symbol-function 'omnigent-transport--auth-header) #'ignore))
+                   (funcall real-require feature filename noerror)))))
       (should-error (omnigent-start-session-updates #'ignore)
                     :type 'user-error))))
 
