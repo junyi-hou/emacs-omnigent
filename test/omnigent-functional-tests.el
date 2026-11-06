@@ -92,5 +92,126 @@
       (should (cl-find id omnigent-sessions
                        :key (lambda (row) (alist-get 'id row)) :test #'equal)))))
 
+(ert-deftest omnigent-mock-acp-tool-call ()
+  "Receive a tool call over SSE and check its committed result."
+  (let ((id (omnigent-integration-create-session t))
+        snapshot events stream failure)
+    (unwind-protect
+        (progn
+          (setq stream
+                (omnigent-transport-start-session-stream
+                 id (lambda (name data) (push (cons name data) events))
+                 (lambda (status body) (setq snapshot (cons status body)))
+                 (lambda (error) (setq failure error))))
+          (with-timeout (15 (ert-fail (format "Tool stream did not load: %S" failure)))
+            (while (not snapshot) (accept-process-output nil 0.1)))
+          (should (= (car snapshot) 200))
+          (let ((response
+                 (omnigent-mock-test-request
+                  "POST" (omnigent-transport--session-path id "/events")
+                  '(("type" . "message")
+                    ("data" . (("role" . "user")
+                               ("content" . [(("type" . "input_text")
+                                              ("text" . "test tool_call"))])))))))
+            (should (= (car response) 202)))
+          (with-timeout (30 (ert-fail (format "Tool turn timed out: %S; events: %S" failure events)))
+            (while (not (assoc "response.completed" events))
+              (accept-process-output nil 0.1)))
+          (should-not failure)
+          (let* ((done-items
+                  (mapcar (lambda (event) (alist-get 'item (cdr event)))
+                          (cl-remove-if-not
+                           (lambda (event) (equal (car event) "response.output_item.done")) events)))
+                 (call (cl-find "function_call" done-items
+                                :key (lambda (item) (alist-get 'type item)) :test #'equal))
+                 (output (cl-find "function_call_output" done-items
+                                  :key (lambda (item) (alist-get 'type item)) :test #'equal))
+                 (response (omnigent-mock-test-request "GET" (omnigent-transport--session-path id)))
+                 (items (append (alist-get 'items (cdr response)) nil)))
+            (should call)
+            (should output)
+            (should (= (car response) 200))
+            ;; Parse committed items through the same state code used by a conversation.
+            (with-temp-buffer
+              (setq omnigent-conversation--items (make-hash-table :test 'equal))
+              (dolist (item items) (omnigent-conversation--put-item item))
+              ;; Stream IDs and database IDs differ; call_id correlates the tool pair.
+              (let* ((stored (mapcar (lambda (item-id)
+                                      (gethash item-id omnigent-conversation--items))
+                                    omnigent-conversation--order))
+                     (stored-call (cl-find "function_call" stored
+                                           :key (lambda (item) (alist-get 'type item)) :test #'equal))
+                     (stored-output (cl-find "function_call_output" stored
+                                             :key (lambda (item) (alist-get 'type item)) :test #'equal)))
+                (should stored-call)
+                (should stored-output)
+                (should (equal (alist-get 'name call) (alist-get 'name stored-call)))
+                (should (equal (alist-get 'call_id call) (alist-get 'call_id stored-call)))
+                (should (equal (alist-get 'call_id output) (alist-get 'call_id stored-output)))
+                (should (equal (alist-get 'output output) (alist-get 'output stored-output)))
+                (should (equal (alist-get 'type stored-call) "function_call"))
+                (should (equal (alist-get 'type stored-output) "function_call_output"))
+                (should (equal (alist-get 'name stored-call) "Reading configuration file"))
+                (should (equal (alist-get 'call_id stored-call) "call_001"))
+                (should (equal (alist-get 'call_id stored-output)
+                               (alist-get 'call_id stored-call)))
+                (should (string-match-p "File read successfully"
+                                        (format "%s" (alist-get 'output stored-output))))))))
+      (when stream (omnigent-transport-stop-session-stream stream)))))
+
+(ert-deftest omnigent-mock-acp-interrupt-running-turn ()
+  "Interrupt after the mock starts streaming, not after a fixed sleep."
+  (let ((id (omnigent-integration-create-session t))
+        snapshot events stream failure)
+    (unwind-protect
+        (progn
+          (setq stream
+                (omnigent-transport-start-session-stream
+                 id (lambda (name data) (push (cons name data) events))
+                 (lambda (status body) (setq snapshot (cons status body)))
+                 (lambda (error) (setq failure error))))
+          (with-timeout (15 (ert-fail (format "Interrupt stream did not load: %S" failure)))
+            (while (not snapshot) (accept-process-output nil 0.1)))
+          (should (= (car snapshot) 200))
+          (let ((response
+                 (omnigent-mock-test-request
+                  "POST" (omnigent-transport--session-path id "/events")
+                  '(("type" . "message")
+                    ("data" . (("role" . "user")
+                               ("content" . [(("type" . "input_text")
+                                              ("text" . "test long_running"))])))))))
+            (should (= (car response) 202)))
+          (with-timeout (30 (ert-fail (format "Mock did not start reasoning: %S" events)))
+            (while (not (assoc "response.reasoning_text.delta" events))
+              (accept-process-output nil 0.1)))
+          (should-not (assoc "response.completed" events))
+          (setq events nil)
+          (with-temp-buffer
+            (setq omnigent-conversation-session-id id)
+            (omnigent-conversation-interrupt))
+          (with-timeout (15 (ert-fail (format "Interrupt did not finish the turn: %S" events)))
+            (while (not (and (assoc "session.interrupted" events)
+                             (cl-some (lambda (event)
+                                        (and (equal (car event) "session.status")
+                                             (equal (alist-get 'status (cdr event)) "idle")))
+                                      events)))
+              (accept-process-output nil 0.1)))
+          (should-not failure)
+          (should-not (assoc "response.completed" events))
+          (should-not (assoc "response.output_text.delta" events))
+          (should (integerp (alist-get 'requested_at
+                                       (alist-get 'data (cdr (assoc "session.interrupted" events))))))
+          (let ((response (omnigent-mock-test-request "GET" (omnigent-transport--session-path id))))
+            (should (= (car response) 200))
+            (should (equal (alist-get 'status (cdr response)) "idle"))
+            (should (cl-find-if
+                     (lambda (item)
+                       (let ((data (alist-get 'data item)))
+                         (and (equal (alist-get 'type item) "message")
+                              (equal (alist-get 'role data) "user")
+                              (equal (omnigent-conversation--text data) "test long_running"))))
+                     (append (alist-get 'items (cdr response)) nil)))))
+      (when stream (omnigent-transport-stop-session-stream stream)))))
+
 (provide 'omnigent-functional-tests)
 ;;; omnigent-functional-tests.el ends here

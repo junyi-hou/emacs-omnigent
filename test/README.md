@@ -7,13 +7,13 @@ configuration, database, workspace, and artifact store. The runner stops the hos
 and server and removes the temporary directory on exit.
 
 Run `pixi install` to install the ACP dependency in this project's Python
-environment. The runner uses `.pixi/envs/default/bin/python`, not the checkout's
-Python environment. Set `PYTHON` to use another Python executable.
+environment. The runner uses `.pixi/envs/default/bin/omnigent` and
+`.pixi/envs/default/bin/python`. Set `OMNIGENT_BIN` or `PYTHON` to use another
+executable.
 
 Run the tests with:
 
 ```sh
-OMNIGENT_BIN="$PWD/.pixi/envs/default/bin/omnigent" \
 make test
 ```
 

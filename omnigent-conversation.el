@@ -151,7 +151,7 @@
   "Interrupt the current session."
   (interactive)
   (omnigent-transport-post-session-event
-   omnigent-conversation-session-id '(("type" . "interrupt") ("data" . ()))
+   omnigent-conversation-session-id '(("type" . "interrupt"))
    (lambda (status _body)
      (unless (omnigent-sessions--success-p status)
        (message "Omnigent interrupt failed: %s" status)))))

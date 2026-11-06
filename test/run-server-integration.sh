@@ -2,7 +2,7 @@
 set -eu
 
 cd "$(dirname "$0")/.."
-server_bin=${OMNIGENT_BIN:-.venv/bin/omnigent}
+server_bin=${OMNIGENT_BIN:-"$PWD/.pixi/envs/default/bin/omnigent"}
 emacs_bin=${EMACS:-emacs}
 python_bin=${PYTHON:-"$PWD/.pixi/envs/default/bin/python"}
 
