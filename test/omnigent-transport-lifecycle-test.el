@@ -169,6 +169,22 @@
       (should (= (omnigent-session-updates-failures updates) 0))
       (should (equal (list frames errors opens scheduled sent) '(0 0 0 0 0))))))
 
+(ert-deftest omnigent-transport-callback-cleans-up-original-response-buffer ()
+  "Keep a buffer selected by the callback and kill only the HTTP response."
+  (let ((response (generate-new-buffer " *omnigent-response*"))
+        (conversation (generate-new-buffer " *omnigent-conversation*")))
+    (unwind-protect
+        (save-current-buffer
+          (set-buffer response)
+          (insert "{}")
+          (omnigent-transport--url-callback
+           nil (lambda (&rest _) (set-buffer conversation))
+           omnigent-transport--generation)
+          (should-not (buffer-live-p response))
+          (should (buffer-live-p conversation)))
+      (when (buffer-live-p response) (kill-buffer response))
+      (when (buffer-live-p conversation) (kill-buffer conversation)))))
+
 (ert-deftest omnigent-transport-reset-invalidates-old-work ()
   "Stop registered connections and ignore callbacks from the old server."
   (let* ((omnigent-transport--generation 0)

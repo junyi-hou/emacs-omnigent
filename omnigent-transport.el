@@ -97,14 +97,15 @@ Return nil for an empty body."
 (defun omnigent-transport--url-callback (status callback generation)
   "Call CALLBACK with STATUS and the response for current GENERATION.
 Use the HTTP status when available, and always kill the response buffer."
-  (unwind-protect
-      (let ((http-status (and (boundp 'url-http-response-status)
-                               url-http-response-status)))
-        (when (= generation omnigent-transport--generation)
-          (funcall callback (or http-status status)
-                   (omnigent-transport--response-body))))
-    (when (buffer-live-p (current-buffer))
-      (kill-buffer (current-buffer)))))
+  (let ((response-buffer (current-buffer)))
+    (unwind-protect
+        (let ((http-status (and (boundp 'url-http-response-status)
+                                 url-http-response-status)))
+          (when (= generation omnigent-transport--generation)
+            (funcall callback (or http-status status)
+                     (omnigent-transport--response-body))))
+      (when (buffer-live-p response-buffer)
+        (kill-buffer response-buffer)))))
 
 (defun omnigent-transport-request (method path callback &optional data)
   "Send METHOD to PATH and call CALLBACK with status and response body.
