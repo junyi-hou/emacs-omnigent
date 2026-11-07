@@ -55,31 +55,41 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
           (setq omnigent-conversation--order-tail cell)))
       (puthash id item omnigent-conversation--items))))
 
+(defconst omnigent-conversation--event-handlers
+  `((("response.elicitation_request")
+     . ,(lambda (data)
+          (omnigent-conversation--elicitation-put data)
+          (run-hooks 'omnigent-conversation-elicitation-change-hook)))
+    (("response.elicitation_resolved")
+     . ,(lambda (data)
+          (when-let* ((id (alist-get 'elicitation_id data)))
+            (omnigent-conversation--elicitation-remove id))
+          (run-hooks 'omnigent-conversation-elicitation-change-hook)))
+    (("response.output_item.added" "response.output_item.done")
+     . ,(lambda (data)
+          (omnigent-conversation--put-item (alist-get 'item data))))
+    (("response.output_text.delta" "response.reasoning_text.delta"
+      "response.reasoning_summary_text.delta")
+     . ,(lambda (data)
+          (let* ((id (alist-get 'item_id data))
+                 (item (and id (gethash id omnigent-conversation--items))))
+            (when item
+              (setf (alist-get 'content item)
+                    (concat (omnigent-conversation--text item) (or (alist-get 'delta data) "")))))))
+    (("response.error" "response.failed")
+     . ,(lambda (data)
+          (omnigent-conversation--put-item
+           `((id . ,(format "error-%s" (float-time))) (type . "error")
+             (text . ,(format "%s" (or (alist-get 'error data) data))))))))
+  "Event names and their conversation state handlers.")
+
 (defun omnigent-conversation--event (name data)
   "Apply stream event NAME with DATA, or queue it while loading."
   (if omnigent-conversation--loading
       (push (cons name data) omnigent-conversation--pending-events)
-    (cond
-     ((equal name "response.elicitation_request")
-      (omnigent-conversation--elicitation-put data)
-      (run-hooks 'omnigent-conversation-elicitation-change-hook))
-     ((equal name "response.elicitation_resolved")
-      (when-let* ((id (alist-get 'elicitation_id data)))
-        (omnigent-conversation--elicitation-remove id))
-      (run-hooks 'omnigent-conversation-elicitation-change-hook))
-     ((member name '("response.output_item.added" "response.output_item.done"))
-      (omnigent-conversation--put-item (alist-get 'item data)))
-     ((member name '("response.output_text.delta" "response.reasoning_text.delta"
-                     "response.reasoning_summary_text.delta"))
-      (let* ((id (alist-get 'item_id data))
-             (item (and id (gethash id omnigent-conversation--items))))
-        (when item
-          (setf (alist-get 'content item)
-                (concat (omnigent-conversation--text item) (or (alist-get 'delta data) ""))))))
-     ((member name '("response.error" "response.failed"))
-      (omnigent-conversation--put-item
-       `((id . ,(format "error-%s" (float-time))) (type . "error")
-         (text . ,(format "%s" (or (alist-get 'error data) data)))))))))
+    (pcase (cl-find-if (lambda (entry) (member name (car entry)))
+                       omnigent-conversation--event-handlers)
+      (`(,_ . ,handler) (funcall handler data)))))
 
 (defun omnigent-conversation--snapshot (status body)
   "Apply snapshot BODY when STATUS indicates success.
