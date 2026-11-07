@@ -16,7 +16,9 @@ status and response body to their callback.
 |---|---|---|
 | List sessions | `GET /v1/sessions?limit=1000&include_archived=true&sort_by=updated_at&order=desc` | `omnigent-transport-list-sessions` |
 | List agents | `GET /v1/agents` | `omnigent-transport-request` |
-| Create session | `POST /v1/sessions` with `agent_id` and optional `title` | `omnigent-transport-request` |
+| List execution hosts | `GET /v1/hosts` | `omnigent-transport-request` |
+| Browse host directories | `GET /v1/hosts/{host_id}/filesystem` or `/filesystem/{path}` | `omnigent-transport-request` |
+| Create session | `POST /v1/sessions` with `agent_id`, `host_id`, `workspace`, and optional `title` | `omnigent-transport-request` |
 | Interrupt | `POST /v1/sessions/{id}/events`, type `interrupt` | `omnigent-transport-post-session-event` |
 | Stop | Same endpoint, type `stop_session` | `omnigent-transport-post-session-event` |
 | Delete | `DELETE /v1/sessions/{id}` | New helper |
@@ -29,6 +31,38 @@ online host.
 
 Delete permanently removes the conversation; request confirmation before deleting it. Do
 not use deletion as a close operation.
+
+### Execution host and workspace
+
+V1 creates sessions on the connected server, whether local or remote and regardless
+of who started it. Starting a local server is an optional convenience, not a creation
+requirement. The server must be reachable and its requests must be authorized; see
+[transport authentication](transport.md#authentication) for the current limitation.
+
+The server coordinates sessions. An execution host runs the agent and its tools.
+The server can run on machine A while the selected host runs on machine B. The
+workspace is a directory on B, not necessarily a directory on A or the Emacs machine.
+The host service must already be online and have the agent dependencies installed.
+Connecting to a server does not install or start a host.
+
+At creation time, query `GET /v1/hosts`. This response lists hosts but does not declare
+a default execution host. Select the sole online host automatically; if several are
+online, prompt with their names and IDs. If none are online, report the problem.
+Do not assume that a host runs on the server machine or the Emacs machine.
+
+Always prompt for the workspace with a `find-file`-style `completing-read` table.
+Use no initial directory, default selection, or prefix argument. Query the selected
+host's filesystem through the server; do not inspect the Emacs filesystem. Empty
+input has no default and cannot create a session. Completion initially lists the
+host's home directory. Relative input resolves under that home; absolute and
+host-relative tilde paths retain their meaning on the selected host.
+
+Offer directories only, support navigation by path, and fetch all listing pages.
+Cache listings only during the prompt. Validate the chosen directory with a fresh
+filesystem request before creation, including paths the user types directly.
+Send the host ID and native workspace path in the create request. Reject TRAMP
+syntax rather than send it to the agent. Abort if the server changes during selection.
+The selection helpers live in `omnigent-sessions.el`.
 
 Create prompts for an agent and optional title. An empty title lets the server derive
 one. The `omnigent-sessions-open-hook` receives the new session; the conversation
@@ -70,8 +104,10 @@ list is not presented as complete. Existing transport tests cover the WebSocket.
 ## Deferred
 
 Forking, child sessions, archiving and unarchiving, cursor pagination beyond 1,000,
-search, custom ordering, advanced creation options, and `delete_worktree` are
-post-v1. V1 still lists archived sessions.
+search, custom ordering, automatic remote-host setup, TRAMP-to-host inference,
+managed sandbox creation, advanced creation options, and `delete_worktree` are
+post-v1. Selecting an existing online remote host is supported. V1 still lists
+archived sessions.
 
 ## References
 

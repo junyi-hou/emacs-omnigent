@@ -25,6 +25,13 @@ Show failed actions with the action, session title, and HTTP status. Indicate
 sessions outside the watch limit. The list is a view of server data, not its
 source. A Transient menu for advanced creation options is deferred.
 
+Session creation uses the connected server, whether Emacs started it or not.
+Select its sole online execution host automatically; prompt when several are online.
+Always prompt for a workspace with directory completion through that host's filesystem
+interface. Start with empty input and no default or prefix argument. The prompt names
+its execution host. Do not use the Emacs project root as a remote workspace.
+See [session-tree.md](session-tree.md#execution-host-and-workspace).
+
 ## Conversation
 
 Use one buffer per session, named `*omnigent: TITLE [conv_XXXX]*`: the session

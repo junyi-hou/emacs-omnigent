@@ -19,15 +19,24 @@ UI. Those components process the data they receive.
 
 ## Connection entry points
 
-- `omnigent-start-server` runs `omnigent server --background --no-open` and connects to
-  the local server. The CLI reuses an existing server when possible.
-- `omnigent-connect` connects to a server URL. Session selection belongs to
-  [session-tree.md](session-tree.md).
+- `omnigent-start-server` runs
+  `omnigent host --server "" --background --no-open --non-interactive` to start or
+  reuse the local server and execution host. The empty server argument forces local
+  mode, even when the CLI has a saved remote-server default.
+- `omnigent-connect` selects an existing local or remote server URL without starting
+  any local process. Session creation works on the connected server regardless of
+  who started it. It discovers execution hosts and workspaces through REST, not the
+  local CLI. Host and workspace selection belongs to [session-tree.md](session-tree.md).
 
 ## What the server offers
 
 - REST endpoints under `/v1/sessions` for create, get, post-event, fork, delete, and
   file resources. One-shot request and response.
+- `GET /v1/hosts` lists execution hosts owned by the caller, with online/offline status.
+  It does not identify a default host. `GET /v1/hosts/{id}/filesystem` lists that host's
+  home directory; `/filesystem/{path}` lists a native directory path. Listings include
+  entry names, paths, types, and `has_more`; request further pages with `after`.
+  These requests work before a session or runner exists.
 - A session stream at `GET /v1/sessions/{id}/stream`. It is Server-Sent Events (SSE) and
   a live tail only: no replay, no sequence numbers, no `starting_after` parameter. The
   API document shows the stream ending with `data: [DONE]`; see the `[DONE]` ambiguity

@@ -58,7 +58,7 @@ reset session and transport state before selecting the server."
       (match-string-no-properties 0))))
 
 (defun omnigent--start-server-sentinel (process _event)
-  "Select the server URL when startup PROCESS exits successfully.
+  "Select the local server URL when startup PROCESS exits successfully.
 Report a startup failure otherwise.  Ignore _EVENT."
   (when (memq (process-status process) '(exit signal))
     (when (eq process omnigent-start-process)
@@ -69,21 +69,22 @@ Report a startup failure otherwise.  Ignore _EVENT."
                      (omnigent--server-url-from-output buffer))))
       (if url
           (progn
-            (when (buffer-live-p buffer)
-              (kill-buffer buffer))
+            (kill-buffer buffer)
             (omnigent-connect url))
-        (message "Omnigent server failed to start; see %s"
+        (message "Omnigent startup failed; see %s"
                  (if (buffer-live-p buffer) (buffer-name buffer) "process output"))))))
 
 ;;;###autoload
 (defun omnigent-start-server ()
-  "Start or reuse the local Omnigent server and select its URL.
-The CLI runs asynchronously.  Its output must contain the server URL."
+  "Start or reuse the local Omnigent server and local execution host.
+Select the server URL.  Session creation discovers hosts through the server.
+The CLI runs asynchronously; saved remote-server defaults are not used."
   (interactive)
   (if (process-live-p omnigent-start-process)
       (message "Omnigent server startup is already in progress")
     (let ((executable (executable-find omnigent-executable))
-          (buffer (get-buffer-create "*Omnigent Server Startup*")))
+          (buffer (get-buffer-create "*Omnigent Server Startup*"))
+          (default-directory temporary-file-directory))
       (unless executable
         (user-error "Cannot find Omnigent CLI: %s" omnigent-executable))
       (with-current-buffer buffer
@@ -93,7 +94,8 @@ The CLI runs asynchronously.  Its output must contain the server URL."
              :name "omnigent-server-start"
              :buffer buffer
              :stderr buffer
-             :command (list executable "server" "--background" "--no-open")
+             :command (list executable "host" "--server" "" "--background"
+                            "--no-open" "--non-interactive")
              :connection-type 'pipe
              :noquery t
              :sentinel #'omnigent--start-server-sentinel))

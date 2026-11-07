@@ -40,6 +40,8 @@ export OMNIGENT_DATA_DIR="$tmp/data"
 export HOME="$tmp/home"
 mkdir -p "$HOME" "$OMNIGENT_DATA_DIR"
 export PATH="$tmp/bin:$PATH"
+export OMNIGENT_TEST_BIN="$server_bin"
+export OMNIGENT_TEST_TMP="$tmp"
 python3 - "$tmp/bin/mock-acp" "$tmp/config/config.yaml" <<'PY'
 import json
 import sys

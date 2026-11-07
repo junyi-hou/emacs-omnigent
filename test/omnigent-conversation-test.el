@@ -345,8 +345,121 @@
                       (gethash "second" omnigent-conversation--items)) "untouched"))
       (should (equal omnigent-conversation--order '("first" "second"))))))
 
+(ert-deftest omnigent-conversation-streams-idless-response ()
+  "Show ID-less chunks immediately, then adopt the final server item ID."
+  (with-temp-buffer
+    (setq omnigent-conversation--items (make-hash-table :test 'equal))
+    (omnigent-conversation--event "response.in_progress" '((response . ((id . "r1")))))
+    (omnigent-conversation--event "response.output_text.delta" '((delta . "Hello ")))
+    (should (= (length omnigent-conversation--order) 1))
+    (should (equal (omnigent-conversation--text
+                    (gethash (car omnigent-conversation--order) omnigent-conversation--items)) "Hello "))
+    (omnigent-conversation--event "response.output_text.delta" '((delta . "world")))
+    (omnigent-conversation--event
+     "response.output_item.done"
+     '((item . ((id . "message-1") (response_id . "r1") (type . "message")
+                (role . "assistant") (content . "Hello world")))))
+    (should (equal omnigent-conversation--order '("message-1")))
+    (should (= (hash-table-count omnigent-conversation--items) 1))
+    (should (equal (omnigent-conversation--text
+                    (gethash "message-1" omnigent-conversation--items)) "Hello world"))))
+
+(ert-deftest omnigent-conversation-idless-sections-reconcile-in-order ()
+  "Keep reasoning, text, tools, and repeated text in their streamed positions."
+  (with-temp-buffer
+    (setq omnigent-conversation--items (make-hash-table :test 'equal))
+    (omnigent-conversation--event "response.created" '((response . ((id . "r1")))))
+    (omnigent-conversation--event "response.reasoning_text.delta" '((delta . "Think")))
+    (omnigent-conversation--event "response.output_text.delta" '((delta . "Same text")))
+    ;; A repeated lifecycle event must not split an existing section.
+    (omnigent-conversation--event "response.in_progress" '((response . ((id . "r1")))))
+    (omnigent-conversation--event
+     "response.output_item.done"
+     '((item . ((id . "tool") (response_id . "r1") (type . "function_call") (call_id . "call")))))
+    (omnigent-conversation--event "response.output_text.delta" '((delta . "Same text")))
+    ;; The first text's final item arrives after tools and another text section.
+    (dolist (item '(((id . "text-1") (response_id . "r1") (type . "message") (content . "Same text"))
+                    ((id . "thought") (response_id . "r1") (type . "reasoning") (content . "Think"))
+                    ((id . "text-2") (response_id . "r1") (type . "message") (content . "Same text"))))
+      (omnigent-conversation--event "response.output_item.done" `((item . ,item))))
+    (should (equal omnigent-conversation--order '("thought" "text-1" "tool" "text-2")))
+    (should (= (hash-table-count omnigent-conversation--items) 4))
+    (omnigent-conversation--event "response.completed" '((response . ((id . "r1")))))
+    (omnigent-conversation--event "response.output_text.delta" '((delta . "late")))
+    (should (= (hash-table-count omnigent-conversation--items) 4))
+    (omnigent-conversation--event "response.in_progress" '((response . ((id . "r2")))))
+    (omnigent-conversation--event "response.output_text.delta" '((delta . "Next turn")))
+    (should (= (hash-table-count omnigent-conversation--items) 5))
+    (should (equal (omnigent-conversation--text
+                    (gethash (car (last omnigent-conversation--order)) omnigent-conversation--items))
+                   "Next turn"))))
+
+(ert-deftest omnigent-conversation-delayed-and-repeated-final-items ()
+  "Late final items must not close or consume a later text section."
+  (with-temp-buffer
+    (setq omnigent-conversation--items (make-hash-table :test 'equal))
+    (omnigent-conversation--event "response.in_progress" '((response . ((id . "r1")))))
+    (omnigent-conversation--event "response.output_text.delta" '((delta . "first")))
+    (omnigent-conversation--event "response.reasoning_text.delta" '((delta . "think")))
+    (omnigent-conversation--event "response.output_text.delta" '((delta . "second")))
+    (omnigent-conversation--event
+     "response.output_item.done"
+     '((item . ((id . "first") (response_id . "r1") (type . "message") (content . "first")))))
+    (omnigent-conversation--event "response.output_text.delta" '((delta . " part")))
+    (should (= (length omnigent-conversation--order) 3))
+    (should (equal (omnigent-conversation--text
+                    (gethash (car (last omnigent-conversation--order)) omnigent-conversation--items))
+                   "second part"))
+    ;; A repeated final must not consume a new section with identical text.
+    (omnigent-conversation--event "response.reasoning.started" nil)
+    (omnigent-conversation--event "response.output_text.delta" '((delta . "first")))
+    (omnigent-conversation--event
+     "response.output_item.done"
+     '((item . ((id . "first") (response_id . "r1") (type . "message") (content . "first")))))
+    (omnigent-conversation--event "response.output_text.delta" '((delta . " again")))
+    (should (= (length omnigent-conversation--order) 4))
+    (should (equal (omnigent-conversation--text
+                    (gethash (car (last omnigent-conversation--order)) omnigent-conversation--items))
+                   "first again"))))
+
+(ert-deftest omnigent-conversation-idless-deltas-use-added-items ()
+  "Use an identified section when the server announces it before its deltas."
+  (with-temp-buffer
+    (setq omnigent-conversation--items (make-hash-table :test 'equal))
+    (omnigent-conversation--event "response.in_progress" '((response . ((id . "r1")))))
+    (omnigent-conversation--event
+     "response.output_item.added"
+     (copy-tree '((item . ((id . "message") (type . "message") (content . ""))))))
+    (omnigent-conversation--event "response.output_text.delta" '((delta . "hello")))
+    (should (equal omnigent-conversation--order '("message")))
+    (should (equal (omnigent-conversation--text
+                    (gethash "message" omnigent-conversation--items)) "hello"))))
+
+(ert-deftest omnigent-conversation-snapshot-and-terminal-events-reset-sections ()
+  "A snapshot replaces provisional items; terminal events stop accumulation."
+  (dolist (terminal '("response.completed" "response.failed" "response.cancelled"
+                      "response.incomplete" "session.interrupted"))
+    (with-temp-buffer
+      (setq omnigent-conversation--items (make-hash-table :test 'equal)
+            omnigent-conversation--elicitations (make-hash-table :test 'equal)
+            omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal))
+      (insert "draft")
+      (omnigent-conversation--event "response.in_progress" '((response . ((id . "old")))))
+      (omnigent-conversation--event "response.output_text.delta" '((delta . "discard")))
+      (omnigent-conversation--snapshot 200 '((active_response_id . "new") (items . [])))
+      (omnigent-conversation--event "response.output_text.delta" '((delta . "restored turn")))
+      (should (= (length omnigent-conversation--order) 1))
+      (should (equal (omnigent-conversation--text
+                      (gethash (car omnigent-conversation--order) omnigent-conversation--items))
+                     "restored turn"))
+      (omnigent-conversation--event terminal '((error . "failed")))
+      (let ((count (hash-table-count omnigent-conversation--items)))
+        (omnigent-conversation--event "response.output_text.delta" '((delta . "late")))
+        (should (= count (hash-table-count omnigent-conversation--items))))
+      (should (equal (buffer-string) "draft")))))
+
 (ert-deftest omnigent-conversation-ignores-deltas-without-known-items ()
-  "Unknown or missing item IDs must not create transcript entries."
+  "Ignore unknown IDs and ID-less deltas without an active response."
   (with-temp-buffer
     (setq omnigent-conversation--items (make-hash-table :test 'equal))
     (dolist (event '("response.output_text.delta" "response.reasoning_text.delta"

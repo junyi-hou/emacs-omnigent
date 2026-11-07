@@ -55,5 +55,13 @@ _Avoid_: fragment, foldable region
 
 **Connection**:
 The single Omnigent server the frontend is attached to. Connecting resets
-all session state.
+all session state. Session creation uses this server regardless of who started it.
 _Avoid_: server profile, instance
+
+**Execution host**:
+A machine with an online Omnigent host service that launches agents and their tools.
+It can differ from both the server machine and the Emacs machine.
+
+**Workspace**:
+The agent's working directory on its execution host. Select it through the server's
+host filesystem interface, not through the Emacs machine's filesystem.

@@ -318,8 +318,180 @@
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (when observer (omnigent-transport-stop-session-stream observer)))))
 
-(provide 'omnigent-functional-tests)
-;;; omnigent-functional-tests.el ends here
+(defmacro omnigent-functional-wait (description &rest body)
+  "Wait up to 30 seconds for BODY, reporting DESCRIPTION on timeout."
+  (declare (indent 1))
+  `(with-timeout (30 (ert-fail ,description))
+     (while (not (progn ,@body)) (accept-process-output nil 0.1))))
+
+(defun omnigent-functional-items (buffer)
+  "Return BUFFER's conversation items in transcript order."
+  (with-current-buffer buffer
+    (mapcar (lambda (id) (gethash id omnigent-conversation--items))
+            omnigent-conversation--order)))
+
+(defun omnigent-functional-open (id)
+  "Open ID and wait for its initial snapshot."
+  (omnigent-conversation-open id)
+  (let ((buffer (current-buffer)))
+    (omnigent-functional-wait "Conversation did not load"
+      (not (buffer-local-value 'omnigent-conversation--loading buffer)))
+    buffer))
+
+(defun omnigent-functional-send (buffer text)
+  "Send TEXT through BUFFER's composer and wait for acknowledgement."
+  (with-current-buffer buffer
+    (goto-char (point-max))
+    (insert text)
+    (omnigent-conversation-send))
+  (omnigent-functional-wait "Message acknowledgement timed out"
+    (not (buffer-local-value 'omnigent-conversation--sending buffer)))
+  (with-current-buffer buffer
+    (should (equal (buffer-substring-no-properties
+                    omnigent-conversation--prompt-start (point-max)) ""))))
+
+(defun omnigent-functional-status-p (id status)
+  "Return non-nil when ID's server state equals STATUS."
+  (let ((response (omnigent-mock-test-request "GET" (omnigent-transport--session-path id))))
+    (should (= (car response) 200))
+    (equal (alist-get 'status (cdr response)) status)))
+
+(ert-deftest omnigent-mock-acp-multiple-hosts ()
+  "Run a mock agent session on each of two distinct hosts."
+  (let* ((process-environment (copy-sequence process-environment))
+         (tmp (getenv "OMNIGENT_TEST_TMP"))
+         (log (generate-new-buffer " *omnigent-second-host*"))
+         host-process buffers)
+    (unwind-protect
+        (progn
+          (setenv "OMNIGENT_HOST_ID" "12345678-1234-4234-8234-123456789abc")
+          (setenv "OMNIGENT_HOST_NAME" "integration-second-host")
+          (setenv "OMNIGENT_DATA_DIR" (concat tmp "/second-host-data"))
+          (setq host-process
+                (make-process :name "omnigent-second-host" :buffer log
+                              :command (list (getenv "OMNIGENT_TEST_BIN") "host"
+                                             "--server" omnigent-server-url
+                                             "--no-open" "--non-interactive")
+                              :noquery t))
+          (omnigent-functional-wait "Second host did not come online"
+            (progn
+              (unless (process-live-p host-process)
+                (ert-fail (with-current-buffer log (buffer-string))))
+              (let* ((response (omnigent-mock-test-request "GET" "/v1/hosts"))
+                     (hosts (append (alist-get 'hosts (cdr response)) nil)))
+                (>= (cl-count "online" hosts :key (lambda (host) (alist-get 'status host))
+                              :test #'equal)
+                    2))))
+          (let* ((hosts (cl-remove-if-not
+                         (lambda (host) (equal (alist-get 'status host) "online"))
+                         (append (alist-get 'hosts
+                                            (cdr (omnigent-mock-test-request "GET" "/v1/hosts"))) nil)))
+                 (agents (cdr (omnigent-mock-test-request "GET" "/v1/agents?limit=1000")))
+                 (agent (cl-find "mock-acp" (append (alist-get 'data agents) nil)
+                                 :key (lambda (item) (alist-get 'name item)) :test #'equal)))
+            (should agent)
+            (should (= (length hosts) 2))
+            (should-not (equal (alist-get 'host_id (car hosts))
+                               (alist-get 'host_id (cadr hosts))))
+            (dolist (host hosts)
+              (let* ((host-id (alist-get 'host_id host))
+                     (created (omnigent-mock-test-request
+                               "POST" "/v1/sessions"
+                               `(("agent_id" . ,(alist-get 'id agent))
+                                 ("host_id" . ,host-id)
+                                 ("workspace" . ,(getenv "HOME")))))
+                     (id (alist-get 'id (cdr created)))
+                     buffer)
+                (should (= (car created) 201))
+                (should (equal host-id (alist-get 'host_id
+                                                  (cdr (omnigent-mock-test-request
+                                                        "GET" (omnigent-transport--session-path id))))))
+                (save-window-excursion
+                  (setq buffer (omnigent-functional-open id))
+                  (push buffer buffers)
+                  (omnigent-functional-send buffer "test agent_message")
+                  (omnigent-functional-wait "Host agent did not answer"
+                    (cl-find-if (lambda (item)
+                                  (and (equal (alist-get 'role item) "assistant")
+                                       (equal (omnigent-conversation--text item)
+                                              "The capital of France is Paris.")))
+                                (omnigent-functional-items buffer))))))))
+      (dolist (buffer buffers) (when (buffer-live-p buffer) (kill-buffer buffer)))
+      (when (and host-process (process-live-p host-process))
+        (delete-process host-process))
+      (kill-buffer log))))
+
+(ert-deftest omnigent-host-workspace-completion ()
+  "Browse nested host directories through the real filesystem endpoint."
+  (let* ((root (make-temp-file "omnigent-workspace-" t))
+         (workspace (concat root "/project #1")))
+    (unwind-protect
+        (progn
+          (make-directory workspace)
+          (make-directory (concat workspace "/src"))
+          (write-region "Not a directory" nil (concat root "/notes.txt") nil 'silent)
+          (cl-letf (((symbol-function 'completing-read)
+                     (lambda (prompt table &rest _)
+                       (should (string-prefix-p "Workspace on " prompt))
+                       (should (equal (all-completions (concat root "/") table)
+                                      (list (concat root "/") (concat workspace "/"))))
+                       (should (equal (try-completion (concat workspace "/s") table)
+                                      (concat workspace "/src/")))
+                       workspace)))
+            (let* ((target (omnigent-sessions--read-workspace))
+                   (hosts (cdr (omnigent-mock-test-request "GET" "/v1/hosts"))))
+              (should (equal (car target) (alist-get 'host_id (aref (alist-get 'hosts hosts) 0))))
+              (should (equal (cdr target) workspace)))))
+      (delete-directory root t))))
+
+(ert-deftest omnigent-mock-acp-create-to-chat ()
+  "Create through the client prompts, open through its hook, and chat."
+  (let* ((hosts (cdr (omnigent-mock-test-request "GET" "/v1/hosts")))
+         (host-id (alist-get 'host_id (aref (alist-get 'hosts hosts) 0)))
+         (workspace (file-truename (getenv "HOME")))
+         (omnigent-executable "/not-installed-on-this-client")
+         buffer)
+    (unwind-protect
+        (save-window-excursion
+          ;; The fixture starts the server elsewhere; connecting needs no CLI.
+          (omnigent-connect omnigent-server-url)
+          (let ((omnigent-sessions-open-hook
+                 (append omnigent-sessions-open-hook
+                         (list (lambda (session)
+                                 (setq buffer (omnigent-sessions-buffer (alist-get 'id session))))))))
+            (cl-letf (((symbol-function 'completing-read)
+                       (lambda (prompt choices &rest _args)
+                         (if (string-prefix-p "Workspace on " prompt)
+                             workspace
+                           (car (cl-find-if (lambda (choice) (string-prefix-p "mock-acp [" (car choice)))
+                                            choices)))))
+                      ((symbol-function 'read-string)
+                       (lambda (&rest _args) "Functional create-to-chat")))
+              (omnigent-sessions-create)
+              (omnigent-functional-wait "Created session did not open" buffer)))
+          ;; REST response cleanup must not kill the newly opened conversation.
+          (should (buffer-live-p buffer))
+          (let* ((id (buffer-local-value 'omnigent-conversation-session-id buffer))
+                 (session (cdr (omnigent-mock-test-request
+                                "GET" (omnigent-transport--session-path id)))))
+            (should (equal (alist-get 'host_id session) host-id))
+            (should (equal (alist-get 'workspace session) workspace))
+            (omnigent-functional-wait "Created conversation did not load"
+              (not (buffer-local-value 'omnigent-conversation--loading buffer)))
+            (omnigent-functional-wait "Created session missing from list"
+              (cl-find id omnigent-sessions :key (lambda (row) (alist-get 'id row)) :test #'equal))
+            (should (equal (alist-get 'title (cl-find id omnigent-sessions
+                              :key (lambda (row) (alist-get 'id row)) :test #'equal))
+                           "Functional create-to-chat"))
+            (omnigent-functional-send buffer "test agent_message")
+            (omnigent-functional-wait "Created session did not answer"
+              (cl-find-if (lambda (item)
+                            (and (equal (alist-get 'role item) "assistant")
+                                 (equal (omnigent-conversation--text item)
+                                        "The capital of France is Paris.")))
+                          (omnigent-functional-items buffer)))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
 (ert-deftest omnigent-mock-acp-decline-and-cancel-permission ()
   "Decline and cancel real pending permission requests without form answers."
   (dolist (action '(decline cancel))
