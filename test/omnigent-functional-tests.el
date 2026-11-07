@@ -213,5 +213,60 @@
                      (append (alist-get 'items (cdr response)) nil)))))
       (when stream (omnigent-transport-stop-session-stream stream)))))
 
+(ert-deftest omnigent-mock-acp-elicitations-survive-reopen-and-resolve ()
+  "Restore a pending request without its draft and resolve it through the API."
+  (let ((id (omnigent-integration-create-session t)) buffer observer events reply)
+    (unwind-protect
+        (save-window-excursion
+          (omnigent-conversation-open id)
+          (setq buffer (current-buffer))
+          (setq observer (omnigent-transport-start-session-stream
+                          id (lambda (name data) (push (cons name data) events))
+                          (lambda (_status _body)) (lambda (_error))))
+          (with-timeout (15 (ert-fail "Conversation snapshot timed out"))
+            (while (with-current-buffer buffer omnigent-conversation--loading)
+              (accept-process-output nil 0.1)))
+          (let ((response (omnigent-mock-test-request
+                           "POST" (omnigent-transport--session-path id "/events")
+                           '(("type" . "message")
+                             ("data" . (("role" . "user")
+                                        ("content" . [(("type" . "input_text")
+                                                       ("text" . "test request_permission"))])))))))
+            (should (= (car response) 202)))
+          (with-timeout (30 (ert-fail (format "No elicitation: %S" events)))
+            (while (not (with-current-buffer buffer (omnigent-conversation-elicitations)))
+              (accept-process-output nil 0.1)))
+          (let* ((request (with-current-buffer buffer (car (omnigent-conversation-elicitations))))
+                 (request-id (alist-get 'elicitation_id request))
+                 (draft (make-hash-table :test 'equal)))
+            (puthash "unsent" "draft" draft)
+            (with-current-buffer buffer
+              (omnigent-conversation-elicitation-set-draft request-id draft))
+            (kill-buffer buffer)
+            (omnigent-conversation-open id)
+            (setq buffer (current-buffer))
+            (with-timeout (15 (ert-fail "Reopened conversation did not restore request"))
+              (while (or (with-current-buffer buffer omnigent-conversation--loading)
+                         (not (with-current-buffer buffer (omnigent-conversation-elicitations))))
+                (accept-process-output nil 0.1)))
+            (with-current-buffer buffer
+              (should (equal request-id (alist-get 'elicitation_id (car (omnigent-conversation-elicitations)))))
+              (should-not (gethash "unsent" (omnigent-conversation-elicitation-draft request-id)))
+              (let* ((request (car (omnigent-conversation-elicitations)))
+                     (schema (alist-get 'requestedSchema (alist-get 'params request)))
+                     (answer (alist-get 'answer (alist-get 'properties schema)))
+                     (draft (omnigent-conversation-elicitation-draft request-id)))
+                (puthash "answer" (aref (alist-get 'enum answer) 0) draft)
+                (omnigent-conversation-elicitation-set-draft request-id draft))
+              (omnigent-conversation-elicitation-submit
+               request-id 'accept (lambda (status body) (setq reply (cons status body)))))
+            (with-timeout (30 (ert-fail (format "Elicitation did not finish: reply=%S events=%S" reply events)))
+              (while (not (and reply (assoc "response.completed" events)))
+                (accept-process-output nil 0.1)))
+            (should (= (car reply) 202))
+            (should-not (with-current-buffer buffer (omnigent-conversation-elicitations)))))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (when observer (omnigent-transport-stop-session-stream observer)))))
+
 (provide 'omnigent-functional-tests)
 ;;; omnigent-functional-tests.el ends here

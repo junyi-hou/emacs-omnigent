@@ -41,6 +41,181 @@
         (should (eq stopped 'stream))
         (should-not omnigent-sessions--buffers)))))
 
+(ert-deftest omnigent-conversation-elicitations-reconcile-snapshot ()
+  (with-temp-buffer
+    (setq omnigent-conversation--items (make-hash-table :test 'equal)
+          omnigent-conversation--elicitations (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-submitting (make-hash-table :test 'equal)
+          omnigent-conversation--loading t)
+    (omnigent-conversation--event "response.elicitation_resolved"
+                                  '((elicitation_id . "old")))
+    (omnigent-conversation--event "response.elicitation_request"
+                                  '((elicitation_id . "new")))
+    (omnigent-conversation--snapshot
+     200 '((pending_elicitations . [((elicitation_id . "old"))])))
+    (should-not (gethash "old" omnigent-conversation--elicitations))
+    (should (gethash "new" omnigent-conversation--elicitations))))
+
+(ert-deftest omnigent-conversation-elicitation-drafts-and-change-hook ()
+  (with-temp-buffer
+    (setq omnigent-conversation--items (make-hash-table :test 'equal)
+          omnigent-conversation--elicitations (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal))
+    (let ((changes 0))
+      (add-hook 'omnigent-conversation-elicitation-change-hook
+                (lambda () (cl-incf changes)) nil t)
+      (omnigent-conversation--event "response.elicitation_request" '((elicitation_id . "keep")))
+      (should (= changes 1))
+      (let ((draft (omnigent-conversation-elicitation-draft "keep")))
+        (puthash "answer" "draft" draft)
+        (omnigent-conversation-elicitation-set-draft "keep" draft))
+      (should (= changes 2))
+      (omnigent-conversation--event "response.elicitation_request" '((elicitation_id . "stale")))
+      (setq omnigent-conversation--loading t)
+      (omnigent-conversation--snapshot
+       200 '((pending_elicitations . [((elicitation_id . "keep"))])))
+      (should (= changes 4))
+      (should (equal (gethash "answer" (omnigent-conversation-elicitation-draft "keep")) "draft"))
+      (should-not (gethash "stale" omnigent-conversation--elicitation-drafts))
+      (omnigent-conversation--event "response.elicitation_resolved" '((elicitation_id . "keep")))
+      (should (= changes 5))
+      (should-not (gethash "keep" omnigent-conversation--elicitation-drafts)))))
+
+(ert-deftest omnigent-conversation-elicitation-submit-after-failure ()
+  (with-temp-buffer
+    (setq omnigent-conversation-session-id "session"
+          omnigent-conversation--elicitations (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-submitting (make-hash-table :test 'equal))
+    (omnigent-conversation--elicitation-put
+     '((elicitation_id . "id") (params . ((requestedSchema .
+       ((type . "object") (required . ["name"])
+        (properties . ((name . ((type . "string") (minLength . 2)))))))))))
+    (should (omnigent-conversation-elicitation-validate "id"))
+    (let ((draft (omnigent-conversation-elicitation-draft "id")) cb payload (changes 0))
+      (add-hook 'omnigent-conversation-elicitation-change-hook
+                (lambda () (cl-incf changes)) nil t)
+      (puthash "name" "ok" draft)
+      (omnigent-conversation-elicitation-set-draft "id" draft)
+      (cl-letf (((symbol-function 'omnigent-transport-request)
+                 (lambda (_method _path callback data) (setq cb callback payload data))))
+        (omnigent-conversation-elicitation-submit "id" 'accept nil)
+        (should (= changes 2))
+        (should (omnigent-conversation-elicitation-submitting-p "id"))
+        (should (equal (gethash "name" (alist-get "content" payload nil nil #'equal)) "ok"))
+        (funcall cb 500 nil)
+        (should (= changes 3))
+        (should (gethash "id" omnigent-conversation--elicitations))
+        (should (equal (gethash "name" (omnigent-conversation-elicitation-draft "id")) "ok"))
+        (omnigent-conversation-elicitation-submit "id" 'accept nil)
+        (funcall cb 202 nil)
+        (should (= changes 5))
+        (should-not (gethash "id" omnigent-conversation--elicitations))
+        (should-not (gethash "id" omnigent-conversation--elicitation-drafts))
+        ;; A resolution event after the response must also be harmless.
+        (omnigent-conversation--event "response.elicitation_resolved" '((elicitation_id . "id")))))))
+
+(ert-deftest omnigent-conversation-elicitation-submit-guards ()
+  (with-temp-buffer
+    (setq omnigent-conversation-session-id "session"
+          omnigent-conversation--elicitations (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-submitting (make-hash-table :test 'equal))
+    (omnigent-conversation--elicitation-put
+     '((elicitation_id . "id") (params . ((requestedSchema .
+       ((type . "object") (required . ["name"])
+        (properties . ((name . ((type . "string")))))))))))
+    (let (callback (requests 0))
+      (cl-letf (((symbol-function 'omnigent-transport-request)
+                 (lambda (_method _path cb _data) (cl-incf requests) (setq callback cb))))
+        (should-error (omnigent-conversation-elicitation-submit "id" 'accept nil) :type 'user-error)
+        (should (= requests 0))
+        ;; Decline does not require a valid draft.
+        (omnigent-conversation-elicitation-submit "id" 'decline nil)
+        (should-error (omnigent-conversation-elicitation-submit "id" 'cancel nil) :type 'user-error)
+        (should (= requests 1))
+        ;; Resolution may arrive before the HTTP response.
+        (omnigent-conversation--event "response.elicitation_resolved" '((elicitation_id . "id")))
+        (funcall callback 202 nil)
+        (should-not (omnigent-conversation-elicitation-submitting-p "id"))
+        (should-not (gethash "id" omnigent-conversation--elicitations))))
+    (omnigent-conversation--elicitation-put '((elicitation_id . "id")))
+    (cl-letf (((symbol-function 'omnigent-transport-request)
+               (lambda (&rest _) (error "Transport failed"))))
+      (should-error (omnigent-conversation-elicitation-submit "id" 'cancel nil))
+      (should-not (omnigent-conversation-elicitation-submitting-p "id"))
+      (should (gethash "id" omnigent-conversation--elicitations)))
+    (omnigent-conversation--elicitation-put
+     '((elicitation_id . "external") (params . ((url . "https://example.test/")))))
+    (should-error (omnigent-conversation-elicitation-submit "external" 'decline nil) :type 'user-error)))
+
+(ert-deftest omnigent-conversation-elicitation-submit-wire-format ()
+  (with-temp-buffer
+    (setq omnigent-conversation-session-id "session /"
+          omnigent-conversation--elicitations (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-submitting (make-hash-table :test 'equal))
+    (omnigent-conversation--elicitation-put
+     '((elicitation_id . "id / malformed") (params . ((requestedSchema .
+       ((type . "object") (properties . ((answer . ((type . ["boolean" "null"])))))))))))
+    (let ((draft (omnigent-conversation-elicitation-draft "id / malformed")))
+      (puthash "answer" :json-false draft)
+      (omnigent-conversation-elicitation-set-draft "id / malformed" draft))
+    (cl-letf (((symbol-function 'url-retrieve)
+               (lambda (url _callback _args &rest _)
+                 (should (string-suffix-p "/v1/sessions/session%20%2F/elicitations/id%20%2F%20malformed/resolve" url))
+                 (should (equal url-request-method "POST"))
+                 (let* ((body (json-parse-string url-request-data :object-type 'hash-table
+                                                 :null-object :null :false-object :json-false))
+                        (content (gethash "content" body)))
+                   (should (equal (gethash "action" body) "accept"))
+                   (should (eq (gethash "answer" content) :json-false))))))
+      (omnigent-conversation-elicitation-submit "id / malformed" 'accept nil))))
+
+(ert-deftest omnigent-conversation-elicitation-validation-and-json-values ()
+  "Validate defaults, false, null, constraints, and unsupported keywords."
+  (with-temp-buffer
+    (setq omnigent-conversation-session-id "session"
+          omnigent-conversation--elicitations (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-submitting (make-hash-table :test 'equal))
+    (omnigent-conversation--elicitation-put
+     '((elicitation_id . "id")
+       (params . ((requestedSchema .
+        ((type . "object") (required . ["enabled" "choice"])
+         (properties . ((enabled . ((type . "boolean") (default . :json-false)))
+                        (choice . ((type . ["string" "null"]) (enum . ["yes" nil])))
+                        (count . ((type . "integer") (minimum . 1) (maximum . 3)))
+                        (name . ((type . "string") (minLength . 2) (maxLength . 4)))))))))))
+    (let ((draft (omnigent-conversation-elicitation-draft "id")) payload)
+      (should (eq (gethash "enabled" draft) :json-false))
+      (should (assoc "choice" (omnigent-conversation-elicitation-validate "id")))
+      (puthash "choice" :null draft)
+      (puthash "count" 4 draft)
+      (puthash "name" "x" draft)
+      (omnigent-conversation-elicitation-set-draft "id" draft)
+      (should (assoc "count" (omnigent-conversation-elicitation-validate "id")))
+      (should (assoc "name" (omnigent-conversation-elicitation-validate "id")))
+      (puthash "count" 2 draft)
+      (puthash "name" "ok" draft)
+      (omnigent-conversation-elicitation-set-draft "id" draft)
+      (should-not (omnigent-conversation-elicitation-validate "id"))
+      (cl-letf (((symbol-function 'omnigent-transport-request)
+                 (lambda (_method _path _callback data) (setq payload data))))
+        (omnigent-conversation-elicitation-submit "id" 'accept nil))
+      (let* ((encoded (json-encode payload))
+             (content (gethash "content" (json-parse-string encoded :object-type 'hash-table
+                                                             :null-object :null :false-object :json-false))))
+        (should (eq (gethash "enabled" content) :json-false))
+        (should (eq (gethash "choice" content) :null)))
+      (omnigent-conversation--elicitation-put
+       '((elicitation_id . "other") (params . ((requestedSchema .
+          ((type . "object") (properties . ((name . ((type . "string") (pattern . "x")))))))))))
+      (should (assoc "name" (omnigent-conversation-elicitation-validate "other")))
+      (should-error (omnigent-conversation-elicitation-submit "other" 'accept nil)
+                    :type 'user-error))))
+
 (ert-deftest omnigent-conversation-send-preserves-edits-while-pending ()
   "Only clear the submitted prefix; reject concurrent and empty sends."
   (dolist (case '(("draft appended" 202 " appended")
@@ -98,6 +273,8 @@
   "Retain existing items on failure and replay queued events in order."
   (with-temp-buffer
     (setq omnigent-conversation--items (make-hash-table :test 'equal)
+          omnigent-conversation--elicitations (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
           omnigent-conversation--loading t)
     (omnigent-conversation--put-item '((id . "existing") (content . "keep")))
     (omnigent-conversation--event
