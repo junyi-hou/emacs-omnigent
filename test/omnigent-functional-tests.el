@@ -92,6 +92,56 @@
       (should (cl-find id omnigent-sessions
                        :key (lambda (row) (alist-get 'id row)) :test #'equal)))))
 
+(ert-deftest omnigent-mock-acp-reopen-completed-conversation ()
+  "Restore a completed exchange from the snapshot after reopening."
+  (let ((id (omnigent-integration-create-session t)) buffer observer events failure snapshot)
+    (unwind-protect
+        (save-window-excursion
+          (omnigent-conversation-open id)
+          (setq buffer (current-buffer))
+          (setq observer (omnigent-transport-start-session-stream
+                          id (lambda (name data) (push (cons name data) events))
+                          (lambda (status _body) (setq snapshot status))
+                          (lambda (err) (setq failure err))))
+          (with-timeout (15 (ert-fail "Conversation snapshot timed out"))
+            (while (or (not snapshot)
+                       (with-current-buffer buffer omnigent-conversation--loading))
+              (accept-process-output nil 0.1)))
+          (should (= snapshot 200))
+          (with-current-buffer buffer
+            (goto-char (point-max))
+            (insert "test agent_message")
+            (omnigent-conversation-send))
+          (with-timeout (30 (ert-fail (format "Turn did not finish: %S" events)))
+            (while (not (and (assoc "response.completed" events)
+                             (cl-some (lambda (event)
+                                        (and (equal (car event) "session.status")
+                                             (equal (alist-get 'status (cdr event)) "idle")))
+                                      events)))
+              (accept-process-output nil 0.1)))
+          (should-not failure)
+          (kill-buffer buffer)
+          (omnigent-conversation-open id)
+          (setq buffer (current-buffer))
+          (with-timeout (15 (ert-fail "Reopened conversation snapshot timed out"))
+            (while (with-current-buffer buffer omnigent-conversation--loading)
+              (accept-process-output nil 0.1)))
+          (with-current-buffer buffer
+            (let ((items (mapcar (lambda (item-id)
+                                   (gethash item-id omnigent-conversation--items))
+                                 omnigent-conversation--order)))
+              (should (cl-some (lambda (item)
+                                 (and (equal (alist-get 'role item) "user")
+                                      (equal (omnigent-conversation--text item) "test agent_message")))
+                               items))
+              (should (cl-some (lambda (item)
+                                 (and (equal (alist-get 'role item) "assistant")
+                                      (string-match-p "The capital of France is Paris\\."
+                                                      (omnigent-conversation--text item))))
+                               items)))))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (when observer (omnigent-transport-stop-session-stream observer)))))
+
 (ert-deftest omnigent-mock-acp-tool-call ()
   "Receive a tool call over SSE and check its committed result."
   (let ((id (omnigent-integration-create-session t))
@@ -267,6 +317,165 @@
             (should-not (with-current-buffer buffer (omnigent-conversation-elicitations)))))
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (when observer (omnigent-transport-stop-session-stream observer)))))
+
+(provide 'omnigent-functional-tests)
+;;; omnigent-functional-tests.el ends here
+(ert-deftest omnigent-mock-acp-decline-and-cancel-permission ()
+  "Decline and cancel real pending permission requests without form answers."
+  (dolist (action '(decline cancel))
+    (let ((id (omnigent-integration-create-session t)) buffer reply)
+      (unwind-protect
+          (save-window-excursion
+            (setq buffer (omnigent-functional-open id))
+            (omnigent-functional-send buffer "test request_permission")
+            (omnigent-functional-wait "Permission request did not arrive"
+              (with-current-buffer buffer (omnigent-conversation-elicitations)))
+            (with-current-buffer buffer
+              (let ((request-id (alist-get 'elicitation_id (car (omnigent-conversation-elicitations)))))
+                (omnigent-conversation-elicitation-submit
+                 request-id action (lambda (status body) (setq reply (cons status body))))))
+            (omnigent-functional-wait "Permission response was not acknowledged" reply)
+            (should (= (car reply) 202))
+            (omnigent-functional-wait "Permission turn did not become idle"
+              (omnigent-functional-status-p id "idle"))
+            (with-current-buffer buffer
+              (should-not (omnigent-conversation-elicitations))
+              (should (= (hash-table-count omnigent-conversation--elicitation-submitting) 0)))
+            (kill-buffer buffer)
+            (setq buffer (omnigent-functional-open id))
+            (should-not (with-current-buffer buffer (omnigent-conversation-elicitations))))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest omnigent-mock-acp-live-conversation-response ()
+  "Apply partial streamed text to an open buffer without changing its draft."
+  (let ((id (omnigent-integration-create-session t)) buffer)
+    (unwind-protect
+        (save-window-excursion
+          (setq buffer (omnigent-functional-open id))
+          (omnigent-functional-send buffer "test long_running")
+          (with-current-buffer buffer (insert "unsent next prompt"))
+          (omnigent-functional-wait "Assistant text did not reach conversation state"
+            (cl-find-if (lambda (item)
+                          (and (equal (alist-get 'role item) "assistant")
+                               (not (string-empty-p (omnigent-conversation--text item)))))
+                        (omnigent-functional-items buffer)))
+          ;; The first visible text must be one chunk, not just the final full item.
+          (let ((assistant (cl-find "assistant" (omnigent-functional-items buffer)
+                                    :key (lambda (item) (alist-get 'role item)) :test #'equal)))
+            (should (equal (omnigent-conversation--text assistant) "The capital of France is Paris.")))
+          (should (omnigent-functional-status-p id "running"))
+          (omnigent-functional-wait "Streamed response did not finish"
+            (and (cl-find-if
+                  (lambda (item)
+                    (and (equal (alist-get 'role item) "assistant")
+                         (equal (omnigent-conversation--text item)
+                                (apply #'concat (make-list 3 "The capital of France is Paris.")))))
+                  (omnigent-functional-items buffer))
+                 (omnigent-functional-status-p id "idle")))
+          (let ((items (omnigent-functional-items buffer)))
+            (should (= 1 (cl-count "assistant" items
+                                  :key (lambda (item) (alist-get 'role item)) :test #'equal)))
+            (let ((thoughts (cl-remove-if-not
+                             (lambda (item) (equal (alist-get 'type item) "reasoning")) items)))
+              (should (= (length thoughts) 1))
+              (should (equal (omnigent-conversation--text (car thoughts))
+                             (apply #'concat (make-list 3 "Thinking about best approach..."))))))
+          (with-current-buffer buffer
+            (should (equal (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max))
+                           "unsent next prompt"))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest omnigent-mock-acp-send-while-busy ()
+  "Queue a second composer message during a turn and restore both exchanges."
+  (let ((id (omnigent-integration-create-session t)) buffer)
+    (unwind-protect
+        (save-window-excursion
+          (setq buffer (omnigent-functional-open id))
+          (omnigent-functional-send buffer "test long_running")
+          (omnigent-functional-wait "First turn did not start"
+            (omnigent-functional-status-p id "running"))
+          (omnigent-functional-send buffer "test agent_message")
+          (omnigent-functional-wait "Queued turn did not answer"
+            (= 2 (cl-count "assistant" (omnigent-functional-items buffer)
+                           :key (lambda (item) (alist-get 'role item)) :test #'equal)))
+          (omnigent-functional-wait "Queued turns did not finish"
+            (omnigent-functional-status-p id "idle"))
+          (kill-buffer buffer)
+          (setq buffer (omnigent-functional-open id))
+          (let ((items (omnigent-functional-items buffer)))
+            (should (equal (mapcar #'omnigent-conversation--text
+                                  (cl-remove-if-not (lambda (item) (equal (alist-get 'role item) "user")) items))
+                           '("test long_running" "test agent_message")))
+            (should (= 2 (cl-count "assistant" items :key (lambda (item) (alist-get 'role item)) :test #'equal)))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest omnigent-mock-acp-two-conversations ()
+  "Keep two sessions isolated, reuse buffers, and interrupt only one session."
+  (let ((id-a (omnigent-integration-create-session t))
+        (id-b (omnigent-integration-create-session t)) a b)
+    (unwind-protect
+        (save-window-excursion
+          (setq a (omnigent-functional-open id-a)
+                b (omnigent-functional-open id-b))
+          (let ((stream (buffer-local-value 'omnigent-conversation--stream a)))
+            (should (eq a (omnigent-functional-open id-a)))
+            (should (eq stream (buffer-local-value 'omnigent-conversation--stream a))))
+          (omnigent-functional-send a "test long_running")
+          (omnigent-functional-wait "Session A did not start"
+            (omnigent-functional-status-p id-a "running"))
+          (omnigent-functional-send b "test request_permission")
+          (omnigent-functional-wait "Session B did not request permission"
+            (with-current-buffer b (omnigent-conversation-elicitations)))
+          (with-current-buffer b (insert "draft for B"))
+          (with-current-buffer a
+            (should (equal omnigent-conversation-session-id id-a))
+            (should-not (omnigent-conversation-elicitations))
+            (insert "draft for A")
+            (omnigent-conversation-interrupt))
+          (omnigent-functional-wait "Session A did not stop"
+            (omnigent-functional-status-p id-a "idle"))
+          (with-current-buffer b
+            (should (equal omnigent-conversation-session-id id-b))
+            (should (omnigent-conversation-elicitations))
+            (omnigent-conversation-elicitation-submit
+             (alist-get 'elicitation_id (car (omnigent-conversation-elicitations))) 'decline nil))
+          (omnigent-functional-wait "Session B did not finish"
+            (omnigent-functional-status-p id-b "idle"))
+          (should-not (cl-find "assistant" (omnigent-functional-items a)
+                               :key (lambda (item) (alist-get 'role item)) :test #'equal))
+          (dolist (entry `((,a . "draft for A") (,b . "draft for B")))
+            (with-current-buffer (car entry)
+              (should (equal (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max))
+                             (cdr entry))))))
+      (when (buffer-live-p a) (kill-buffer a))
+      (when (buffer-live-p b) (kill-buffer b)))))
+
+(ert-deftest omnigent-mock-acp-close-running-conversation ()
+  "Closing stops the client stream, but the agent finishes and history survives."
+  (let ((id (omnigent-integration-create-session t)) buffer stream)
+    (unwind-protect
+        (save-window-excursion
+          (setq buffer (omnigent-functional-open id)
+                stream (buffer-local-value 'omnigent-conversation--stream buffer))
+          (omnigent-functional-send buffer "test long_running")
+          (omnigent-functional-wait "Turn did not start before closing"
+            (omnigent-functional-status-p id "running"))
+          (with-current-buffer buffer (insert "discard this draft"))
+          (kill-buffer buffer)
+          (should (omnigent-stream-stopped stream))
+          (should-not (process-live-p (omnigent-stream-process stream)))
+          (should-not (assoc id omnigent-sessions--buffers))
+          (omnigent-functional-wait "Agent did not finish while buffer was closed"
+            (omnigent-functional-status-p id "idle"))
+          (setq buffer (omnigent-functional-open id))
+          (let ((items (omnigent-functional-items buffer)))
+            (should (= 1 (cl-count "user" items :key (lambda (item) (alist-get 'role item)) :test #'equal)))
+            (should (= 1 (cl-count "assistant" items :key (lambda (item) (alist-get 'role item)) :test #'equal)))
+            (should (cl-find-if (lambda (item)
+                                 (equal (omnigent-conversation--text item)
+                                        (apply #'concat (make-list 3 "The capital of France is Paris.")))) items)))
+          (with-current-buffer buffer (should (equal (buffer-string) ""))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (provide 'omnigent-functional-tests)
 ;;; omnigent-functional-tests.el ends here
