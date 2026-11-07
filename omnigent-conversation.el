@@ -9,10 +9,11 @@
 (require 'cl-lib)
 (require 'omnigent-sessions)
 
-;; Major mode initialization clears buffer-local variables.  Bind this
-;; temporarily so the mode can set `omnigent-conversation-session-id'.
-(defvar omnigent-conversation--session-id nil)
-(defvar-local omnigent-conversation-session-id nil)
+(defvar omnigent-conversation--session-id nil
+  "Major mode initialization clears buffer-local variables.
+Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
+(defvar-local omnigent-conversation-session-id nil
+  "Session ID associated with the current conversation buffer.")
 (defvar-local omnigent-conversation--stream nil)
 (defvar-local omnigent-conversation--items nil)
 (defvar-local omnigent-conversation--order nil)
@@ -24,6 +25,7 @@
 
 
 (defun omnigent-conversation--text (item)
+  "Return the text in ITEM, combining content parts when necessary."
   (let ((content (alist-get 'content item)))
     (cond ((stringp content) content)
           ((vectorp content)
@@ -32,6 +34,7 @@
           (t (or (alist-get 'text item) "")))))
 
 (defun omnigent-conversation--put-item (item)
+  "Store ITEM by ID and keep insertion order within the history limit."
   ;; Snapshot items wrap their message fields in `data'.  Stream items may
   ;; already have those fields at the top level.
   (let ((id (alist-get 'id item))
@@ -53,6 +56,7 @@
       (puthash id item omnigent-conversation--items))))
 
 (defun omnigent-conversation--event (name data)
+  "Apply stream event NAME with DATA, or queue it while loading."
   (if omnigent-conversation--loading
       (push (cons name data) omnigent-conversation--pending-events)
     (cond
@@ -78,6 +82,8 @@
          (text . ,(format "%s" (or (alist-get 'error data) data)))))))))
 
 (defun omnigent-conversation--snapshot (status body)
+  "Apply snapshot BODY when STATUS indicates success.
+Replay queued stream events and notify the elicitation change hook."
   (if (not (omnigent-sessions--success-p status))
       (progn (setq omnigent-conversation--loading nil)
              (message "Omnigent snapshot failed: %s" status)
@@ -101,6 +107,7 @@
   (run-hooks 'omnigent-conversation-elicitation-change-hook))
 
 (defun omnigent-conversation--close ()
+  "Stop the current buffer's session stream."
   (when omnigent-conversation--stream
     (omnigent-transport-stop-session-stream omnigent-conversation--stream)))
 
@@ -109,10 +116,12 @@
     (set-keymap-parent map text-mode-map)
     (define-key map (kbd "C-c C-c") #'omnigent-conversation-send)
     (define-key map (kbd "C-c C-k") #'omnigent-conversation-interrupt)
-    map))
+    map)
+  "Keymap for `omnigent-conversation-mode'.")
 
 (define-derived-mode omnigent-conversation-mode text-mode "Omnigent"
-  "Conversation transcript and composer."
+  "Major mode for a conversation transcript and composer.
+Use `omnigent-conversation-open' to create a conversation buffer."
   (unless omnigent-conversation--session-id
     (error "A session ID is required"))
   (setq omnigent-conversation-session-id omnigent-conversation--session-id
@@ -226,6 +235,7 @@ unanswered.  The frontend must use the setter to change this table."
   (gethash id omnigent-conversation--elicitation-submitting))
 
 (defun omnigent-conversation--elicitation-put (request)
+  "Store elicitation REQUEST and initialize its draft from schema defaults."
   (when-let* ((id (alist-get 'elicitation_id request)))
     (puthash id request omnigent-conversation--elicitations)
     (unless (gethash id omnigent-conversation--elicitation-drafts)
@@ -239,13 +249,15 @@ unanswered.  The frontend must use the setter to change this table."
         (puthash id draft omnigent-conversation--elicitation-drafts)))))
 
 (defun omnigent-conversation--elicitation-remove (id)
+  "Remove elicitation ID and its draft."
   (remhash id omnigent-conversation--elicitations)
   (remhash id omnigent-conversation--elicitation-drafts))
 
 (defun omnigent-conversation-elicitation-validate (id)
   "Return validation errors for ID's draft as (FIELD . MESSAGE) pairs.
-A nil FIELD identifies an unsupported or invalid schema.  Only primitive
-object properties and the constraints listed below are supported."
+A nil FIELD identifies an unsupported or invalid schema.  Supported field
+types are string, integer, number, boolean and null.  Supported constraints
+are required, enum, minimum, maximum, minLength and maxLength."
   (let* ((request (or (gethash id omnigent-conversation--elicitations)
                       (error "Unknown elicitation: %s" id)))
          (schema (alist-get 'requestedSchema (alist-get 'params request)))

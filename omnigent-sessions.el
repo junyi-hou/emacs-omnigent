@@ -9,27 +9,36 @@
 (require 'cl-lib)
 (require 'omnigent-transport)
 
-(defvar omnigent-sessions nil "Root sessions from the server.")
-(defvar omnigent-sessions-truncated nil "Non-nil when the list has more rows.")
-(defvar omnigent-sessions-updates nil "Session updates transport handle.")
-(defvar omnigent-sessions-change-hook nil "Hook run after session list changes.")
-(defvar omnigent-sessions-frame-hook nil "Hook called with each update frame.")
-(defvar omnigent-sessions-error-hook '(message) "Hook called with an error description.")
+(defvar omnigent-sessions nil
+  "List of root session alists from the server.")
+(defvar omnigent-sessions-truncated nil
+  "Non-nil when the server reports more sessions than were fetched.")
+(defvar omnigent-sessions-updates nil
+  "Transport handle for session updates, or nil when not started.")
+(defvar omnigent-sessions-change-hook nil
+  "Hook run without arguments after session list changes.")
+(defvar omnigent-sessions-frame-hook nil
+  "Hook called with each parsed session update frame.")
+(defvar omnigent-sessions-error-hook '(message)
+  "Hook called with an error description string.")
 (defvar omnigent-sessions-open-hook nil
-  "Hook called with a newly created session so the frontend can open it.")
+  "Hook called with a newly created session alist so a frontend can open it.")
 (defvar omnigent-sessions--refresh-number 0)
 (defvar omnigent-sessions--buffers nil)
 (defvar omnigent-sessions--revision 0)
 
 (defun omnigent-sessions--success-p (status)
+  "Return non-nil when STATUS is a successful HTTP status code."
   (and (integerp status) (<= 200 status) (< status 300)))
 
 (defun omnigent-sessions--error (action status)
+  "Report the failure of ACTION with STATUS to the error hook."
   (run-hook-with-args 'omnigent-sessions-error-hook
                       (format "%s: %s" action status)))
 
 (defun omnigent-sessions-refresh ()
-  "Refresh the root session list."
+  "Request the root session list asynchronously.
+Run `omnigent-sessions-change-hook' on success, or the error hook on failure."
   (interactive)
   (let ((number (cl-incf omnigent-sessions--refresh-number))
         (revision omnigent-sessions--revision))
@@ -49,6 +58,8 @@
            (omnigent-sessions--error "List sessions" status))))))))
 
 (defun omnigent-sessions--frame (frame)
+  "Apply session update FRAME and notify the session hooks.
+Refresh the list if FRAME contains a session that is not in the list."
   (let ((type (alist-get 'type frame)) unknown)
     (cond
      ((member type '("snapshot" "changed"))
@@ -73,6 +84,7 @@
     (when unknown (omnigent-sessions-refresh))))
 
 (defun omnigent-sessions--watch ()
+  "Remove dead buffers and update the watched session IDs."
   (setq omnigent-sessions--buffers
         (cl-remove-if-not (lambda (entry) (buffer-live-p (cdr entry)))
                           omnigent-sessions--buffers))
@@ -86,7 +98,9 @@
     (and (buffer-live-p buffer) buffer)))
 
 (defun omnigent-sessions-register-buffer (id buffer)
-  "Register conversation BUFFER for session ID."
+  "Register conversation BUFFER for session ID.
+Signal a user error if ID already has a different live buffer or the
+500-session watch limit is reached.  Remove the registration when BUFFER dies."
   (let ((existing (assoc id omnigent-sessions--buffers)))
     (when (and existing (not (buffer-live-p (cdr existing))))
       (setq omnigent-sessions--buffers (delq existing omnigent-sessions--buffers)
@@ -103,6 +117,7 @@
       (omnigent-sessions--watch))))
 
 (defun omnigent-sessions--buffer-killed ()
+  "Remove the current buffer's registration and update the watch set."
   (setq omnigent-sessions--buffers
         (cl-remove (current-buffer) omnigent-sessions--buffers :key #'cdr))
   (omnigent-sessions--watch))
@@ -157,7 +172,9 @@
               data))))))))
 
 (defun omnigent-sessions-action (id type callback)
-  "Send event TYPE for session ID and invoke CALLBACK with the result."
+  "Send event TYPE for session ID and invoke CALLBACK with the result.
+CALLBACK receives the HTTP status and response body.  Refresh the session list
+after the request completes."
   (omnigent-transport-post-session-event
    id `(("type" . ,type))
    (lambda (status body)
@@ -166,7 +183,8 @@
 
 (defun omnigent-sessions-delete (id callback)
   "Delete session ID and invoke CALLBACK with the result.
-The caller must obtain confirmation first."
+CALLBACK receives the HTTP status and response body.  Refresh the session list
+after the request completes.  The caller must obtain confirmation first."
   (omnigent-transport-delete-session
    id (lambda (status body)
         (omnigent-sessions-refresh)

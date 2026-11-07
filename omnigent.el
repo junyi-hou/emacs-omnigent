@@ -26,7 +26,8 @@
                 ".venv/bin/omnigent"
                 (file-name-directory (or load-file-name buffer-file-name)))))
     (if (file-executable-p local) local "omnigent"))
-  "Omnigent CLI executable."
+  "Omnigent CLI executable used to start the local server.
+Use the project's local executable when available, or search `exec-path'."
   :type 'file
   :group 'omnigent)
 
@@ -35,7 +36,9 @@
 
 ;;;###autoload
 (defun omnigent-connect (url)
-  "Connect to URL."
+  "Select the Omnigent server at URL.
+URL must start with http:// or https://.  Close conversation buffers and
+reset session and transport state before selecting the server."
   (interactive (list (read-string "Omnigent server URL: " omnigent-server-url)))
   (unless (string-match-p "\\`https?://" url)
     (user-error "Server URL must start with http:// or https://"))
@@ -48,12 +51,15 @@
   (message "Using Omnigent server %s" omnigent-server-url))
 
 (defun omnigent--server-url-from-output (buffer)
+  "Return the first HTTP URL in BUFFER, or nil if none exists."
   (with-current-buffer buffer
     (goto-char (point-min))
     (when (re-search-forward "https?://[^[:space:]]+" nil t)
       (match-string-no-properties 0))))
 
 (defun omnigent--start-server-sentinel (process _event)
+  "Select the server URL when startup PROCESS exits successfully.
+Report a startup failure otherwise.  Ignore _EVENT."
   (when (memq (process-status process) '(exit signal))
     (when (eq process omnigent-start-process)
       (setq omnigent-start-process nil))
@@ -71,7 +77,8 @@
 
 ;;;###autoload
 (defun omnigent-start-server ()
-  "Start or reuse the local Omnigent server, then select a session."
+  "Start or reuse the local Omnigent server and select its URL.
+The CLI runs asynchronously.  Its output must contain the server URL."
   (interactive)
   (if (process-live-p omnigent-start-process)
       (message "Omnigent server startup is already in progress")
