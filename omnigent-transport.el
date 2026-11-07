@@ -30,6 +30,11 @@
   :type 'string
   :group 'omnigent-transport)
 
+(defcustom omnigent-transport-session-limit 100
+  "Maximum number of sessions to fetch, between 1 and 1000."
+  :type 'integer
+  :group 'omnigent-transport)
+
 (defvar omnigent-transport--generation 0
   "Generation of the current server connection.")
 (defvar omnigent-transport--streams nil
@@ -45,6 +50,10 @@
   (setq omnigent-transport--streams nil
         omnigent-transport--updates nil))
 
+(defcustom omnigent-transport-history-limit 5000
+  "Maximum number of conversation items to keep."
+  :type '(integer :tag "Items")
+  :group 'omnigent-transport)
 (defconst omnigent-transport--reconnect-min-delay 1.0)
 (defconst omnigent-transport--reconnect-max-delay 15.0)
 
@@ -115,7 +124,8 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
 (defun omnigent-transport-list-sessions (callback)
   "List sessions and call CALLBACK with status and response body."
   (omnigent-transport-request
-   "GET" "/v1/sessions?limit=1000&include_archived=true&sort_by=updated_at&order=desc"
+   "GET" (format "/v1/sessions?limit=%d&include_archived=true&sort_by=updated_at&order=desc"
+                 (max 1 (min 1000 omnigent-transport-session-limit)))
    callback))
 
 (defun omnigent-transport-delete-session (session-id callback)
@@ -211,6 +221,38 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
              (= attempt (omnigent-stream-attempt stream)))
     (funcall (omnigent-stream-snapshot-callback stream) status body)))
 
+(defun omnigent-transport--stream-load-items (stream attempt body remaining before items)
+  (let* ((path (omnigent-transport--session-path (omnigent-stream-session-id stream)))
+         (query (format "/items?limit=%d&order=desc" (min 1000 remaining))))
+    (when before (setq query (concat query "&after=" (url-hexify-string before))))
+    (omnigent-transport-request
+     "GET" (concat path query)
+     (lambda (status page)
+       (when (and (not (omnigent-stream-stopped stream))
+                  (= attempt (omnigent-stream-attempt stream)))
+         (if (not (and (integerp status) (<= 200 status 299)))
+             (omnigent-transport--stream-snapshot stream attempt status page)
+           (let* ((data (append (alist-get 'data page) nil))
+                  (remaining (- remaining (length data)))
+                  (items (nconc (nreverse data) items))
+                  (cursor (alist-get 'last_id page)))
+             (if (and (> remaining 0) (eq (alist-get 'has_more page) t) cursor data)
+                 (omnigent-transport--stream-load-items stream attempt body remaining cursor items)
+               (setf (alist-get 'items body) (vconcat items))
+               (omnigent-transport--stream-snapshot stream attempt status body)))))))))
+
+(defun omnigent-transport--stream-load-snapshot (stream attempt)
+  (let ((path (omnigent-transport--session-path (omnigent-stream-session-id stream))))
+    (omnigent-transport-request
+     "GET" (concat path "?include_items=false")
+     (lambda (status body)
+       (when (and (not (omnigent-stream-stopped stream))
+                  (= attempt (omnigent-stream-attempt stream)))
+         (if (not (and (integerp status) (<= 200 status 299)))
+             (omnigent-transport--stream-snapshot stream attempt status body)
+           (omnigent-transport--stream-load-items
+            stream attempt body (max 1 omnigent-transport-history-limit) nil nil)))))))
+
 (defun omnigent-transport--reconnect-delay (failures)
   (if (zerop failures)
       omnigent-transport--reconnect-min-delay
@@ -273,10 +315,7 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
         (process-put process 'omnigent-stream stream)
         (process-put process 'omnigent-stderr stderr)
         (setf (omnigent-stream-process stream) process)
-        (omnigent-transport-get-session
-         (omnigent-stream-session-id stream)
-         (lambda (status body)
-           (omnigent-transport--stream-snapshot stream attempt status body)))))))
+        (omnigent-transport--stream-load-snapshot stream attempt)))))
 
 (defun omnigent-transport-start-session-stream (session-id on-event on-snapshot &optional on-error on-connect)
   "Start the SSE stream for SESSION-ID.

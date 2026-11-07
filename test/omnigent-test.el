@@ -16,12 +16,13 @@
 
 (ert-deftest omnigent-list-sessions-requests-most-recent ()
   "Request the most recently updated sessions, including archived ones."
-  (cl-letf (((symbol-function 'omnigent-transport-request)
-             (lambda (method path callback)
-               (should (equal method "GET"))
-               (should (equal path "/v1/sessions?limit=1000&include_archived=true&sort_by=updated_at&order=desc"))
-               (should (eq callback #'ignore)))))
-    (omnigent-transport-list-sessions #'ignore)))
+  (let ((omnigent-transport-session-limit 42))
+    (cl-letf (((symbol-function 'omnigent-transport-request)
+               (lambda (method path callback)
+                 (should (equal method "GET"))
+                 (should (equal path "/v1/sessions?limit=42&include_archived=true&sort_by=updated_at&order=desc"))
+                 (should (eq callback #'ignore)))))
+      (omnigent-transport-list-sessions #'ignore))))
 
 (ert-deftest omnigent-start-parses-server-url-from-cli-output ()
   "Extract the URL printed by the Omnigent server command."

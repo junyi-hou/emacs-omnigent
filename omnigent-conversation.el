@@ -9,11 +9,14 @@
 (require 'cl-lib)
 (require 'omnigent-sessions)
 
-(defvar omnigent-conversation--opening-id nil)
+;; Major mode initialization clears buffer-local variables.  Bind this
+;; temporarily so the mode can set `omnigent-conversation-session-id'.
+(defvar omnigent-conversation--session-id nil)
 (defvar-local omnigent-conversation-session-id nil)
 (defvar-local omnigent-conversation--stream nil)
 (defvar-local omnigent-conversation--items nil)
 (defvar-local omnigent-conversation--order nil)
+(defvar-local omnigent-conversation--order-tail nil)
 (defvar-local omnigent-conversation--pending-events nil)
 (defvar-local omnigent-conversation--loading nil)
 (defvar-local omnigent-conversation--prompt-start nil)
@@ -37,7 +40,16 @@
       (setq item (append item data)))
     (when id
       (unless (gethash id omnigent-conversation--items)
-        (setq omnigent-conversation--order (append omnigent-conversation--order (list id))))
+        (when (>= (hash-table-count omnigent-conversation--items)
+                  (max 1 omnigent-transport-history-limit))
+          (remhash (pop omnigent-conversation--order) omnigent-conversation--items)
+          (unless omnigent-conversation--order
+            (setq omnigent-conversation--order-tail nil)))
+        (let ((cell (list id)))
+          (if omnigent-conversation--order-tail
+              (setcdr omnigent-conversation--order-tail cell)
+            (setq omnigent-conversation--order cell))
+          (setq omnigent-conversation--order-tail cell)))
       (puthash id item omnigent-conversation--items))))
 
 (defun omnigent-conversation--event (name data)
@@ -79,7 +91,8 @@
                (unless (gethash id omnigent-conversation--elicitations)
                  (remhash id omnigent-conversation--elicitation-drafts)))
              omnigent-conversation--elicitation-drafts)
-    (setq omnigent-conversation--order nil omnigent-conversation--loading nil)
+    (setq omnigent-conversation--order nil omnigent-conversation--order-tail nil
+          omnigent-conversation--loading nil)
     (dolist (item (append (alist-get 'items body) nil))
       (omnigent-conversation--put-item item))
     (dolist (event (nreverse omnigent-conversation--pending-events))
@@ -100,9 +113,9 @@
 
 (define-derived-mode omnigent-conversation-mode text-mode "Omnigent"
   "Conversation transcript and composer."
-  (unless omnigent-conversation--opening-id
+  (unless omnigent-conversation--session-id
     (error "A session ID is required"))
-  (setq omnigent-conversation-session-id omnigent-conversation--opening-id
+  (setq omnigent-conversation-session-id omnigent-conversation--session-id
         omnigent-conversation--items (make-hash-table :test 'equal)
         omnigent-conversation--elicitations (make-hash-table :test 'equal)
         omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
@@ -135,7 +148,7 @@
       (condition-case err
           (progn
             (with-current-buffer buffer
-              (let ((omnigent-conversation--opening-id id))
+              (let ((omnigent-conversation--session-id id))
                 (omnigent-conversation-mode)))
             (omnigent-sessions-register-buffer id buffer))
         (error (kill-buffer buffer) (signal (car err) (cdr err)))))

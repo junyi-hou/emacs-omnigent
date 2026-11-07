@@ -54,10 +54,11 @@
                  (push (plist-get args :stderr) properties)
                  'process))
               ((symbol-function 'process-put) #'ignore)
-              ((symbol-function 'omnigent-transport-get-session)
-               (lambda (id callback)
-                 (should (equal id "session"))
-                 (push callback callbacks))))
+              ((symbol-function 'omnigent-transport--stream-load-snapshot)
+               (lambda (target attempt)
+                 (push (lambda (status body)
+                         (omnigent-transport--stream-snapshot target attempt status body))
+                       callbacks))))
       (unwind-protect
           (progn
             (omnigent-transport--stream-connect stream)
@@ -74,6 +75,28 @@
             (should (= connected 2))
             (should (equal snapshots '((200 . current)))))
         (mapc #'kill-buffer properties)))))
+
+(ert-deftest omnigent-transport-stream-loads-bounded-history ()
+  (let* ((omnigent-transport-history-limit 1001) requests result
+         (stream (omnigent-transport--make-stream
+                  :session-id "session" :attempt 1
+                  :snapshot-callback (lambda (status body) (setq result (cons status body))))))
+    (cl-letf (((symbol-function 'omnigent-transport-request)
+               (lambda (_method path callback &optional _data)
+                 (push (cons path callback) requests))))
+      (omnigent-transport--stream-load-snapshot stream 1)
+      (should (equal (caar requests) "/v1/sessions/session?include_items=false"))
+      (funcall (cdar requests) 200 '((pending_elicitations . [])))
+      (should (equal (caar requests) "/v1/sessions/session/items?limit=1000&order=desc"))
+      (funcall (cdar requests) 200
+               `((data . ,(vconcat (mapcar (lambda (n) `((id . ,n))) (number-sequence 1001 2 -1))))
+                 (has_more . t) (last_id . "cursor /")))
+      (should (equal (caar requests) "/v1/sessions/session/items?limit=1&order=desc&after=cursor%20%2F"))
+      (funcall (cdar requests) 200 '((data . [((id . 1))]) (has_more . :json-false)))
+      (let ((items (alist-get 'items (cdr result))))
+        (should (= (length items) 1001))
+        (should (= (alist-get 'id (aref items 0)) 1))
+        (should (= (alist-get 'id (aref items 1000)) 1001))))))
 
 (ert-deftest omnigent-transport-stream-start-failure-and-stop ()
   "Retry process creation failures, then cancel the retry when stopped."

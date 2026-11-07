@@ -303,6 +303,8 @@
     (should-not omnigent-conversation--pending-events)
     (should-not (gethash "existing" omnigent-conversation--items))
     (should (equal omnigent-conversation--order '("new")))
+    (omnigent-conversation--put-item '((id . "after-reload")))
+    (should (equal omnigent-conversation--order '("new" "after-reload")))
     (should (equal (omnigent-conversation--text
                     (gethash "new" omnigent-conversation--items))
                    "snapshot recovered"))
@@ -311,6 +313,19 @@
     (should (equal (omnigent-conversation--text
                     (gethash "new" omnigent-conversation--items))
                    "snapshot recovered live"))))
+
+(ert-deftest omnigent-conversation-history-limit ()
+  (with-temp-buffer
+    (let ((omnigent-transport-history-limit 2))
+      (setq omnigent-conversation--items (make-hash-table :test 'equal))
+      (omnigent-conversation--put-item '((id . "first")))
+      (omnigent-conversation--put-item '((id . "second")))
+      (omnigent-conversation--put-item '((id . "second") (content . "updated")))
+      (should (equal omnigent-conversation--order '("first" "second")))
+      (omnigent-conversation--put-item '((id . "third")))
+      (should (equal omnigent-conversation--order '("second" "third")))
+      (should-not (gethash "first" omnigent-conversation--items))
+      (should (= (hash-table-count omnigent-conversation--items) 2)))))
 
 (ert-deftest omnigent-conversation-accumulates-text-and-reasoning-deltas ()
   "Append each supported delta without changing item order or other items."

@@ -49,6 +49,7 @@ omit a deleted file. Omnigent does not distinguish that failure from a new file.
       after a snapshot refresh). See
       [docs/conversation-buffer.md](docs/conversation-buffer.md).
 - [ ] Fetch sessions incrementally: load 20 first, then let the user fetch more.
+- [ ] Fetch older conversation items on demand.
 - [ ] Row ordering in the session tree (`updated_at` vs. `created_at`).
 - [ ] Advanced session-creation options in a Transient menu: workspace,
       host, sandbox, model override, reasoning effort, launch args, and
