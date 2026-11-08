@@ -15,6 +15,11 @@ elicitation is a temporary server request, not a conversation item.
   `action` of `accept`, `decline`, or `cancel`, and optional form `content`.
   Add a transport helper for this route.
 
+One-shot resolve requests follow the [API callback design](api-callbacks.md) for
+result delivery, exception handling, and notification ordering. This document
+owns elicitation validation, drafts, and pending-state changes, not a separate
+callback contract. SSE event handling remains outside the one-shot contract.
+
 ## State and response
 
 Keep requests and unsent drafts in their conversation buffer, keyed by
@@ -33,6 +38,12 @@ Disable submission while a resolve request is pending. A successful response
 confirms resolution: remove the request and clear its draft. On failure, retain
 the request and draft. A resolved event may arrive before the response; removal
 by ID must be harmless when repeated.
+
+During submission, report change-hook errors as client warnings. These errors
+must not prevent request dispatch, pending-state cleanup, or completion callback
+delivery.  A synchronous request failure clears pending state and retains the
+request and draft.  Completion callback errors remain client errors; do not
+deliver a second result.
 
 Closing a buffer needs no confirmation. A still-pending server request can be
 loaded again when the buffer opens. Unsubmitted draft answers are lost. Pending

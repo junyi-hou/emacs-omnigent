@@ -8,6 +8,11 @@ outages or recovery of an agent process that stops.
 [session-tree.md](session-tree.md) owns the session list and watch set.
 [conversation-buffer.md](conversation-buffer.md) owns transcript reconciliation and drafts.
 
+REST reads and writes follow the [API callback design](api-callbacks.md) for
+result delivery and invalidation. The recovery-specific read retries and
+deadlines below remain proposed. SSE and WebSocket callbacks have separate
+subscription contracts.
+
 ## Goal and deployment
 
 A user can disconnect Emacs or suspend the laptop while a remote task continues.

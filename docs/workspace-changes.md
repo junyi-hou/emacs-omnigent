@@ -74,9 +74,9 @@ Load `omnigent-workspace` to use these asynchronous operations:
 - `omnigent-workspace-local-filename` requires an explicit `local` marker or trusted
   TRAMP prefix before it constructs an Emacs filename.
 
-The asynchronous callbacks receive `(STATUS BODY)`, like the transport callbacks.
-A local processing error uses nil for STATUS and an error string for BODY. Diff
-generation requires the `diff` executable.
+The asynchronous operations follow the [API callback design](api-callbacks.md)
+for status values, error forwarding, and callback lifetimes. Their success
+payloads are specified above. Diff generation requires the `diff` executable.
 
 ## Scope
 

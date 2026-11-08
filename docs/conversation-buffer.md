@@ -137,9 +137,11 @@ snapshot refreshes. Fold presentation belongs to [frontend.md](frontend.md).
 
 ## Composer and sending
 
-The composer is always enabled; session status does not block typing. The transport owns
-request outcome reporting. Keep the draft until a successful POST; on failure or
-uncertain timeout, preserve it and report the outcome; do not resend a potentially
+The composer is always enabled; session status does not block typing. Send and
+interrupt requests follow the [API callback design](api-callbacks.md). Transport
+delivers outcomes; conversation callbacks own draft updates and outcome
+handling. Keep the draft until a successful POST. On failure or uncertain
+timeout, preserve it and report the outcome. Do not resend a potentially
 accepted message automatically.
 
 - **Send** posts `{"type":"message",...}` through

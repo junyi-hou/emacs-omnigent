@@ -21,9 +21,12 @@ title, agent, status, and an attention marker for pending elicitations. Preserve
 point by session ID on refresh. Child sessions are deferred.
 
 Use faces for busy, idle, failed, archived, and attention entries.
-Show failed actions with the action, session title, and HTTP status. Indicate
-sessions outside the watch limit. The list is a view of server data, not its
-source. A Transient menu for advanced creation options is deferred.
+Show failed actions with the action, session title, and available status and
+diagnostics. Follow the [API callback
+design](api-callbacks.md#validation-and-error-presentation) for one-shot
+request-error presentation. Indicate sessions outside the watch limit. The list
+is a view of server data, not its source. A Transient menu for advanced creation
+options is deferred.
 
 Session creation uses the connected server, whether Emacs started it or not.
 Select its sole online execution host automatically; prompt when several are online.

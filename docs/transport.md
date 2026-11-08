@@ -54,6 +54,11 @@ Use the built-in `url-retrieve` for one-shot requests. `omnigent-transport-reque
 handles JSON encoding and response parsing. The endpoint helpers cover session
 snapshots, top-level lists, child lists, and posted events.
 
+Follow the [one-shot API callback design](api-callbacks.md) for result
+arguments, success detection, validation, error presentation, notification
+ordering, and callback lifetimes. That document owns the common request-result
+contract; this document owns its transport implementation.
+
 ### Session stream: a `curl` subprocess
 
 Run `curl -N <url>` as an Emacs subprocess. Attach a process filter to the curl

@@ -9,8 +9,10 @@ and updates list state. [frontend.md](frontend.md) owns presentation.
 
 ## Public APIs
 
-The v1 client needs these server APIs. Transport helpers are asynchronous and return a
-status and response body to their callback.
+The v1 client needs these server APIs. One-shot requests follow the [API
+callback design](api-callbacks.md) for result delivery, response validation, and
+callback lifetimes. This document specifies session payloads and state changes;
+the WebSocket subscription has its own transport contract.
 
 | Operation | Server API | Client helper |
 |---|---|---|
@@ -62,7 +64,12 @@ Cache listings only during the prompt. Validate the chosen directory with a fres
 filesystem request before creation, including paths the user types directly.
 Send the host ID and native workspace path in the create request. Reject TRAMP
 syntax rather than send it to the agent. Abort if the server changes during selection.
-The selection helpers live in `omnigent-sessions.el`.
+The selection helpers live in `omnigent-sessions.el`. Fetch hosts, directory
+listings, and agents asynchronously. Show an echo-area message while each
+request runs. A response callback presents the next prompt or processes a
+failure. Directory completion uses cached results and refreshes when an
+asynchronous listing arrives.  Do not wait for network output inside a command
+or completion table.
 
 Create prompts for an agent and optional title. An empty title lets the server derive
 one. The `omnigent-sessions-open-hook` receives the new session; the conversation
@@ -75,6 +82,12 @@ Fetch active and archived sessions on initial load and manual refresh. The serve
 defaults to 20 entries; request 1,000, sorted by most recently updated first. The server
 must sort before applying the limit. Pagination beyond that is post-v1. Do not silently
 represent a truncated result as complete.
+
+Check that list responses contain an array and the string fields needed to
+process each row. Check the session ID before opening a created session. Missing
+or malformed fields are client processing failures, not empty results. Preserve
+the previous list and truncation state when a response is malformed. An explicit
+empty array is valid.
 
 Subscribe to session updates. A watch message replaces the complete watch set, which
 contains only IDs with live conversation buffers. Creating or closing a conversation
@@ -97,9 +110,13 @@ in v1.
 ## Checks
 
 Use fixture list responses and update frames to check root updates, unknown IDs,
-removals, reconnect, buffer open and close, and refusal to open a 501st buffer.  Check
-that the request selects the 1,000 most recently updated sessions and that a truncated
-list is not presented as complete. Existing transport tests cover the WebSocket.
+removals, reconnect, buffer open and close, and refusal to open a 501st buffer.
+Check that the request selects the 1,000 most recently updated sessions and that
+a truncated list is not presented as complete. Check that commands return
+between requests and that completion does not duplicate pending directory
+requests. Real-server tests mock user choices, browse nested directories, and
+reject a missing typed path before creation. Existing transport tests cover the
+WebSocket.
 
 ## Deferred
 
