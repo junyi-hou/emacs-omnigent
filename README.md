@@ -43,10 +43,13 @@ omit a deleted file. Omnigent does not distinguish that failure from a new file.
 
 ## TODO (post-v1)
 
+- [ ] Complete client reconnection after network loss or laptop sleep: detect stale
+      SSE/WebSocket connections, restore subscriptions, reload server state, and
+      retry failed snapshots without resending messages. See
+      [the reconnection design](docs/reconnection.md).
 - [ ] Design server-to-harness retry for a failed runner startup and its saved input.
 - [ ] Design client-to-server retry for requests with no confirmed response, including
       messages the server may already have accepted.
-
 - [ ] Support workspace diffs for non-Git workspaces.
 - [ ] Design centralized authentication for remote servers, including token expiration.
 - [ ] Support connections to multiple Omnigent servers.

@@ -4,6 +4,8 @@
 implemented. Connection setup and request outcome handling remain incomplete. The
 transport implementation is [omnigent-transport.el](../omnigent-transport.el). The
 existing interactive entry points are in [omnigent.el](../omnigent.el).
+[reconnection.md](reconnection.md) proposes the complete client-outage recovery flow,
+including stale-connection detection, subscription readiness, and snapshot retries.
 
 Transport owns the input and output protocols and their implementation: server
 connections, requests, response parsing, SSE, and WebSocket frames. It exposes client
