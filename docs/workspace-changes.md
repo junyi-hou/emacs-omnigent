@@ -1,8 +1,8 @@
 # Workspace Changes Data Design
 
-**Status:** Proposed. This document describes workspace data processing, not
-presentation or transport implementation. Use the APIs in [transport.md](transport.md)
-for server requests and responses.
+**Status:** Implemented in [omnigent-workspace.el](../omnigent-workspace.el).
+This document describes workspace data processing, not presentation or transport.
+Use the APIs in [transport.md](transport.md) for server requests and responses.
 
 ## Decision
 
@@ -64,6 +64,19 @@ caller must provide a trusted TRAMP connection mapping. An Omnigent `host_id` al
 not an SSH address or a TRAMP connection. If no mapping is available, report that direct
 access is unavailable. The environment filesystem API can still read file contents
 independently of direct access.
+
+## Client API
+
+Load `omnigent-workspace` to use these asynchronous operations:
+
+- `omnigent-workspace-diff` returns a unified diff string.
+- `omnigent-workspace-list` returns the environment root and changed paths.
+- `omnigent-workspace-local-filename` requires an explicit `local` marker or trusted
+  TRAMP prefix before it constructs an Emacs filename.
+
+The asynchronous callbacks receive `(STATUS BODY)`, like the transport callbacks.
+A local processing error uses nil for STATUS and an error string for BODY. Diff
+generation requires the `diff` executable.
 
 ## Scope
 
