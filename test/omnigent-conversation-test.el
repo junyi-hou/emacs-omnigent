@@ -523,4 +523,94 @@
         (omnigent-conversation-interrupt)
         (should sent)))))
 
+(ert-deftest omnigent-conversation-request-errors-retain-server-details ()
+  "Show server diagnostics for failed sends and interrupts without losing the draft."
+  (with-temp-buffer
+    (insert "keep draft")
+    (setq omnigent-conversation-session-id "session"
+          omnigent-conversation--prompt-start (copy-marker (point-min)))
+    (let (callback messages)
+      (cl-letf (((symbol-function 'omnigent-transport-post-session-event)
+                 (lambda (_id _event cb) (setq callback cb)))
+                ((symbol-function 'message)
+                 (lambda (format-string &rest args)
+                   (push (apply #'format format-string args) messages))))
+        (omnigent-conversation-send)
+        (funcall callback 403 '((detail . "Access denied")))
+        (should-not omnigent-conversation--sending)
+        (should (equal (buffer-string) "keep draft"))
+        (omnigent-conversation-interrupt)
+        (funcall callback 403 '((detail . "Access denied")))
+        (should (equal (nreverse messages)
+                       '("Omnigent send failed: 403 (Access denied)"
+                         "Omnigent interrupt failed: 403 (Access denied)")))))))
+
+(ert-deftest omnigent-conversation-submission-survives-notification-errors ()
+  "Hook failures must not block dispatch, cleanup, or the completion callback."
+  (dolist (status '(202 500))
+    (with-temp-buffer
+      (setq omnigent-conversation-session-id "session"
+            omnigent-conversation--elicitations (make-hash-table :test 'equal)
+            omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
+            omnigent-conversation--elicitation-submitting (make-hash-table :test 'equal)
+            omnigent-conversation-elicitation-change-hook
+            (list (lambda () (error "Frontend failed"))))
+      (omnigent-conversation--elicitation-put '((elicitation_id . "id")))
+      (puthash "answer" "keep" (gethash "id" omnigent-conversation--elicitation-drafts))
+      (let (callback warnings received (calls 0) (body '((detail . "Server result"))))
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (_type text &rest _) (push text warnings)))
+                  ((symbol-function 'omnigent-transport-request)
+                   (lambda (_method _path cb _data) (setq callback cb))))
+          (omnigent-conversation-elicitation-submit
+           "id" 'decline (lambda (code data) (cl-incf calls) (setq received (list code data))))
+          (should callback)
+          (should (omnigent-conversation-elicitation-submitting-p "id"))
+          (funcall callback status body)
+          (should-not (omnigent-conversation-elicitation-submitting-p "id"))
+          (should (= calls 1))
+          (should (equal received (list status body)))
+          (should (= (length warnings) 2))
+          (should (cl-every (lambda (text) (string-match-p "Frontend failed" text)) warnings))
+          (if (= status 202)
+              (should-not (gethash "id" omnigent-conversation--elicitations))
+            (should (gethash "id" omnigent-conversation--elicitations))
+            (should (equal (gethash "answer" (omnigent-conversation-elicitation-draft "id")) "keep"))))))))
+
+(ert-deftest omnigent-conversation-submission-setup-failure-keeps-original-error ()
+  "Clear pending state and retain drafts even if failure notification also fails."
+  (with-temp-buffer
+    (setq omnigent-conversation-session-id "session"
+          omnigent-conversation--elicitations (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-submitting (make-hash-table :test 'equal)
+          omnigent-conversation-elicitation-change-hook
+          (list (lambda () (error "Frontend failed"))))
+    (omnigent-conversation--elicitation-put '((elicitation_id . "id")))
+    (cl-letf (((symbol-function 'display-warning) #'ignore)
+              ((symbol-function 'omnigent-transport-request)
+               (lambda (&rest _) (error "Transport failed"))))
+      (should (equal (should-error (omnigent-conversation-elicitation-submit "id" 'decline nil))
+                     '(error "Transport failed")))
+      (should-not (omnigent-conversation-elicitation-submitting-p "id"))
+      (should (gethash "id" omnigent-conversation--elicitations))
+      (should (gethash "id" omnigent-conversation--elicitation-drafts)))))
+
+(ert-deftest omnigent-conversation-submission-consumer-errors-propagate ()
+  "A completion callback error stays a client error and is not delivered twice."
+  (with-temp-buffer
+    (setq omnigent-conversation-session-id "session"
+          omnigent-conversation--elicitations (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-submitting (make-hash-table :test 'equal))
+    (omnigent-conversation--elicitation-put '((elicitation_id . "id")))
+    (let (callback (calls 0))
+      (cl-letf (((symbol-function 'omnigent-transport-request)
+                 (lambda (_method _path cb _data) (setq callback cb))))
+        (omnigent-conversation-elicitation-submit
+         "id" 'decline (lambda (&rest _) (cl-incf calls) (error "Consumer failed")))
+        (should (equal (should-error (funcall callback 202 nil)) '(error "Consumer failed")))
+        (should (= calls 1))
+        (should-not (omnigent-conversation-elicitation-submitting-p "id"))))))
+
 (provide 'omnigent-conversation-test)

@@ -422,9 +422,10 @@
       (kill-buffer log))))
 
 (ert-deftest omnigent-host-workspace-completion ()
-  "Browse nested host directories through the real filesystem endpoint."
+  "Select a path with mocked input and asynchronous real host filesystem requests."
   (let* ((root (make-temp-file "omnigent-workspace-" t))
-         (workspace (concat root "/project #1")))
+         (workspace (concat root "/project #1"))
+         target)
     (unwind-protect
         (progn
           (make-directory workspace)
@@ -433,15 +434,40 @@
           (cl-letf (((symbol-function 'completing-read)
                      (lambda (prompt table &rest _)
                        (should (string-prefix-p "Workspace on " prompt))
-                       (should (equal (all-completions (concat root "/") table)
-                                      (list (concat root "/") (concat workspace "/"))))
-                       (should (equal (try-completion (concat workspace "/s") table)
-                                      (concat workspace "/src/")))
+                       (omnigent-functional-wait "Parent directory completion did not load"
+                         (equal (all-completions (concat root "/") table)
+                                (list (concat root "/") (concat workspace "/"))))
+                       (omnigent-functional-wait "Nested directory completion did not load"
+                         (equal (try-completion (concat workspace "/s") table)
+                                (concat workspace "/src/")))
                        workspace)))
-            (let* ((target (omnigent-sessions--read-workspace))
-                   (hosts (cdr (omnigent-mock-test-request "GET" "/v1/hosts"))))
+            (omnigent-sessions--read-workspace (lambda (value) (setq target value)))
+            (should-not target)
+            (omnigent-functional-wait "Workspace selection did not finish" target)
+            (let ((hosts (cdr (omnigent-mock-test-request "GET" "/v1/hosts"))))
               (should (equal (car target) (alist-get 'host_id (aref (alist-get 'hosts hosts) 0))))
               (should (equal (cdr target) workspace)))))
+      (delete-directory root t))))
+
+(ert-deftest omnigent-host-workspace-selection-rejects-missing-path ()
+  "Let the real server reject a typed path before continuing session creation."
+  (let* ((root (make-temp-file "omnigent-selection-" t))
+         (missing (concat root "/does-not-exist"))
+         (omnigent-sessions-error-hook nil)
+         errors selected)
+    (unwind-protect
+        (progn
+          (setq omnigent-sessions-error-hook (list (lambda (error) (push error errors))))
+          (cl-letf (((symbol-function 'completing-read)
+                     (lambda (prompt _table &rest _)
+                       (should (string-prefix-p "Workspace on " prompt))
+                       missing)))
+            (omnigent-sessions--read-workspace (lambda (_) (setq selected t)))
+            (should-not errors)
+            (omnigent-functional-wait "Missing workspace did not report a server failure" errors)
+            (should-not selected)
+            (should (= (length errors) 1))
+            (should (string-prefix-p "Check workspace: 404" (car errors)))))
       (delete-directory root t))))
 
 (ert-deftest omnigent-mock-acp-create-to-chat ()

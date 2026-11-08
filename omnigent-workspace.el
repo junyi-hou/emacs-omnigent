@@ -16,10 +16,6 @@
   (omnigent-transport--session-path
    session-id (concat "/resources/environments/default/" suffix)))
 
-(defun omnigent-workspace--success-p (status)
-  "Return non-nil if STATUS is a successful HTTP status."
-  (and (integerp status) (<= 200 status 299)))
-
 (defun omnigent-workspace--changes (session-id callback)
   "Request changed paths for SESSION-ID and call CALLBACK with the response."
   (omnigent-transport-request
@@ -60,40 +56,43 @@ The result is a best-effort view, not an atomic snapshot."
   (omnigent-workspace--changes
    session-id
    (lambda (status body)
-     (if (not (omnigent-workspace--success-p status))
+     (if (not (omnigent-transport-success-p status))
          (funcall callback status body)
-       (condition-case err
-           (let ((paths (omnigent-workspace--paths body)) (patches nil))
-             (cl-labels
-                 ((next ()
-                    (if (null paths)
-                        (funcall callback status (apply #'concat (nreverse patches)))
-                      (let ((path (pop paths)))
-                        (omnigent-transport-request
-                         "GET"
-                         (omnigent-workspace--path
-                          session-id (concat "diff/" (mapconcat #'url-hexify-string
-                                                                 (split-string path "/") "/")))
-                         (lambda (file-status file-body)
-                           (if (not (omnigent-workspace--success-p file-status))
-                               (funcall callback file-status file-body)
-                             (let ((result
-                                    (condition-case error-data
-                                        (let ((before (alist-get 'before file-body))
-                                              (after (alist-get 'after file-body)))
-                                          (unless (and (listp file-body)
-                                                       (assq 'before file-body)
-                                                       (assq 'after file-body)
-                                                       (or (null before) (stringp before))
-                                                       (or (null after) (stringp after)))
-                                            (error "Invalid diff response for %s" path))
-                                          (omnigent-workspace--diff path before after))
-                                      (error error-data))))
-                               (if (stringp result)
-                                   (progn (push result patches) (next))
-                                 (funcall callback nil (error-message-string result)))))))))))
-               (next)))
-         (error (funcall callback nil (error-message-string err))))))))
+       (let ((paths (condition-case err
+                        (omnigent-workspace--paths body)
+                      (error err)))
+             (patches nil))
+         (if (and (consp paths) (eq (car paths) 'error))
+             (funcall callback nil (error-message-string paths))
+           (cl-labels
+            ((next ()
+               (if (null paths)
+                   (funcall callback status (apply #'concat (nreverse patches)))
+                 (let ((path (pop paths)))
+                   (omnigent-transport-request
+                    "GET"
+                    (omnigent-workspace--path
+                     session-id (concat "diff/" (mapconcat #'url-hexify-string
+                                                           (split-string path "/") "/")))
+                    (lambda (file-status file-body)
+                      (if (not (omnigent-transport-success-p file-status))
+                          (funcall callback file-status file-body)
+                        (let ((result
+                               (condition-case error-data
+                                   (let ((before (alist-get 'before file-body))
+                                         (after (alist-get 'after file-body)))
+                                     (unless (and (listp file-body)
+                                                  (assq 'before file-body)
+                                                  (assq 'after file-body)
+                                                  (or (null before) (stringp before))
+                                                  (or (null after) (stringp after)))
+                                       (error "Invalid diff response for %s" path))
+                                     (omnigent-workspace--diff path before after))
+                                 (error error-data))))
+                          (if (stringp result)
+                              (progn (push result patches) (next))
+                            (funcall callback nil (error-message-string result)))))))))))
+            (next))))))))
 
 (defun omnigent-workspace-list (session-id callback)
   "Fetch the environment root and changed paths for SESSION-ID.
@@ -102,15 +101,15 @@ or (STATUS ERROR) on failure.  ROOT is a runner path, not a local filename."
   (omnigent-transport-request
    "GET" (omnigent-workspace--path session-id "filesystem")
    (lambda (status body)
-     (if (not (omnigent-workspace--success-p status))
+     (if (not (omnigent-transport-success-p status))
          (funcall callback status body)
-       (let ((root (alist-get 'base body)))
+       (let ((root (and (listp body) (alist-get 'base body))))
          (if (not (and (stringp root) (file-name-absolute-p root)))
              (funcall callback nil "Invalid environment root response")
            (omnigent-workspace--changes
             session-id
             (lambda (changes-status changes-body)
-              (if (not (omnigent-workspace--success-p changes-status))
+              (if (not (omnigent-transport-success-p changes-status))
                   (funcall callback changes-status changes-body)
                 (let ((paths (condition-case err
                                  (omnigent-workspace--paths changes-body)

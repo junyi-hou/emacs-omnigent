@@ -162,7 +162,7 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 (defun omnigent-conversation--snapshot (status body)
   "Apply snapshot BODY when STATUS indicates success.
 Replay queued stream events and notify the elicitation change hook."
-  (if (not (omnigent-sessions--success-p status))
+  (if (not (omnigent-transport-success-p status))
       (progn (setq omnigent-conversation--loading nil)
              (message "Omnigent snapshot failed: %s" status)
              (dolist (event (nreverse omnigent-conversation--pending-events))
@@ -256,26 +256,32 @@ Use `omnigent-conversation-open' to create a conversation buffer."
          omnigent-conversation-session-id
          `(("type" . "message") ("data" . (("role" . "user")
                     ("content" . [(("type" . "input_text") ("text" . ,text))]))))
-         (lambda (status _body)
-           (when (buffer-live-p buffer)
-             (with-current-buffer buffer
-               (setq omnigent-conversation--sending nil)
-               (if (omnigent-sessions--success-p status)
-                   (let ((draft (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max))))
-                     (when (string-prefix-p text draft)
-                       (delete-region omnigent-conversation--prompt-start
-                                      (+ omnigent-conversation--prompt-start (length text)))))
-                 (message "Omnigent send failed: %s" status))))))
+         (apply-partially #'omnigent-conversation--sent buffer text))
       (error (setq omnigent-conversation--sending nil) (signal (car err) (cdr err))))))
 
+(defun omnigent-conversation--sent (buffer text status body)
+  "Handle send STATUS in BUFFER, removing submitted TEXT only on success."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq omnigent-conversation--sending nil)
+      (if (omnigent-transport-success-p status)
+          (let ((draft (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max))))
+            (when (string-prefix-p text draft)
+              (delete-region omnigent-conversation--prompt-start
+                             (+ omnigent-conversation--prompt-start (length text)))))
+        (message "%s" (omnigent-transport-error-message "Omnigent send failed" status body))))))
+
 (defun omnigent-conversation-interrupt ()
-  "Interrupt the current session."
+  "Interrupt the current session asynchronously."
   (interactive)
   (omnigent-transport-post-session-event
    omnigent-conversation-session-id '(("type" . "interrupt"))
-   (lambda (status _body)
-     (unless (omnigent-sessions--success-p status)
-       (message "Omnigent interrupt failed: %s" status)))))
+   #'omnigent-conversation--interrupted))
+
+(defun omnigent-conversation--interrupted (status body)
+  "Report a failed interrupt STATUS; successful acceptance needs no UI change."
+  (unless (omnigent-transport-success-p status)
+    (message "%s" (omnigent-transport-error-message "Omnigent interrupt failed" status body))))
 
 
 ;;; Elicitations
@@ -432,25 +438,41 @@ submitted here.  The change hook reports state changes to the frontend."
           (maphash (lambda (key value) (when (eq value :null) (puthash key nil content))) content)
           (push (cons "content" content) payload))))
     (puthash id t omnigent-conversation--elicitation-submitting)
-    (run-hooks 'omnigent-conversation-elicitation-change-hook)
     (condition-case err
-        (omnigent-transport-request
-         "POST" (omnigent-transport--session-path
-                  omnigent-conversation-session-id
-                  (concat "/elicitations/" (url-hexify-string id) "/resolve"))
-         (lambda (status body)
-           (when (buffer-live-p buffer)
-             (with-current-buffer buffer
-               (remhash id omnigent-conversation--elicitation-submitting)
-               (when (omnigent-sessions--success-p status)
-                 (omnigent-conversation--elicitation-remove id))
-               (run-hooks 'omnigent-conversation-elicitation-change-hook)
-               (when callback (funcall callback status body))))) payload)
-      (error (remhash id omnigent-conversation--elicitation-submitting)
-             (run-hooks 'omnigent-conversation-elicitation-change-hook)
-             (signal (car err) (cdr err))))))
+        (progn
+          (omnigent-conversation--notify-submission-change)
+          (omnigent-transport-request
+           "POST" (omnigent-transport--session-path
+                    omnigent-conversation-session-id
+                    (concat "/elicitations/" (url-hexify-string id) "/resolve"))
+           (apply-partially #'omnigent-conversation--elicitation-submitted buffer id callback)
+           payload))
+      ((error quit)
+       (when (gethash id omnigent-conversation--elicitation-submitting)
+         (remhash id omnigent-conversation--elicitation-submitting)
+         (omnigent-conversation--notify-submission-change))
+       (signal (car err) (cdr err))))))
 
 
+(defun omnigent-conversation--notify-submission-change ()
+  "Notify elicitation observers without letting hook errors interrupt submission.
+Report hook errors as client warnings, not request failures."
+  (save-current-buffer
+    (condition-case err
+        (run-hooks 'omnigent-conversation-elicitation-change-hook)
+      (error (display-warning 'omnigent
+                              (format "Elicitation change hook failed: %s"
+                                      (error-message-string err)))))))
+
+(defun omnigent-conversation--elicitation-submitted (buffer id callback status body)
+  "Apply submission STATUS and BODY for ID in BUFFER, then call CALLBACK."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (remhash id omnigent-conversation--elicitation-submitting)
+      (when (omnigent-transport-success-p status)
+        (omnigent-conversation--elicitation-remove id))
+      (omnigent-conversation--notify-submission-change)
+      (when callback (funcall callback status body)))))
 
 (provide 'omnigent-conversation)
 ;;; omnigent-conversation.el ends here

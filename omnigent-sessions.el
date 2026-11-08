@@ -27,14 +27,19 @@
 (defvar omnigent-sessions--buffers nil)
 (defvar omnigent-sessions--revision 0)
 
-(defun omnigent-sessions--success-p (status)
-  "Return non-nil when STATUS is a successful HTTP status code."
-  (and (integerp status) (<= 200 status) (< status 300)))
-
-(defun omnigent-sessions--error (action status)
-  "Report the failure of ACTION with STATUS to the error hook."
+(defun omnigent-sessions--error (action status &optional body)
+  "Report ACTION's failure STATUS and any server detail in BODY to the error hook."
   (run-hook-with-args 'omnigent-sessions-error-hook
-                      (format "%s: %s" action status)))
+                      (omnigent-transport-error-message action status body)))
+
+(defun omnigent-sessions--rows-p (body key &rest fields)
+  "Return non-nil if BODY has an array at KEY with string FIELDS in each row."
+  (and (listp body)
+       (vectorp (alist-get key body))
+       (cl-every (lambda (row)
+                   (and (listp row)
+                        (cl-every (lambda (field) (stringp (alist-get field row))) fields)))
+                 (alist-get key body))))
 
 (defun omnigent-sessions-refresh ()
   "Request the root session list asynchronously.
@@ -43,19 +48,24 @@ Run `omnigent-sessions-change-hook' on success, or the error hook on failure."
   (let ((number (cl-incf omnigent-sessions--refresh-number))
         (revision omnigent-sessions--revision))
     (omnigent-transport-list-sessions
-     (lambda (status body)
-       (when (= number omnigent-sessions--refresh-number)
-         (if (and (omnigent-sessions--success-p status)
-                  (/= revision omnigent-sessions--revision))
-             (omnigent-sessions-refresh)
-           (if (omnigent-sessions--success-p status)
-             (progn
-               (setq omnigent-sessions
-                     (cl-remove-if (lambda (row) (alist-get 'parent_session_id row))
-                                   (append (alist-get 'data body) nil))
-                     omnigent-sessions-truncated (eq (alist-get 'has_more body) t))
-               (run-hooks 'omnigent-sessions-change-hook))
-           (omnigent-sessions--error "List sessions" status))))))))
+     (apply-partially #'omnigent-sessions--refreshed number revision))))
+
+(defun omnigent-sessions--refreshed (number revision status body)
+  "Apply list BODY for refresh NUMBER and REVISION when STATUS succeeds."
+  (when (= number omnigent-sessions--refresh-number)
+    (cond
+     ((not (omnigent-transport-success-p status))
+      (omnigent-sessions--error "List sessions" status body))
+     ((/= revision omnigent-sessions--revision)
+      (omnigent-sessions-refresh))
+     ((not (omnigent-sessions--rows-p body 'data 'id))
+      (omnigent-sessions--error "List sessions" nil "Invalid session list response"))
+     (t
+      (setq omnigent-sessions
+            (cl-remove-if (lambda (row) (alist-get 'parent_session_id row))
+                          (append (alist-get 'data body) nil))
+            omnigent-sessions-truncated (eq (alist-get 'has_more body) t))
+      (run-hooks 'omnigent-sessions-change-hook)))))
 
 (defun omnigent-sessions--frame (frame)
   "Apply session update FRAME and notify the session hooks.
@@ -139,22 +149,6 @@ Signal a user error if ID already has a different live buffer or the
          #'omnigent-sessions-refresh))
   (omnigent-sessions-refresh))
 
-(defun omnigent-sessions--workspace-get (path)
-  "Read PATH from the connected server while allowing process output and quit."
-  (let ((generation omnigent-transport--generation) result)
-    (omnigent-transport-request
-     "GET" path (lambda (status body) (setq result (cons status body))))
-    (with-timeout (30 (user-error "Timed out reading %s" path))
-      (while (and (not result) (= generation omnigent-transport--generation))
-        (accept-process-output nil 0.05)))
-    (unless (= generation omnigent-transport--generation)
-      (user-error "Server changed during workspace selection"))
-    (unless (omnigent-sessions--success-p (car result))
-      (user-error "Read %s: %s%s" path (car result)
-                  (let ((detail (and (listp (cdr result)) (alist-get 'detail (cdr result)))))
-                    (if detail (format " (%s)" detail) ""))))
-    (cdr result)))
-
 (defun omnigent-sessions--filesystem-path (host-id path &optional after)
   "Build the filesystem request for HOST-ID, PATH, and pagination cursor AFTER."
   (let* ((base (concat "/v1/hosts/" (url-hexify-string host-id) "/filesystem"))
@@ -168,23 +162,30 @@ Signal a user error if ID already has a different live buffer or the
             "?limit=1000"
             (when after (concat "&after=" (url-hexify-string after))))))
 
-(defun omnigent-sessions--workspace-directories (host-id path)
-  "List directories at PATH on HOST-ID, following every page."
-  (let ((more t) directories after)
-    ;; ponytail: fetch full listings; use incremental completion if large directories are slow.
-    (while more
-      (let* ((body (omnigent-sessions--workspace-get
-                    (omnigent-sessions--filesystem-path host-id path after)))
-             (entries (append (alist-get 'data body) nil))
-             (cursor (alist-get 'path (car (last entries)))))
-        (dolist (entry entries)
-          (when (equal (alist-get 'type entry) "directory")
-            (push entry directories)))
-        (setq more (eq (alist-get 'has_more body) t))
-        (when (and more (or (null cursor) (equal cursor after)))
-          (user-error "Invalid filesystem pagination for %s" path))
-        (setq after cursor)))
-    (nreverse directories)))
+(defun omnigent-sessions--workspace-directories (host-id path callback &optional after directories)
+  "Fetch directories at PATH on HOST-ID asynchronously for CALLBACK.
+CALLBACK receives (STATUS DIRECTORIES), or (STATUS BODY) on failure.
+AFTER and DIRECTORIES carry the cursor and entries across listing pages."
+  ;; ponytail: fetch full listings; use incremental completion if large directories are slow.
+  (omnigent-transport-request
+   "GET" (omnigent-sessions--filesystem-path host-id path after)
+   (lambda (status body)
+     (cond
+      ((not (omnigent-transport-success-p status))
+       (funcall callback status body))
+      ((not (omnigent-sessions--rows-p body 'data 'name 'path 'type))
+       (funcall callback nil "Invalid filesystem listing response"))
+      (t
+       (let* ((entries (append (alist-get 'data body) nil))
+              (cursor (alist-get 'path (car (last entries)))))
+         (dolist (entry entries)
+           (when (equal (alist-get 'type entry) "directory")
+             (push entry directories)))
+         (if (eq (alist-get 'has_more body) t)
+             (if (or (null cursor) (equal cursor after))
+                 (funcall callback nil "Invalid filesystem pagination")
+               (omnigent-sessions--workspace-directories host-id path callback cursor directories))
+           (funcall callback status (nreverse directories)))))))))
 
 (defun omnigent-sessions--native-workspace (input)
   "Interpret INPUT on the execution host, never relative to Emacs's directory."
@@ -196,96 +197,162 @@ Signal a user error if ID already has a different live buffer or the
       input
     (concat "~/" input)))
 
-(defun omnigent-sessions--read-workspace ()
-  "Return (HOST-ID . WORKSPACE) selected through the connected server.
-Use the sole online host, or prompt when several hosts are online.  Always
-prompt for a directory, with completion against that host's filesystem.
-The empty input has no default.  Relative input refers to the host's home."
-  (let* ((generation omnigent-transport--generation)
-         (body (omnigent-sessions--workspace-get "/v1/hosts"))
-         (hosts (cl-remove-if-not
-                 (lambda (host) (equal (alist-get 'status host) "online"))
-                 (append (alist-get 'hosts body) nil)))
-         (choices (mapcar (lambda (host)
-                            (cons (format "%s [%s]" (or (alist-get 'name host) "Host")
-                                          (alist-get 'host_id host))
-                                  (alist-get 'host_id host))) hosts)))
-    (unless choices
-      (user-error "No online execution hosts; connect a host to this server first"))
-    (let* ((choice (if (cdr choices)
-                       (completing-read "Execution host: " choices nil t)
-                     (caar choices)))
-           (host-id (cdr (assoc choice choices)))
-           (cache (make-hash-table :test #'equal))
-           (table
-            (lambda (input predicate action)
-              (unless (= generation omnigent-transport--generation)
-                (user-error "Server changed during workspace selection"))
-              (if (eq action 'metadata)
-                  '(metadata (category . omnigent-workspace))
-                (let* ((parent (or (file-name-directory input) ""))
-                       (entries (gethash parent cache 'missing)))
-                  (when (eq entries 'missing)
-                    (setq entries (omnigent-sessions--workspace-directories
-                                   host-id (if (string-empty-p parent) ""
-                                             (omnigent-sessions--native-workspace parent))))
-                    (puthash parent entries cache))
-                  (complete-with-action
-                   action (cons (if (string-empty-p parent) "~/" parent)
-                                (mapcar (lambda (entry)
-                                          (concat parent (alist-get 'name entry) "/")) entries))
-                   input predicate)))))
-           (workspace (omnigent-sessions--native-workspace
-                       (completing-read (format "Workspace on %s: " choice)
-                                        table nil nil nil t))))
+(defun omnigent-sessions--read-workspace (callback)
+  "Select a host and workspace asynchronously, then call CALLBACK with their cons.
+Use the sole online host, or prompt when several hosts are online.
+Report discovery failures through `omnigent-sessions-error-hook'."
+  (message "Reading execution hosts...")
+  (omnigent-transport-request
+   "GET" "/v1/hosts"
+   (apply-partially #'omnigent-sessions--select-host
+                    omnigent-transport--generation callback)))
+
+(defun omnigent-sessions--select-host (generation callback status body)
+  "Present hosts from BODY for GENERATION and continue through CALLBACK."
+  (cond
+   ((not (omnigent-transport-success-p status))
+    (omnigent-sessions--error "List hosts" status body))
+   ((not (omnigent-sessions--rows-p body 'hosts 'host_id 'status))
+    (omnigent-sessions--error "List hosts" nil "Invalid execution host response"))
+   (t
+    (let* ((hosts (cl-remove-if-not
+                   (lambda (host) (equal (alist-get 'status host) "online"))
+                   (append (alist-get 'hosts body) nil)))
+           (choices (mapcar (lambda (host)
+                              (cons (format "%s [%s]" (or (alist-get 'name host) "Host")
+                                            (alist-get 'host_id host))
+                                    (alist-get 'host_id host))) hosts)))
+      (if (null choices)
+          (omnigent-sessions--error "Select workspace" "No online execution hosts")
+        (let* ((choice (if (cdr choices)
+                           (completing-read "Execution host: " choices nil t)
+                         (caar choices)))
+               (host-id (cdr (assoc choice choices))))
+          (unless (= generation omnigent-transport--generation)
+            (user-error "Server changed during workspace selection"))
+          (message "Reading workspaces on %s..." choice)
+          (omnigent-sessions--workspace-directories
+           host-id ""
+           (apply-partially #'omnigent-sessions--select-workspace
+                            generation host-id choice callback))))))))
+
+(defun omnigent-sessions--select-workspace (generation host-id choice callback status directories)
+  "Prompt with DIRECTORIES for HOST-ID and CHOICE after successful STATUS.
+Continue through CALLBACK after validating the path on GENERATION's server."
+  (if (not (omnigent-transport-success-p status))
+      (omnigent-sessions--error "List workspaces" status directories)
+    (let ((cache (make-hash-table :test #'equal)) (active t) workspace)
+      (puthash "" directories cache)
+      (unwind-protect
+          (setq workspace
+                (omnigent-sessions--native-workspace
+                 (completing-read
+                  (format "Workspace on %s: " choice)
+                  (lambda (input predicate action)
+                    (unless (= generation omnigent-transport--generation)
+                      (user-error "Server changed during workspace selection"))
+                    (if (eq action 'metadata)
+                        '(metadata (category . omnigent-workspace))
+                      (let ((parent (or (file-name-directory input) ""))
+                            (minibuffer (when-let* ((window (active-minibuffer-window)))
+                                          (window-buffer window))))
+                        (when (eq (gethash parent cache 'missing) 'missing)
+                          (puthash parent 'pending cache)
+                          (message "Reading directories...")
+                          (omnigent-sessions--workspace-directories
+                           host-id (if (string-empty-p parent) ""
+                                     (omnigent-sessions--native-workspace parent))
+                           (lambda (directory-status entries)
+                             (when active
+                               (if (not (omnigent-transport-success-p directory-status))
+                                   (progn
+                                     (remhash parent cache)
+                                     (omnigent-sessions--error "List directories"
+                                                               directory-status entries))
+                                 (puthash parent entries cache)
+                                 (when-let* ((window (active-minibuffer-window))
+                                             ((eq (window-buffer window) minibuffer)))
+                                   (with-selected-window window
+                                     (when (equal parent (or (file-name-directory
+                                                              (minibuffer-contents-no-properties)) ""))
+                                       (minibuffer-complete)))))))))
+                        (let ((entries (gethash parent cache)))
+                          (complete-with-action
+                           action (cons (if (string-empty-p parent) "~/" parent)
+                                        (unless (eq entries 'pending)
+                                          (mapcar (lambda (entry)
+                                                    (concat parent (alist-get 'name entry) "/")) entries)))
+                           input predicate)))))
+                  nil nil nil t)))
+        (setq active nil))
       (unless (= generation omnigent-transport--generation)
         (user-error "Server changed during workspace selection"))
+      (message "Checking workspace %s..." workspace)
       ;; A fresh listing validates typed paths, including empty directories.
-      (omnigent-sessions--workspace-get (omnigent-sessions--filesystem-path host-id workspace))
-      (cons host-id workspace))))
+      (omnigent-transport-request
+       "GET" (omnigent-sessions--filesystem-path host-id workspace)
+       (lambda (check-status body)
+         (cond
+          ((not (omnigent-transport-success-p check-status))
+           (omnigent-sessions--error "Check workspace" check-status body))
+          ((not (omnigent-sessions--rows-p body 'data 'name 'path 'type))
+           (omnigent-sessions--error "Check workspace" nil "Invalid filesystem listing response"))
+          (t (funcall callback (cons host-id workspace)))))))))
 
 ;;;###autoload
 (defun omnigent-sessions-create ()
-  "Create a session on the connected server, regardless of who started it.
-Select an online execution host and a workspace through the server, then
-prompt for an agent and optional title.  No workspace default or prefix
-argument is used."
+  "Create a session with asynchronously fetched host, workspace, and agent choices.
+Prompt for a workspace and optional title without a default workspace.
+Report failures through `omnigent-sessions-error-hook'."
   (interactive)
-  (let* ((generation omnigent-transport--generation)
-         (target (omnigent-sessions--read-workspace))
-         (host-id (car target))
-         (workspace (cdr target)))
-    (omnigent-transport-request
-     "GET" "/v1/agents"
-     (lambda (status body)
-       (if (not (omnigent-sessions--success-p status))
-           (omnigent-sessions--error "List agents" status)
-         (let* ((agents (append (alist-get 'data body) nil))
-                (choices (mapcar (lambda (agent)
-                                   (cons (format "%s [%s]" (alist-get 'name agent)
-                                                 (alist-get 'id agent))
-                                         (alist-get 'id agent))) agents)))
-           (if (null choices)
-               (omnigent-sessions--error "Create session" "No agents available")
-             (let* ((choice (completing-read "Agent: " choices nil t))
-                    (title (read-string "Title (optional): "))
-                    (data `(("agent_id" . ,(cdr (assoc choice choices)))
-                            ("host_id" . ,host-id)
-                            ("workspace" . ,workspace))))
-               (unless (string-empty-p title)
-                 (push (cons "title" title) data))
-               (unless (= generation omnigent-transport--generation)
-                 (user-error "Server changed during session creation"))
-               (omnigent-transport-request
-                "POST" "/v1/sessions"
-                (lambda (create-status session)
-                  (omnigent-sessions-refresh)
-                  (if (omnigent-sessions--success-p create-status)
-                      (if omnigent-sessions-open-hook
-                          (run-hook-with-args 'omnigent-sessions-open-hook session)
-                        (message "Session created; conversation view is not available yet"))
-                    (omnigent-sessions--error "Create session" create-status)))
-                data)))))))))
+  (omnigent-sessions--read-workspace
+   (apply-partially #'omnigent-sessions--workspace-selected omnigent-transport--generation)))
+
+(defun omnigent-sessions--workspace-selected (generation target)
+  "Fetch agents for GENERATION after the user selects workspace TARGET."
+  (message "Reading agents...")
+  (omnigent-transport-request
+   "GET" "/v1/agents"
+   (apply-partially #'omnigent-sessions--select-agent generation target)))
+
+(defun omnigent-sessions--select-agent (generation target status body)
+  "Present agents from BODY and create a session on GENERATION at TARGET."
+  (cond
+   ((not (omnigent-transport-success-p status))
+    (omnigent-sessions--error "List agents" status body))
+   ((not (omnigent-sessions--rows-p body 'data 'id 'name))
+    (omnigent-sessions--error "List agents" nil "Invalid agent list response"))
+   (t
+    (let* ((agents (append (alist-get 'data body) nil))
+           (choices (mapcar (lambda (agent)
+                              (cons (format "%s [%s]" (alist-get 'name agent)
+                                            (alist-get 'id agent))
+                                    (alist-get 'id agent))) agents)))
+      (if (null choices)
+          (omnigent-sessions--error "Create session" "No agents available")
+        (let* ((choice (completing-read "Agent: " choices nil t))
+               (title (read-string "Title (optional): "))
+               (data `(("agent_id" . ,(cdr (assoc choice choices)))
+                       ("host_id" . ,(car target))
+                       ("workspace" . ,(cdr target)))))
+          (unless (string-empty-p title)
+            (push (cons "title" title) data))
+          (unless (= generation omnigent-transport--generation)
+            (user-error "Server changed during session creation"))
+          (message "Creating session...")
+          (omnigent-transport-request "POST" "/v1/sessions" #'omnigent-sessions--created data)))))))
+
+(defun omnigent-sessions--created (status session)
+  "Refresh sessions and open SESSION after successful creation STATUS."
+  (unwind-protect (omnigent-sessions-refresh)
+    (cond
+     ((not (omnigent-transport-success-p status))
+      (omnigent-sessions--error "Create session" status session))
+     ((not (and (listp session) (stringp (alist-get 'id session))))
+      (omnigent-sessions--error "Create session" nil "Invalid created session response"))
+     (omnigent-sessions-open-hook
+      (run-hook-with-args 'omnigent-sessions-open-hook session))
+     (t (message "Session created; conversation view is not available yet")))))
 
 (defun omnigent-sessions-action (id type callback)
   "Send event TYPE for session ID and invoke CALLBACK with the result.
@@ -294,8 +361,8 @@ after the request completes."
   (omnigent-transport-post-session-event
    id `(("type" . ,type))
    (lambda (status body)
-     (omnigent-sessions-refresh)
-     (funcall callback status body))))
+     (unwind-protect (omnigent-sessions-refresh)
+       (funcall callback status body)))))
 
 (defun omnigent-sessions-delete (id callback)
   "Delete session ID and invoke CALLBACK with the result.
@@ -303,8 +370,8 @@ CALLBACK receives the HTTP status and response body.  Refresh the session list
 after the request completes.  The caller must obtain confirmation first."
   (omnigent-transport-delete-session
    id (lambda (status body)
-        (omnigent-sessions-refresh)
-        (funcall callback status body))))
+        (unwind-protect (omnigent-sessions-refresh)
+          (funcall callback status body)))))
 
 (provide 'omnigent-sessions)
 ;;; omnigent-sessions.el ends here

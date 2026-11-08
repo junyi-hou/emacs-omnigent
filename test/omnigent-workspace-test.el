@@ -26,6 +26,36 @@
       (omnigent-workspace-diff "id" (lambda (status body) (setq result (cons status body))))
       (should (= (car result) 503)))))
 
+(ert-deftest omnigent-workspace-consumer-errors-are-not-request-failures ()
+  "Propagate consumer errors without delivering a second operation result."
+  (dolist (operation '(omnigent-workspace-diff omnigent-workspace-list))
+    (dolist (paths '([] [((path . "file"))]))
+      (let ((calls 0))
+        (cl-letf (((symbol-function 'omnigent-transport-request)
+                   (lambda (_method path callback &optional _data)
+                     (funcall callback 200
+                              (cond
+                               ((string-suffix-p "/filesystem" path) '((base . "/workspace")))
+                               ((string-suffix-p "/changes" path) `((data . ,paths)))
+                               (t '((before . "old") (after . "new"))))))))
+          (should (equal (should-error
+                          (funcall operation "id"
+                                   (lambda (&rest _)
+                                     (cl-incf calls)
+                                     (error "Consumer failed"))))
+                         '(error "Consumer failed")))
+          (should (= calls 1)))))))
+
+(ert-deftest omnigent-workspace-list-rejects-malformed-root ()
+  "Report malformed successful root responses through the result callback."
+  (dolist (body '(nil "not JSON" [] ((base . 7))))
+    (let (result)
+      (cl-letf (((symbol-function 'omnigent-transport-request)
+                 (lambda (_method _path callback &optional _data)
+                   (funcall callback 200 body))))
+        (omnigent-workspace-list "id" (lambda (status data) (setq result (list status data))))
+        (should (equal result '(nil "Invalid environment root response")))))))
+
 (ert-deftest omnigent-workspace-list-and-access ()
   "Check workspace listing and direct access restrictions."
   (let (result)

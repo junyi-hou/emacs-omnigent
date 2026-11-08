@@ -124,6 +124,21 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
                   #'omnigent-transport--url-callback
                   (list callback omnigent-transport--generation) t t)))
 
+(defun omnigent-transport-success-p (status)
+  "Return non-nil when STATUS is an HTTP success code from 200 through 299."
+  (and (integerp status) (<= 200 status 299)))
+
+(defun omnigent-transport-error-message (action status body)
+  "Describe ACTION's failure STATUS with diagnostics from BODY.
+Prefer server `detail' or `error' fields; otherwise retain the response body.
+A nil STATUS identifies a client-side processing failure.  This function
+only formats text; the caller decides how to present it."
+  (let ((detail (or (and (listp body)
+                         (or (alist-get 'detail body) (alist-get 'error body)))
+                    body)))
+    (format "%s: %s%s" action (or status "client error")
+            (if (or (null detail) (equal detail "")) "" (format " (%s)" detail)))))
+
 (defun omnigent-transport-get-session (session-id callback)
   "Get SESSION-ID and call CALLBACK with status and response body."
   (omnigent-transport-request "GET" (omnigent-transport--session-path session-id) callback))
@@ -244,7 +259,7 @@ ITEMS contains items already fetched in chronological order."
      (lambda (status page)
        (when (and (not (omnigent-stream-stopped stream))
                   (= attempt (omnigent-stream-attempt stream)))
-         (if (not (and (integerp status) (<= 200 status 299)))
+         (if (not (omnigent-transport-success-p status))
              (omnigent-transport--stream-snapshot stream attempt status page)
            (let* ((data (append (alist-get 'data page) nil))
                   (remaining (- remaining (length data)))
@@ -263,7 +278,7 @@ ITEMS contains items already fetched in chronological order."
      (lambda (status body)
        (when (and (not (omnigent-stream-stopped stream))
                   (= attempt (omnigent-stream-attempt stream)))
-         (if (not (and (integerp status) (<= 200 status 299)))
+         (if (not (omnigent-transport-success-p status))
              (omnigent-transport--stream-snapshot stream attempt status body)
            (omnigent-transport--stream-load-items
             stream attempt body (max 1 omnigent-transport-history-limit) nil nil)))))))

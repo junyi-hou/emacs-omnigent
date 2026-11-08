@@ -3,6 +3,26 @@
 (require 'ert)
 (require 'omnigent-transport)
 
+(ert-deftest omnigent-transport-success-codes ()
+  "Accept only integer HTTP success codes, including both range endpoints."
+  (dolist (status '(200 202 204 299))
+    (should (omnigent-transport-success-p status)))
+  (dolist (status '(199 300 500 200.0 "200" nil t (:error (connection-failed))))
+    (should-not (omnigent-transport-success-p status))))
+
+(ert-deftest omnigent-transport-error-message-preserves-diagnostics ()
+  "Format HTTP, transport, and local failures without discarding response details."
+  (dolist (case '((403 ((detail . "Access denied")) "Read: 403 (Access denied)")
+                  (422 ((detail . [((msg . "Required"))])) "Read: 422 ([((msg . Required))])")
+                  (502 "Upstream unavailable" "Read: 502 (Upstream unavailable)")
+                  (500 ((error . "Runner failed")) "Read: 500 (Runner failed)")
+                  (500 ((reason . "Failure")) "Read: 500 (((reason . Failure)))")
+                  (204 nil "Read: 204")
+                  (nil "Invalid response" "Read: client error (Invalid response)")
+                  ((:error (connection-failed)) nil "Read: (:error (connection-failed))")))
+    (should (equal (omnigent-transport-error-message "Read" (nth 0 case) (nth 1 case))
+                   (nth 2 case)))))
+
 (ert-deftest omnigent-transport-splits-sse-frames-across-chunks ()
   "Keep partial frames until a blank-line delimiter arrives."
   (let* ((first (omnigent-transport--split-sse-frames
