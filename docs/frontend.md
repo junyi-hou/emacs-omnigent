@@ -97,7 +97,11 @@ mark the constants with a `ponytail:` comment naming that upgrade path.
 Faces: `omnigent-ui-user` and `omnigent-ui-agent` for message labels, `omnigent-ui-tool`
 for tool headers, `omnigent-ui-reasoning` for reasoning, and `omnigent-ui-error` for
 failed status and interrupt markers. Use plain text, not Markdown rendering, in v1. Do
-not add a plan panel or usage display in v1.
+not add a plan panel in v1.
+
+Show the harness, model, reasoning effort, access mode, and context window usage in the
+conversation header. Show unknown values when the server does not report them. Update
+the header from session snapshots and stream events.
 
 ## Elicitations
 

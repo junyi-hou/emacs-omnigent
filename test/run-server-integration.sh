@@ -31,7 +31,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 mkdir -p "$tmp/bin" "$tmp/config"
 git clone --quiet https://github.com/junyi-hou/mock-acp.git "$tmp/mock-acp"
-git -C "$tmp/mock-acp" checkout --quiet a835bac254932c7f91905c087a893e9053e8a4c4
+git -C "$tmp/mock-acp" checkout --quiet 549bab49a1e24e3a1d114adcf9fc73366def1c28
 printf '#!/bin/sh\nexec "%s" "%s" "$@"\n' \
   "$python_bin" "$tmp/mock-acp/src/main.py" > "$tmp/bin/mock-acp"
 chmod +x "$tmp/bin/mock-acp"

@@ -16,6 +16,9 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
   "Session ID associated with the current conversation buffer.")
 (defvar-local omnigent-conversation-agent-name nil
   "Agent display name from the latest successful session snapshot.")
+(defvar-local omnigent-conversation-header-data nil
+  "Session settings and context usage from snapshots and stream events.")
+(defvar-local omnigent-conversation--permission-read-only nil)
 (defvar-local omnigent-conversation--elicitations nil)
 (defvar-local omnigent-conversation--elicitation-drafts nil)
 (defvar-local omnigent-conversation--elicitation-submitting nil)
@@ -177,6 +180,29 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
     (pcase (cl-find-if (lambda (entry) (member name (car entry)))
                        omnigent-conversation--event-handlers)
       (`(,_ . ,handler) (funcall handler data)))
+    (pcase name
+      ("session.model"
+       (setf (alist-get 'llm_model omnigent-conversation-header-data) (alist-get 'model data)))
+      ("session.reasoning_effort"
+       (setf (alist-get 'reasoning_effort omnigent-conversation-header-data)
+             (alist-get 'reasoning_effort data)))
+      ((or "session.permission_mode" "session.codex_approval_mode")
+       (setf (alist-get 'access_mode omnigent-conversation-header-data)
+             (alist-get (if (equal name "session.permission_mode")
+                            'permission_mode 'approval_mode) data)))
+      ("session.usage"
+       (dolist (field '((context_tokens . last_total_tokens) (context_window . context_window)))
+         (when (numberp (alist-get (car field) data))
+           (setf (alist-get (cdr field) omnigent-conversation-header-data)
+                 (alist-get (car field) data)))))
+      ("response.completed"
+       (let* ((usage (alist-get 'usage (alist-get 'response data)))
+              (tokens (or (alist-get 'context_tokens usage) (alist-get 'total_tokens usage)))
+              (model (alist-get 'model usage)))
+         (when (numberp tokens)
+           (setf (alist-get 'last_total_tokens omnigent-conversation-header-data) tokens))
+         (when (and (stringp model) (not (string-empty-p model)))
+           (setf (alist-get 'llm_model omnigent-conversation-header-data) model)))))
     (when (and (equal name "session.status")
                (equal (alist-get 'status data) "failed") (alist-get 'error data))
       (omnigent-conversation--put-item
@@ -197,7 +223,22 @@ Replay queued stream events and notify the elicitation change hook."
              (message "%s" (omnigent-transport-error-message "Omnigent snapshot failed" status body))
              (dolist (event (nreverse omnigent-conversation--pending-events))
                (omnigent-conversation--event (car event) (cdr event))))
-    (setq omnigent-conversation-agent-name (alist-get 'agent_name body))
+    (when omnigent-conversation--permission-read-only
+      (setq buffer-read-only nil))
+    (setq omnigent-conversation--permission-read-only
+          (equal (alist-get 'permission_level body) 1))
+    (when omnigent-conversation--permission-read-only
+      (setq buffer-read-only t))
+    (setq omnigent-conversation-agent-name (alist-get 'agent_name body)
+          omnigent-conversation-header-data
+          `((harness . ,(alist-get 'harness body))
+            (llm_model . ,(alist-get 'llm_model body))
+            (reasoning_effort . ,(alist-get 'reasoning_effort body))
+            (permission_level . ,(alist-get 'permission_level body))
+            (access_mode . ,(or (alist-get 'omnigent.claude_native.permission_mode (alist-get 'labels body))
+                                (alist-get 'omnigent.codex_native.approval_mode (alist-get 'labels body))))
+            (last_total_tokens . ,(alist-get 'last_total_tokens body))
+            (context_window . ,(alist-get 'context_window body))))
     (clrhash omnigent-conversation--items)
     (clrhash omnigent-conversation--elicitations)
     (setq omnigent-conversation--elicitation-order nil)

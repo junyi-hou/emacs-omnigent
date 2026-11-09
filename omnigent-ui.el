@@ -168,6 +168,11 @@
          (row (cl-find id omnigent-sessions :key (lambda (session) (alist-get 'id session))
                        :test #'equal)))
     (unless id (user-error "No session at point"))
+    (when (or (and (derived-mode-p 'omnigent-conversation-mode) buffer-read-only)
+              (equal (alist-get 'permission_level row) 1)
+              (when-let* ((buffer (omnigent-sessions-buffer id)))
+                (with-current-buffer buffer buffer-read-only)))
+      (user-error "This session is read-only"))
     (cons id (or (alist-get 'title row) "Untitled"))))
 
 (defun omnigent-ui--action-result (action title status body)
@@ -187,7 +192,7 @@
       (when-let* ((buffer (omnigent-sessions-buffer id)))
         (with-current-buffer buffer
           (omnigent-conversation--close)
-          (setq buffer-read-only t)
+          (setq buffer-read-only t omnigent-conversation--permission-read-only nil)
           (dolist (widget omnigent-ui--widgets) (widget-apply widget :deactivate))))
       (remhash id omnigent-ui--workspace-cache)
       (remhash id omnigent-ui--workspace-pending)
@@ -474,6 +479,29 @@
   (when (equal name "session.changed_files.invalidated")
     (omnigent-ui-workspace-refresh omnigent-conversation-session-id)))
 
+(defun omnigent-ui--conversation-header ()
+  "Update the header from the current session settings and context usage."
+  (let ((data omnigent-conversation-header-data))
+    (setq header-line-format
+          (format "Harness: %s | Model: %s | Effort: %s | Access: %s | Context: %s%s"
+                  (or (alist-get 'harness data) "unknown")
+                  (or (alist-get 'llm_model data) "unknown")
+                  (or (alist-get 'reasoning_effort data) "unknown")
+                  (or (alist-get 'access_mode data) "unknown")
+                  (let ((used (alist-get 'last_total_tokens data))
+                        (window (alist-get 'context_window data)))
+                    (cond
+                     ((and (numberp used) (numberp window) (> window 0))
+                      (format "%s / %s tokens (%.0f%%)" used window
+                              (* 100.0 (/ (float used) window))))
+                     ((numberp used) (format "%s tokens used (limit unknown)" used))
+                     ((and (numberp window) (> window 0))
+                      (format "unknown / %s tokens" window))
+                     (t "unknown")))
+                  (pcase (alist-get 'permission_level data)
+                    (1 " [R]") (2 " [E]") ((or 3 4) " [M]") (_ ""))))
+    (force-mode-line-update)))
+
 (defun omnigent-ui-conversation-setup ()
   "Initialize transcript, request and composer boundaries for this session."
   (setq omnigent-ui--folds (make-hash-table :test 'equal)
@@ -488,7 +516,8 @@
     (set-marker omnigent-ui--composer-label (point-min))
     (set-marker omnigent-conversation--prompt-start (point))
     (set-marker-insertion-type omnigent-conversation--prompt-start nil))
-  (setq-local header-line-format (format "Session %s" omnigent-conversation-session-id))
+  (omnigent-ui--conversation-header)
+  (add-hook 'omnigent-conversation-change-hook #'omnigent-ui--conversation-header nil t)
   (add-hook 'omnigent-conversation-change-hook #'omnigent-ui--transcript nil t)
   (add-hook 'omnigent-conversation-elicitation-change-hook #'omnigent-ui--requests nil t)
   (add-hook 'omnigent-conversation-event-hook #'omnigent-ui--conversation-event nil t)
@@ -699,6 +728,8 @@ CHOICES is a widget choice list; REQUIRED and SECRET control input handling."
         (omnigent-ui--request request))
       (set-marker omnigent-ui--request-start start)
       (widget-setup)
+      (when buffer-read-only
+        (dolist (widget omnigent-ui--widgets) (widget-apply widget :deactivate)))
       (omnigent-ui--restore-edit-hooks)
       (goto-char position)
       (when field-location

@@ -78,6 +78,36 @@
       (when stream (omnigent-transport-stop-session-stream stream))
       (when updates (omnigent-transport-stop-session-updates updates)))))
 
+(ert-deftest omnigent-mock-acp-conversation-header ()
+  "Show available session data before and after a mock ACP usage update."
+  (let ((id (omnigent-integration-create-session t)) buffer observer snapshot events)
+    (unwind-protect
+        (save-window-excursion
+          (omnigent-conversation-open id)
+          (setq buffer (current-buffer))
+          (setq observer (omnigent-transport-start-session-stream
+                          id (lambda (name data) (push (cons name data) events))
+                          (lambda (status _body) (setq snapshot status))))
+          (with-timeout (15 (ert-fail "Conversation snapshot timed out"))
+            (while (or (not snapshot)
+                       (with-current-buffer buffer omnigent-conversation--loading))
+              (accept-process-output nil 0.1)))
+          (should (= snapshot 200))
+          (with-current-buffer buffer
+            (should (equal header-line-format
+                           "Harness: acp | Model: unknown | Effort: unknown | Access: unknown | Context: unknown [M]"))
+            (insert "test usage")
+            (omnigent-conversation-send))
+          (with-timeout (30 (ert-fail "Mock usage turn timed out"))
+            (while (not (assoc "response.completed" events))
+              (accept-process-output nil 0.1)))
+          (with-current-buffer buffer
+            ;; The mock sends ACP usage, but this server does not expose it here.
+            (should (equal header-line-format
+                           "Harness: acp | Model: unknown | Effort: unknown | Access: unknown | Context: unknown [M]"))))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (when observer (omnigent-transport-stop-session-stream observer)))))
+
 (ert-deftest omnigent-session-list-refresh ()
   "Load a session created on the temporary server."
   (let ((id (omnigent-integration-create-session))
@@ -521,6 +551,76 @@
             (with-current-buffer buffer
               (should (string-match-p "You:\ntest agent_message" (buffer-string)))
               (should (string-match-p "The capital of France is Paris\\." (buffer-string))))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest omnigent-mock-acp-change-model ()
+  "Change the model before the first turn and check the runner's ACP result."
+  (let ((root (getenv "OMNIGENT_TEST_TMP"))
+        (id (omnigent-integration-create-session t)) buffer result)
+    (skip-unless root)
+    (unwind-protect
+        (save-window-excursion
+          (setq buffer (omnigent-functional-open id))
+          (cl-letf* ((original (symbol-function 'omnigent-transport-set-session-model))
+                     ((symbol-function 'omnigent-transport-set-session-model)
+                      (lambda (session model callback)
+                        (funcall original session model
+                                 (lambda (status body)
+                                   (setq result (cons status body))
+                                   (funcall callback status body)))))
+                     ((symbol-function 'read-string) (lambda (&rest _) "mock-model-2")))
+            (with-current-buffer buffer (call-interactively #'omnigent-conversation-set-model))
+            (omnigent-functional-wait "Model change timed out" result))
+          (should (omnigent-transport-success-p (car result)))
+          (omnigent-functional-send buffer "test model")
+          ;; The model-change note prevents mock-acp from recognizing the prompt.
+          (omnigent-functional-wait "Runner did not apply the changed model"
+            (cl-some (lambda (file)
+                       (with-temp-buffer
+                         (insert-file-contents file)
+                         (search-forward "model set to mock-model-2" nil t)))
+                     (file-expand-wildcards
+                      (expand-file-name (concat "data/logs/runner/runner-" id "-*.log") root)))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest omnigent-mock-acp-change-model-after-chat ()
+  "Change the model after a turn and check the runner's ACP result."
+  (let ((root (getenv "OMNIGENT_TEST_TMP"))
+        (id (omnigent-integration-create-session t)) buffer result)
+    (skip-unless root)
+    (unwind-protect
+        (save-window-excursion
+          (setq buffer (omnigent-functional-open id))
+          (omnigent-functional-send buffer "test model")
+          (omnigent-functional-wait "Initial model did not appear"
+            (cl-some (lambda (item)
+                       (and (equal (alist-get 'role item) "assistant")
+                            (string-match-p "mock-model"
+                                            (format "%s" (alist-get 'content item)))))
+                     (omnigent-functional-items buffer)))
+          (omnigent-functional-wait "Initial turn did not finish"
+            (omnigent-functional-status-p id "idle"))
+          (cl-letf* ((original (symbol-function 'omnigent-transport-set-session-model))
+                     ((symbol-function 'omnigent-transport-set-session-model)
+                      (lambda (session model callback)
+                        (funcall original session model
+                                 (lambda (status body)
+                                   (setq result (cons status body))
+                                   (funcall callback status body)))))
+                     ((symbol-function 'read-string) (lambda (&rest _) "mock-model-2")))
+            (with-current-buffer buffer (call-interactively #'omnigent-conversation-set-model))
+            (omnigent-functional-wait "Model change timed out" result))
+          (should (omnigent-transport-success-p (car result)))
+          (omnigent-functional-send buffer "test model")
+          ;; The replayed history prevents mock-acp from recognizing the prompt.
+          ;; The runner logs the ACP result after the mock accepts the model.
+          (omnigent-functional-wait "Runner did not apply the changed model"
+            (cl-some (lambda (file)
+                       (with-temp-buffer
+                         (insert-file-contents file)
+                         (search-forward "model set to mock-model-2" nil t)))
+                     (file-expand-wildcards
+                      (expand-file-name (concat "data/logs/runner/runner-" id "-*.log") root)))))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (ert-deftest omnigent-mock-acp-decline-and-cancel-permission ()

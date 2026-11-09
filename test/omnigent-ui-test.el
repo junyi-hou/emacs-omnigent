@@ -38,6 +38,54 @@
          (setq omnigent-conversation--loading nil)
          ,@body))))
 
+(ert-deftest omnigent-ui-conversation-header-tracks-session-data ()
+  "Show snapshot settings and update them from partial stream events."
+  (omnigent-ui-test--conversation
+    (should (string-match-p "Harness: unknown" header-line-format))
+    (omnigent-conversation--snapshot
+     200 '((harness . "codex-native") (llm_model . "model-a")
+           (reasoning_effort . "high")
+           (labels . ((omnigent.codex_native.approval_mode . "read-only")))
+           (last_total_tokens . 100) (context_window . 1000) (items . [])))
+    (should (equal header-line-format
+                   "Harness: codex-native | Model: model-a | Effort: high | Access: read-only | Context: 100 / 1000 tokens (10%)"))
+    (omnigent-conversation--event "session.model" '((model . "model-b")))
+    (omnigent-conversation--event "session.reasoning_effort" '((reasoning_effort . "low")))
+    (omnigent-conversation--event "session.codex_approval_mode" '((approval_mode . "full-access")))
+    (omnigent-conversation--event "session.usage" '((context_tokens . 250)))
+    (should (equal header-line-format
+                   "Harness: codex-native | Model: model-b | Effort: low | Access: full-access | Context: 250 / 1000 tokens (25%)"))
+    (omnigent-conversation--event
+     "response.completed" '((response . ((model . "agent-name")
+                                          (usage . ((model . "model-c") (context_tokens . 300)
+                                                    (total_tokens . 900)))))))
+    (should (string-match-p "Model: model-c.*Context: 300 / 1000 tokens (30%)" header-line-format))
+    (omnigent-conversation--snapshot 200 '((last_total_tokens . 42) (items . [])))
+    (should (string-match-p "Context: 42 tokens used (limit unknown)" header-line-format))
+    (omnigent-conversation--snapshot 200 '((context_window . 4096) (items . [])))
+    (should (string-match-p "Context: unknown / 4096 tokens" header-line-format))
+    (omnigent-conversation--event "response.completed" '((response . ((usage . ((total_tokens . 512)))))))
+    (should (string-match-p "Context: 512 / 4096 tokens (12%)" header-line-format))))
+
+(ert-deftest omnigent-ui-conversation-user-permission ()
+  "Freeze read-only sessions and restore editing when permission increases."
+  (omnigent-ui-test--conversation
+    (insert "unsent draft")
+    (omnigent-conversation--snapshot 200 '((permission_level . 1) (items . [])))
+    (should buffer-read-only)
+    (should (string-suffix-p " [R]" header-line-format))
+    (should-error (insert "more") :type 'buffer-read-only)
+    (should-error (omnigent-conversation-send) :type 'user-error)
+    (should-error (omnigent-conversation-interrupt) :type 'user-error)
+    (should-error (omnigent-ui-stop) :type 'user-error)
+    (omnigent-conversation--snapshot 200 '((permission_level . 2) (items . [])))
+    (should-not buffer-read-only)
+    (should (string-suffix-p " [E]" header-line-format))
+    (should (equal (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max))
+                   "unsent draft"))
+    (omnigent-conversation--snapshot 200 '((permission_level . 4) (items . [])))
+    (should (string-suffix-p " [M]" header-line-format))))
+
 (ert-deftest omnigent-ui-transcript-stream-preserves-composer-and-fold ()
   "Render streamed blocks without replacing input or opening collapsed folds."
   (omnigent-ui-test--conversation

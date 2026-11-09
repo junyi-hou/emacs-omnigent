@@ -143,6 +143,11 @@ only formats text; the caller decides how to present it."
   "Get SESSION-ID and call CALLBACK with status and response body."
   (omnigent-transport-request "GET" (omnigent-transport--session-path session-id) callback))
 
+(defun omnigent-transport-set-session-model (session-id model callback)
+  "Set SESSION-ID's MODEL and call CALLBACK with status and response body."
+  (omnigent-transport-request "PATCH" (omnigent-transport--session-path session-id)
+                              callback `(("model_override" . ,model))))
+
 (defun omnigent-transport-list-sessions (callback)
   "List sessions and call CALLBACK with status and response body."
   (omnigent-transport-request

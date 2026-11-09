@@ -193,6 +193,20 @@ Use `omnigent-conversation-open' to create a conversation buffer."
          (apply-partially #'omnigent-conversation--sent buffer text))
       (error (setq omnigent-conversation--sending nil) (signal (car err) (cdr err))))))
 
+(defun omnigent-conversation-set-model (model)
+  "Change the current session's MODEL asynchronously."
+  (interactive (list (read-string "Model: ")))
+  (unless (derived-mode-p 'omnigent-conversation-mode)
+    (user-error "This is not an Omnigent conversation"))
+  (when buffer-read-only (user-error "This session is read-only"))
+  (when (string-blank-p model) (user-error "The model is empty"))
+  (omnigent-transport-set-session-model
+   omnigent-conversation-session-id model
+   (lambda (status body)
+     (if (omnigent-transport-success-p status)
+         (message "Model change requested: %s" model)
+       (message "%s" (omnigent-transport-error-message "Change model" status body))))))
+
 (defun omnigent-conversation-interrupt ()
   "Interrupt the current session asynchronously."
   (interactive)
