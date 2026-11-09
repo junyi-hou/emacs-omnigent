@@ -29,7 +29,7 @@
 (ert-deftest omnigent-workspace-consumer-errors-are-not-request-failures ()
   "Propagate consumer errors without delivering a second operation result."
   (dolist (operation '(omnigent-workspace-diff omnigent-workspace-list))
-    (dolist (paths '([] [((path . "file"))]))
+    (dolist (paths '([] [((path . "file") (status . "modified"))]))
       (let ((calls 0))
         (cl-letf (((symbol-function 'omnigent-transport-request)
                    (lambda (_method path callback &optional _data)
@@ -64,14 +64,90 @@
                  (funcall callback 200
                           (if (string-suffix-p "/filesystem" path)
                               '((base . "/workspace"))
-                            '((data . [((path . "src/file"))])))))))
+                            '((data . [((path . "src/file") (status . "modified"))])))))))
       (omnigent-workspace-list "id" (lambda (status body) (setq result (cons status body))))
       (should (equal (alist-get 'root (cdr result)) "/workspace"))
-      (should (equal (alist-get 'paths (cdr result)) '("src/file"))))
+      (should (equal (alist-get 'paths (cdr result)) '("src/file")))
+      (should (equal (alist-get 'changes (cdr result))
+                     '(((path . "src/file") (status . "modified"))))))
     (should (equal (omnigent-workspace-local-filename "/workspace" "src/file" 'local)
                    "/workspace/src/file"))
     (should-error (omnigent-workspace-local-filename "/workspace" "src/file"))
     (should-error (omnigent-workspace-local-filename "/workspace" "../secret" 'local))))
+
+(ert-deftest omnigent-workspace-file-diff-results ()
+  "Check single-file diffs, encoding, failures, and callback errors."
+  (let (request result response)
+    (cl-letf (((symbol-function 'omnigent-transport-request)
+               (lambda (_method path callback &optional _data)
+                 (setq request path)
+                 (funcall callback (car response) (cdr response)))))
+      (setq response '(200 (before . "old\n") (after . "new\n")))
+      (omnigent-workspace-file-diff "id/1" "a b/x#y"
+                                    (lambda (status body) (setq result (cons status body))))
+      (should (string-match-p "id%2F1.*a%20b/x%23y" request))
+      (should (string-match-p (regexp-quote "-old\n+new") (cdr result)))
+      (setq response '(503 (error . "unavailable")))
+      (omnigent-workspace-file-diff "id" "file"
+                                    (lambda (status body) (setq result (cons status body))))
+      (should (equal result response))
+      (setq response '(200 (before . 3) (after . "new")))
+      (omnigent-workspace-file-diff "id" "file"
+                                    (lambda (status body) (setq result (cons status body))))
+      (should-not (car result))
+      (setq response '(200 (before . nil) (after . "new")))
+      (should-error (omnigent-workspace-file-diff
+                     "id" "file" (lambda (&rest _) (error "Consumer failed")))))))
+
+(ert-deftest omnigent-workspace-list-rejects-missing-status ()
+  "Reject a change list without the status needed by the workspace view."
+  (let (result)
+    (cl-letf (((symbol-function 'omnigent-transport-request)
+               (lambda (_method path callback &optional _data)
+                 (funcall callback 200
+                          (if (string-suffix-p "/filesystem" path)
+                              '((base . "/workspace"))
+                            '((data . [((path . "file"))])))))))
+      (omnigent-workspace-list "id" (lambda (status body) (setq result (cons status body))))
+      (should (equal result '(nil . "Invalid workspace changes response"))))))
+
+(ert-deftest omnigent-workspace-list-retries-host-only-root ()
+  "Retry transient host listings, bound retries, and stop after disconnect."
+  (dolist (scenario '(ready unavailable disconnected))
+    (let ((omnigent-transport--generation 0)
+          (attempts 0) scheduled result)
+      (cl-letf (((symbol-function 'omnigent-transport-request)
+                 (lambda (_method path callback &optional _data)
+                   (if (string-suffix-p "/filesystem" path)
+                       (progn
+                         (cl-incf attempts)
+                         (funcall callback 200
+                                  (if (and (eq scenario 'ready) (> attempts 1))
+                                      '((base . "/workspace"))
+                                    '((object . "list") (data . [])))))
+                     (funcall callback 200 '((data . []))))))
+                ((symbol-function 'run-at-time)
+                 (lambda (_time _repeat function &rest _args)
+                   (setq scheduled function))))
+        (omnigent-workspace-list "id" (lambda (status body) (setq result (cons status body))))
+        (should scheduled)
+        (should-not result)
+        (when (eq scenario 'disconnected) (cl-incf omnigent-transport--generation))
+        (while scheduled
+          (let ((next scheduled))
+            (setq scheduled nil)
+            (funcall next)))
+        (pcase scenario
+          ('ready
+           (should (= attempts 2))
+           (should (= (car result) 200))
+           (should (equal (alist-get 'root (cdr result)) "/workspace")))
+          ('unavailable
+           (should (= attempts 11))
+           (should (equal result '(nil . "Invalid environment root response"))))
+          ('disconnected
+           (should (= attempts 1))
+           (should-not result)))))))
 
 (provide 'omnigent-workspace-test)
 ;;; omnigent-workspace-test.el ends here

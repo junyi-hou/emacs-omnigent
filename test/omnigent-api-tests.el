@@ -73,6 +73,24 @@
             (should (equal (file-truename (alist-get 'root (cdr listing))) root))
             (should (equal (sort (copy-sequence paths) #'string<)
                            '("deleted.txt" "nested/modified #1.txt" "nested/new #2.txt" "staged.txt")))
+            (should (equal
+                     (sort (mapcar (lambda (change)
+                                     (cons (alist-get 'path change) (alist-get 'status change)))
+                                   (alist-get 'changes (cdr listing)))
+                           (lambda (a b) (string< (car a) (car b))))
+                     '(("deleted.txt" . "deleted")
+                       ("nested/modified #1.txt" . "modified")
+                       ("nested/new #2.txt" . "created")
+                       ("staged.txt" . "modified"))))
+            (dolist (expected '(("deleted.txt" . "-deleted line")
+                                ("nested/modified #1.txt" . "+new line")
+                                ("nested/new #2.txt" . "+added without newline")
+                                ("staged.txt" . "+after staged")))
+              (let ((file-diff (omnigent-api-workspace-result
+                                (lambda (session callback)
+                                  (omnigent-workspace-file-diff session (car expected) callback)) id)))
+                (should (= 200 (car file-diff)))
+                (should (string-match-p (regexp-quote (cdr expected)) (cdr file-diff)))))
             (should (= 200 (car diff)))
             (dolist (text '("--- a/deleted.txt" "-deleted line"
                             "--- a/nested/modified #1.txt" "-old line" "+new line"
@@ -84,7 +102,16 @@
           (omnigent-api-workspace-git root "commit" "-qm" "changes")
           (let ((clean (omnigent-api-workspace-result #'omnigent-workspace-diff id)))
             (should (= 200 (car clean)))
-            (should (equal "" (cdr clean)))))
+            (should (equal "" (cdr clean))))
+          (let ((listing (omnigent-api-workspace-result #'omnigent-workspace-list id))
+                (file-diff (omnigent-api-workspace-result
+                            (lambda (session callback)
+                              (omnigent-workspace-file-diff session "nested/modified #1.txt" callback)) id)))
+            (should (= 200 (car listing)))
+            (should-not (alist-get 'paths (cdr listing)))
+            (should-not (alist-get 'changes (cdr listing)))
+            ;; The live server returns 404 when the path is no longer changed.
+            (should (= 404 (car file-diff)))))
       (unwind-protect
           (when id (omnigent-mock-test-request "DELETE" (omnigent-transport--session-path id)))
         (delete-directory root t)))))

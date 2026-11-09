@@ -1,7 +1,9 @@
 # Workspace Changes Data Design
 
-**Status:** Implemented in [omnigent-workspace.el](../omnigent-workspace.el).
-This document describes workspace data processing, not presentation or transport.
+**Status:** Diff and listing operations are implemented in
+[omnigent-workspace.el](../omnigent-workspace.el). Change-list caching and refresh
+coordination remain proposed. This document describes workspace data processing,
+not presentation or transport.
 Use the APIs in [transport.md](transport.md) for server requests and responses.
 
 ## Decision
@@ -69,10 +71,16 @@ independently of direct access.
 
 Load `omnigent-workspace` to use these asynchronous operations:
 
-- `omnigent-workspace-diff` returns a unified diff string.
-- `omnigent-workspace-list` returns the environment root and changed paths. It
-  currently discards file statuses; expose the server's created, deleted, and
-  modified statuses for the workspace view.
+- `omnigent-workspace-diff` returns a combined unified diff string.
+- `omnigent-workspace-file-diff` takes a session ID and a workspace-relative path, and
+  returns that file's unified diff string. Equal before and after contents produce an
+  empty string. The server can return 404 when a path is no longer changed. The
+  operation forwards request failures and reports invalid responses as client errors.
+- `omnigent-workspace-list` returns an alist with `root`, `paths`, and `changes`. Each
+  entry in `changes` has a `path` and the server's `status` string. The `paths` list
+  remains available for existing callers. During runner startup, a host-only filesystem
+  listing can omit the root. Retry that response every half second for up to five
+  seconds. Stop retries on disconnect. Other invalid root responses fail immediately.
 - `omnigent-workspace-local-filename` requires an explicit `local` marker or trusted
   TRAMP prefix before it constructs an Emacs filename.
 
@@ -80,17 +88,17 @@ The asynchronous operations follow the [API callback design](api-callbacks.md)
 for status values, error forwarding, and callback lifetimes. Their success
 payloads are specified above. Diff generation requires the `diff` executable.
 
-## Scope
-
 ## Change-list cache and refresh
 
 Keep a separate change-list cache for each session. Fetch the selected session's list on
 selection and on `session.changed_files.invalidated` events. The frontend can also
 request a manual refresh. Coalesce overlapping refreshes for the same session: allow at
-most one fetch at a time, and schedule one follow-up fetch if an invalidation or
-manual refresh arrives while it runs. A failed fetch leaves the cached list unchanged. Results for one session
-must not overwrite another session's cache. Clear cached state on server disconnect.
-This coordination is proposed, not yet implemented.
+most one fetch at a time, and schedule one follow-up fetch if an invalidation or manual
+refresh arrives while it runs. A failed fetch leaves the cached list unchanged. Results
+for one session must not overwrite another session's cache. Clear cached state on server
+disconnect. This coordination is proposed, not yet implemented.
+
+## Scope
 
 Rendering, buffer selection, and file-opening commands belong in
 [frontend.md](frontend.md); the workspace UI remains open for discussion. Git staging,
