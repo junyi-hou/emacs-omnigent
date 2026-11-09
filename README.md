@@ -35,11 +35,34 @@ What works:
   collapsed tool and reasoning blocks, and inline elicitation forms
   (`omnigent-ui.el`).
 
-## Using the frontend
+## Installation
 
-Load `omnigent.el` with this directory on `load-path`. Install the declared GNU
-ELPA `websocket` dependency. The client also uses `curl` for session streams and
-`diff` for workspace patches.
+Choose one of these configurations for your Emacs initialization file.
+
+With Elpaca:
+
+```elisp
+(use-package omnigent
+  :ensure (:host github :repo "junyi-hou/omnigent-emacs"))
+```
+
+With straight.el:
+
+```elisp
+(use-package omnigent
+  :straight (:host github :repo "junyi-hou/omnigent-emacs"))
+```
+
+With `use-package-vc` (Emacs 30 or later):
+
+```elisp
+(use-package omnigent
+  :vc (:url "https://github.com/junyi-hou/omnigent-emacs"))
+```
+
+Install `curl` for session streams and `diff` for workspace patches.
+
+## Using the frontend
 
 1. Connect to an existing server with `M-x omnigent-connect`. Alternatively, use
    `M-x omnigent-start-server` for a local server and host.
