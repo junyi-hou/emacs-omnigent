@@ -59,8 +59,7 @@ Buffer-local state:
   rendered twice, from the snapshot or the stream.
 - Pending elicitations, keyed by elicitation id, stored separately from transcript
   items. Session management supplies status from the session-updates WebSocket for
-  queued-message display. The conversation stream also handles failed `session.status`
-  events that carry startup errors.
+  queued-message display.
 
 The conversation buffer holds the client-side transcript state while it is open. The
 server remains authoritative for persisted session state. Mode activation calls
@@ -137,12 +136,12 @@ snapshot refreshes. Fold presentation belongs to [frontend.md](frontend.md).
 
 ## Composer and sending
 
-The composer is always enabled; session status does not block typing. Send and
-interrupt requests follow the [API callback design](api-callbacks.md). Transport
-delivers outcomes; conversation callbacks own draft updates and outcome
-handling. Keep the draft until a successful POST. On failure or uncertain
-timeout, preserve it and report the outcome. Do not resend a potentially
-accepted message automatically.
+The composer is enabled unless the conversation is read-only, such as after a session is
+removed. Session status alone does not block typing. Send and interrupt requests follow
+the [API callback design](api-callbacks.md). Transport delivers outcomes; conversation
+callbacks own draft updates and outcome handling. Keep the draft until a successful
+POST. On failure or uncertain timeout, preserve it and report the outcome. Do not resend
+a potentially accepted message automatically.
 
 - **Send** posts `{"type":"message",...}` through
   `omnigent-transport-post-session-event` without checking session status. The server
@@ -169,18 +168,12 @@ accepted message automatically.
 
 ## Harness and session errors
 
-Follow the official web frontend: render errors from `response.error` and from the
-error in `response.failed` as error blocks in the conversation. Render an error from a
-failed `session.status` too: a runner startup failure can use this event without a
-`response.failed` event. On snapshot or reconnect, include `last_task_error` for a
-failed session when it is not already represented. Reconcile errors to avoid duplicate
-blocks. These are stream events and snapshot state, not ordinary text deltas; do not
-ignore them as unknown events. Use the existing error face; defer cosmetic treatment.
-
-At implementation time, check the [server API](https://github.com/omnigent-ai/omnigent/blob/main/omnigent/server/API.md)
-for response errors, failed session status, and snapshot error fields. Compare the
-current official web frontend as well, including its error deduplication and recovery
-behavior. The cases listed here are not an exhaustive server error contract.
+Show a live error as its own transcript item, including errors reported by
+`response.error`, `response.failed`, and failed `session.status` events. Treat error
+items like other transcript items. On snapshot or reconnect, construct history from
+snapshot items only. Do not synthesize history from `last_task_error`, or retain an
+error that is absent from the snapshot. Live errors that are not persisted in the
+snapshot can disappear on refresh or reconnect. Use the error face for error items.
 
 ## Elicitations
 
@@ -201,8 +194,6 @@ See [elicitation.md](elicitation.md) for request state and resolution.
   API](https://github.com/omnigent-ai/omnigent/blob/main/omnigent/server/API.md)
   - session events, stream events, interrupt semantics
 - [Transport design](transport.md)
-- [ADR 0002: the server owns the message
-  queue](adr/0002-server-owns-the-message-queue.md)
 - [Frontend design](frontend.md)
 - [Session tree design](session-tree.md)
 

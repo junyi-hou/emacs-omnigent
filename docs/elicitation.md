@@ -39,11 +39,12 @@ confirms resolution: remove the request and clear its draft. On failure, retain
 the request and draft. A resolved event may arrive before the response; removal
 by ID must be harmless when repeated.
 
-During submission, report change-hook errors as client warnings. These errors
-must not prevent request dispatch, pending-state cleanup, or completion callback
-delivery.  A synchronous request failure clears pending state and retains the
-request and draft.  Completion callback errors remain client errors; do not
-deliver a second result.
+During submission, report change-hook errors as client warnings. These errors must not
+prevent request dispatch, pending-state cleanup, or completion callback delivery. A
+synchronous request failure clears pending state and retains the request and draft. On
+an uncertain timeout, report failure and retain the request and draft. Do not
+automatically retry or reconcile the submission in v1. Retry handling is deferred.
+Completion callback errors remain client errors; do not deliver a second result.
 
 Closing a buffer needs no confirmation. A still-pending server request can be
 loaded again when the buffer opens. Unsubmitted draft answers are lost. Pending

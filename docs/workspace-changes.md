@@ -70,7 +70,9 @@ independently of direct access.
 Load `omnigent-workspace` to use these asynchronous operations:
 
 - `omnigent-workspace-diff` returns a unified diff string.
-- `omnigent-workspace-list` returns the environment root and changed paths.
+- `omnigent-workspace-list` returns the environment root and changed paths. It
+  currently discards file statuses; expose the server's created, deleted, and
+  modified statuses for the workspace view.
 - `omnigent-workspace-local-filename` requires an explicit `local` marker or trusted
   TRAMP prefix before it constructs an Emacs filename.
 
@@ -80,7 +82,17 @@ payloads are specified above. Diff generation requires the `diff` executable.
 
 ## Scope
 
-Rendering, buffer selection, refresh policy, and file-opening commands belong in
+## Change-list cache and refresh
+
+Keep a separate change-list cache for each session. Fetch the selected session's list on
+selection and on `session.changed_files.invalidated` events. The frontend can also
+request a manual refresh. Coalesce overlapping refreshes for the same session: allow at
+most one fetch at a time, and schedule one follow-up fetch if an invalidation or
+manual refresh arrives while it runs. A failed fetch leaves the cached list unchanged. Results for one session
+must not overwrite another session's cache. Clear cached state on server disconnect.
+This coordination is proposed, not yet implemented.
+
+Rendering, buffer selection, and file-opening commands belong in
 [frontend.md](frontend.md); the workspace UI remains open for discussion. Git staging,
 commits, persistent snapshots, and session-exclusive change attribution are out of
 scope.

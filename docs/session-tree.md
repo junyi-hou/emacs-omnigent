@@ -97,13 +97,23 @@ still allowed. Manual refresh reconciles all loaded rows; rows without open conv
 buffers do not receive live updates. The transport reconnects and resends the watch set.
 
 The server sends a snapshot after each watch, changed and removed frames, and
-heartbeats. Apply frames to the watched session and its list row. For an unknown ID,
-refresh the root list rather than assuming it is a root: the server can also report
-child sessions. A removed frame removes its row. Reconcile on reconnect and manual
-refresh.
+heartbeats. Merge the fetched root list with watched sessions that have open
+conversation buffers. Keep each open session visible even when it falls outside
+the fetched list. Sort merged rows by their last known `updated_at`. Apply watched
+updates to its row. A removed frame removes its
+row. Treat a `removed` frame as session deletion, even though the server can also
+send it when access is lost. If its conversation buffer is open, freeze it as-is,
+including any draft,
+and make it read-only; do not report the deletion. Close its workspace panel. Do not infer that a session was deleted merely because a list refresh omitted
+it. After a conversation buffer closes, retain its row until the next successful
+list refresh; remove it then if it is absent from the fetched list. Reconcile on
+reconnect and manual refresh. Child sessions remain outside v1.
 
-The server owns session state. Do not poll for updates. The frontend owns the list's
-display and ordering. The conversation frontend owns user-facing actions. Child-session
+The server owns session state. Refresh the list once after Emacs becomes idle for
+10 seconds, in addition to live updates and manual refresh. Do not repeat the
+refresh during the same idle period. Keep the idle timer active while connected,
+even when the session side window is hidden; stop it on disconnect. The frontend
+owns the list's display and ordering. The conversation frontend owns user-facing actions. Child-session
 display and management are post-v1; do not fetch child lists or open child conversations
 in v1.
 

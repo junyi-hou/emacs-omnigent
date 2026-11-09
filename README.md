@@ -43,14 +43,19 @@ omit a deleted file. Omnigent does not distinguish that failure from a new file.
 
 ## TODO (post-v1)
 
+- [ ] Use a Markdown parser to render conversation messages.
+
 - [ ] Complete client reconnection after network loss or laptop sleep: detect stale
       SSE/WebSocket connections, restore subscriptions, reload server state, and
       retry failed snapshots without resending messages. See
       [the reconnection design](docs/reconnection.md).
 - [ ] Design server-to-harness retry for a failed runner startup and its saved input.
 - [ ] Design client-to-server retry for requests with no confirmed response, including
-      messages the server may already have accepted.
+      messages and elicitation responses the server may already have accepted.
 - [ ] Support workspace diffs for non-Git workspaces.
+- [ ] Integrate Magit for staging and committing workspace changes.
+- [ ] Design safe workspace file visiting for local and remote execution hosts,
+      including how to identify the host and avoid opening a file on the wrong host.
 - [ ] Design centralized authentication for remote servers, including token expiration.
 - [ ] Support connections to multiple Omnigent servers.
 - [ ] Track queued messages client-side: show messages sent while the
@@ -59,7 +64,6 @@ omit a deleted file. Omnigent does not distinguish that failure from a new file.
       [docs/conversation-buffer.md](docs/conversation-buffer.md).
 - [ ] Fetch sessions incrementally: load 20 first, then let the user fetch more.
 - [ ] Fetch older conversation items on demand.
-- [ ] Row ordering in the session tree (`updated_at` vs. `created_at`).
 - [ ] Infer execution hosts and native workspace paths from TRAMP buffers.
       Existing online hosts and their directories are already selectable through
       the server. Design automatic remote-host setup and connectivity separately.
