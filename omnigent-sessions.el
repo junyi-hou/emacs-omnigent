@@ -61,10 +61,17 @@ Run `omnigent-sessions-change-hook' on success, or the error hook on failure."
      ((not (omnigent-sessions--rows-p body 'data 'id))
       (omnigent-sessions--error "List sessions" nil "Invalid session list response"))
      (t
-      (setq omnigent-sessions
-            (cl-remove-if (lambda (row) (alist-get 'parent_session_id row))
-                          (append (alist-get 'data body) nil))
-            omnigent-sessions-truncated (eq (alist-get 'has_more body) t))
+      (let ((rows (append (alist-get 'data body) nil)))
+        (dolist (entry omnigent-sessions--buffers)
+          (when (and (buffer-live-p (cdr entry))
+                     (not (cl-find (car entry) rows :key (lambda (row) (alist-get 'id row))
+                                   :test #'equal)))
+            (when-let* ((old (cl-find (car entry) omnigent-sessions
+                                     :key (lambda (row) (alist-get 'id row)) :test #'equal)))
+              (push old rows))))
+        (setq omnigent-sessions
+              (cl-remove-if (lambda (row) (alist-get 'parent_session_id row)) rows)))
+      (setq omnigent-sessions-truncated (eq (alist-get 'has_more body) t))
       (run-hooks 'omnigent-sessions-change-hook)))))
 
 (defun omnigent-sessions--frame (frame)
@@ -80,6 +87,9 @@ Refresh the list if FRAME contains a session that is not in the list."
           (if old
               (setq omnigent-sessions (mapcar (lambda (row) (if (eq row old) item row))
                                                omnigent-sessions))
+            (when (and (omnigent-sessions-buffer id)
+                       (not (alist-get 'parent_session_id item)))
+              (push item omnigent-sessions))
             (setq unknown t)))))
      ((equal type "removed")
       (let ((ids (append (alist-get 'ids frame) nil)))

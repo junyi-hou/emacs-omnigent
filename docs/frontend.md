@@ -1,10 +1,11 @@
 # Emacs Frontend Presentation
 
-**Status:** Proposed. Session selection, conversation, and side views are not
-implemented. This document owns presentation and window arrangement.
-[session-tree.md](session-tree.md) owns session management,
-[conversation-buffer.md](conversation-buffer.md) owns conversation behavior,
-and [elicitation.md](elicitation.md) owns request and response handling.
+**Status:** Implemented in `omnigent-ui.el`. Session selection, conversation
+presentation, inline requests, and optional side views follow this v1 design. This
+document owns presentation and window arrangement. [session-tree.md](session-tree.md)
+owns session management, [conversation-buffer.md](conversation-buffer.md) owns
+conversation behavior, and [elicitation.md](elicitation.md) owns request and response
+handling.
 
 ## Arrangement
 
@@ -93,10 +94,10 @@ lines retain the first and last 400 lines and show the omitted count. Apply
 both limits deterministically on refresh. Fetching omitted content is deferred;
 mark the constants with a `ponytail:` comment naming that upgrade path.
 
-Faces: `omnigent-user` and `omnigent-agent` for message labels,
-`omnigent-tool` for tool headers, `omnigent-reasoning` for reasoning, and
-`omnigent-error` for failed status and interrupt markers. Use plain text, not
-Markdown rendering, in v1. Do not add a plan panel or usage display in v1.
+Faces: `omnigent-ui-user` and `omnigent-ui-agent` for message labels, `omnigent-ui-tool`
+for tool headers, `omnigent-ui-reasoning` for reasoning, and `omnigent-ui-error` for
+failed status and interrupt markers. Use plain text, not Markdown rendering, in v1. Do
+not add a plan panel or usage display in v1.
 
 ## Elicitations
 

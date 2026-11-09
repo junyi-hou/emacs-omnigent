@@ -4,9 +4,11 @@
 (require 'omnigent)
 
 (ert-deftest omnigent-connect-sets-server-url ()
-  "Reset transport and set the server URL without selecting a session."
-  (let ((omnigent-server-url "http://old.example") reset)
-    (cl-letf (((symbol-function 'omnigent-transport-reset)
+  "Reset transport and load frontend data without selecting a session."
+  (let ((omnigent-server-url "http://old.example") reset started)
+    (cl-letf (((symbol-function 'omnigent-ui-start)
+               (lambda () (should reset) (setq started t)))
+              ((symbol-function 'omnigent-transport-reset)
                (lambda () (setq reset t)))
               ((symbol-function 'omnigent-transport-request)
                (lambda (&rest _) (ert-fail "Unexpected request")))
@@ -14,6 +16,7 @@
                (lambda (&rest _) (ert-fail "Connecting must not launch a process"))))
       (omnigent-connect "http://example.test/"))
     (should reset)
+    (should started)
     (should (equal omnigent-server-url "http://example.test"))))
 
 (ert-deftest omnigent-list-sessions-requests-most-recent ()
@@ -52,6 +55,7 @@
                   ((symbol-function 'process-exit-status) (lambda (_) 0))
                   ((symbol-function 'process-buffer) (lambda (_) buffer))
                   ((symbol-function 'process-command) (lambda (_) (car commands)))
+                  ((symbol-function 'omnigent-ui-start) #'ignore)
                   ((symbol-function 'omnigent-transport-reset) #'ignore))
           (omnigent-start-server)
           (should (equal (car commands)

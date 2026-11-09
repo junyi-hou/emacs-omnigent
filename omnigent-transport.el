@@ -30,7 +30,7 @@
   :type 'string
   :group 'omnigent-transport)
 
-(defcustom omnigent-transport-session-limit 100
+(defcustom omnigent-transport-session-limit 1000
   "Maximum number of sessions to fetch, between 1 and 1000."
   :type 'integer
   :group 'omnigent-transport)

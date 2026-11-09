@@ -18,9 +18,9 @@
       (while (not result) (accept-process-output nil 0.1)))
     result))
 
-(defun omnigent-integration-create-session (&optional with-host)
+(defun omnigent-integration-create-session (&optional with-host workspace)
   "Create a mock agent session and return its ID.
-When WITH-HOST is non-nil, bind the session to an online host."
+When WITH-HOST is non-nil, bind it to an online host in WORKSPACE or HOME."
   (let* ((agents (omnigent-mock-test-request "GET" "/v1/agents?limit=1000"))
          (agent (cl-find-if (lambda (item) (equal (alist-get 'name item) "mock-acp"))
                             (append (alist-get 'data (cdr agents)) nil)))
@@ -32,7 +32,7 @@ When WITH-HOST is non-nil, bind the session to an online host."
                                (append (alist-get 'hosts (cdr hosts)) nil))))
         (should host)
         (setq data (append data `(("host_id" . ,(alist-get 'host_id host))
-                                  ("workspace" . ,(getenv "HOME")))))))
+                                  ("workspace" . ,(or workspace (getenv "HOME"))))))))
     (let ((created (omnigent-mock-test-request "POST" "/v1/sessions" data)))
       (should (= (car created) 201))
       (should (alist-get 'id (cdr created)))

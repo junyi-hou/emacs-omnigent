@@ -533,5 +533,35 @@
       (should-not selected)
       (should (= (length errors) 1)))))
 
+
+(ert-deftest omnigent-sessions-list-keeps-watched-roots-until-unwatched ()
+  "Merge watched server rows outside the fetched list and drop them after close."
+  (let ((omnigent-sessions '(((id . "watched") (title . "Keep"))))
+        (omnigent-sessions--refresh-number 1)
+        (omnigent-sessions--revision 0)
+        (omnigent-sessions-change-hook nil)
+        (omnigent-sessions--buffers nil))
+    (with-temp-buffer
+      (setq omnigent-sessions--buffers (list (cons "watched" (current-buffer))))
+      (omnigent-sessions--refreshed 1 0 200 '((data . [((id . "fetched"))])))
+      (should (equal (mapcar (lambda (row) (alist-get 'id row)) omnigent-sessions)
+                     '("watched" "fetched")))
+      (setq omnigent-sessions--buffers nil)
+      (omnigent-sessions--refreshed 1 0 200 '((data . [((id . "fetched"))])))
+      (should (equal omnigent-sessions '(((id . "fetched"))))))))
+
+(ert-deftest omnigent-sessions-watch-frame-adds-missing-root-row ()
+  "Use watched snapshot rows even if the bounded REST list omitted them."
+  (let ((omnigent-sessions nil)
+        (omnigent-sessions-frame-hook nil)
+        (omnigent-sessions-change-hook nil)
+        (omnigent-sessions--buffers nil))
+    (with-temp-buffer
+      (setq omnigent-sessions--buffers (list (cons "watched" (current-buffer))))
+      (cl-letf (((symbol-function 'omnigent-sessions-refresh) #'ignore))
+        (omnigent-sessions--frame
+         '((type . "snapshot") (items . [((id . "watched") (title . "Keep"))])))
+        (should (equal omnigent-sessions '(((id . "watched") (title . "Keep")))))))))
+
 (provide 'omnigent-sessions-test)
 ;;; omnigent-sessions-test.el ends here

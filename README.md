@@ -12,7 +12,8 @@ and follow child sessions and workspace changes from inside Emacs. See
 
 ## Project status
 
-Alpha. The conversation frontend is not implemented yet.
+Alpha. The v1 session, conversation, elicitation, and workspace views are
+implemented.
 
 What works:
 
@@ -30,16 +31,48 @@ What works:
 - Conversation state, snapshot parsing, and message and interrupt requests
   (`omnigent-conversation.el`).
 
-The conversation frontend, including transcript display, is not implemented.
-The session tree and session selection are also not implemented.
+- Optional session and workspace side windows, streamed plain-text transcripts,
+  collapsed tool and reasoning blocks, and inline elicitation forms
+  (`omnigent-ui.el`).
 
-The planned client can open at most 500 conversation buffers at once, because the
-server limits the WebSocket watch set to 500 sessions. This should be more than enough
+## Using the frontend
+
+Load `omnigent.el` with this directory on `load-path`. Install the declared GNU
+ELPA `websocket` dependency. The client also uses `curl` for session streams and
+`diff` for workspace patches.
+
+1. Connect to an existing server with `M-x omnigent-connect`. Alternatively, use
+   `M-x omnigent-start-server` for a local server and host.
+2. Run `M-x omnigent-ui-sessions` to show or hide the session list. Use `RET` to open a
+   session, `c` to create one, `g` to refresh, `s` to stop, or `d` to delete after
+   confirmation.
+3. Type after `> ` in a conversation. `RET` inserts a newline. `C-c C-c` sends
+   the composer; `C-c C-k` interrupts the session. Activate tool and reasoning
+   headings to expand or collapse their bodies.
+4. Use `TAB` and `S-TAB` to navigate elicitation fields and actions. Secret
+   fields use a masked minibuffer prompt, not clear text in the transcript.
+5. Run `M-x omnigent-ui-workspace` to show or hide workspace changes. Use `RET` for a
+   fresh file or combined diff, or `g` to refresh the file list. The panel opens
+   automatically for changed files until you close it yourself.
+6. Run `M-x omnigent-disconnect` to stop client connections and close
+   conversation and workspace buffers. This discards unsent drafts but does not
+   stop agents.
+
+Session lists refresh after ten seconds of idle time, including when hidden.
+Workspace refresh failures retain the previous view without a notification.
+Transcript text uses plain text, not Markdown rendering.
+
+Run `make test-unit` for offline unit checks. `make test` also runs the
+network-dependent integration runner described in
+[test/README.md](test/README.md).
+
+The client can open at most 500 conversation buffers at once, because the server
+limits the WebSocket watch set to 500 sessions. This should be more than enough
 for normal use. Close a conversation buffer to open another session.
 
-The planned v1 workspace diff treats missing file contents as empty. If Omnigent
-fails to read a Git baseline, the diff can show existing lines as additions or
-omit a deleted file. Omnigent does not distinguish that failure from a new file.
+The v1 workspace diff treats missing file contents as empty. If Omnigent fails
+to read a Git baseline, the diff can show existing lines as additions or omit a
+deleted file. Omnigent does not distinguish that failure from a new file.
 
 ## TODO (post-v1)
 

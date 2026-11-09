@@ -672,8 +672,145 @@
             (should (cl-find-if (lambda (item)
                                  (equal (omnigent-conversation--text item)
                                         (apply #'concat (make-list 3 "The capital of France is Paris.")))) items)))
-          (with-current-buffer buffer (should (equal (buffer-string) ""))))
+          (with-current-buffer buffer
+            (should (equal (buffer-substring-no-properties
+                            omnigent-conversation--prompt-start (point-max)) ""))
+            (should-not (string-match-p "discard this draft" (buffer-string)))))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(defun omnigent-functional-workspace (root)
+  "Initialize ROOT with two tracked files for workspace frontend tests."
+  (make-directory root t)
+  (write-region "before modification\n" nil (expand-file-name "modified #1.txt" root) nil 'silent)
+  (write-region "before deletion\n" nil (expand-file-name "deleted.txt" root) nil 'silent)
+  (dolist (args '(("init" "-q") ("add" ".")
+                  ("-c" "user.name=Omnigent Test" "-c" "user.email=test@example.invalid"
+                   "commit" "-qm" "baseline")))
+    (should (= 0 (apply #'call-process "git" nil nil nil "-C" root args)))))
+
+(ert-deftest omnigent-ui-workspace-live-diffs ()
+  "Select changed files and fetch fresh file and combined diffs through the UI."
+  (let ((root (file-truename (make-temp-file "omnigent-panel-" t)))
+        (omnigent-ui--selected-session nil)
+        (omnigent-ui--workspace-cache (make-hash-table :test 'equal))
+        (omnigent-ui--workspace-pending (make-hash-table :test 'equal))
+        (omnigent-ui--workspace-again (make-hash-table :test 'equal))
+        (omnigent-ui--workspace-visible nil)
+        (omnigent-ui--workspace-closed nil)
+        id conversation panel file-buffer combined-buffer)
+    (unwind-protect
+        (save-window-excursion
+          (omnigent-functional-workspace root)
+          (setq id (omnigent-integration-create-session t root))
+          (write-region "first modification\n" nil (expand-file-name "modified #1.txt" root) nil 'silent)
+          (write-region "new file\n" nil (expand-file-name "added.txt" root) nil 'silent)
+          (delete-file (expand-file-name "deleted.txt" root))
+          (omnigent-ui-open id)
+          (setq conversation (current-buffer))
+          (omnigent-functional-wait "Workspace selection did not populate the panel"
+            (and (gethash id omnigent-ui--workspace-cache)
+                 (get-buffer-window (omnigent-ui--workspace-buffer id))))
+          (setq panel (omnigent-ui--workspace-buffer id))
+          (with-current-buffer panel
+            (should (equal (buffer-string)
+                           "[unified diff]\nA added.txt\nD deleted.txt\nM modified #1.txt\n"))
+            (goto-char (point-min))
+            (forward-line 3)
+            (omnigent-ui-workspace-diff))
+          (omnigent-functional-wait "File diff did not open"
+            (setq file-buffer (get-buffer (format "*omnigent-diff: %s:modified #1.txt*" id))))
+          (with-current-buffer file-buffer
+            (should (derived-mode-p 'diff-mode))
+            (should (string-match-p "\\+first modification" (buffer-string))))
+          (write-region "second modification\n" nil (expand-file-name "modified #1.txt" root) nil 'silent)
+          (with-selected-window (get-buffer-window panel)
+            (goto-char (point-min))
+            (forward-line 3)
+            (omnigent-ui-workspace-diff))
+          (omnigent-functional-wait "Reopening the diff did not fetch fresh content"
+            (with-current-buffer file-buffer
+              (string-match-p "\\+second modification" (buffer-string))))
+          (should (eq file-buffer (get-buffer (format "*omnigent-diff: %s:modified #1.txt*" id))))
+          (with-current-buffer file-buffer
+            (should-not (string-match-p "first modification" (buffer-string))))
+          (with-current-buffer panel
+            (goto-char (point-min))
+            (omnigent-ui-workspace-diff))
+          (omnigent-functional-wait "Combined diff did not open"
+            (setq combined-buffer (get-buffer (format "*omnigent-diff: %s::all*" id))))
+          (with-current-buffer combined-buffer
+            (should (derived-mode-p 'diff-mode))
+            (dolist (text '("+new file" "-before deletion" "+second modification"))
+              (should (string-match-p (regexp-quote text) (buffer-string))))))
+      (dolist (buffer (list conversation panel file-buffer combined-buffer))
+        (when (buffer-live-p buffer) (kill-buffer buffer)))
+      (when id (omnigent-mock-test-request "DELETE" (omnigent-transport--session-path id)))
+      (delete-directory root t))))
+
+(ert-deftest omnigent-ui-workspace-live-invalidation ()
+  "A server invalidation refreshes its session without replacing another panel."
+  (let ((root (file-truename (make-temp-file "omnigent-invalidation-" t)))
+        (other-root (file-truename (make-temp-file "omnigent-other-workspace-" t)))
+        (omnigent-ui--selected-session nil)
+        (omnigent-ui--workspace-cache (make-hash-table :test 'equal))
+        (omnigent-ui--workspace-pending (make-hash-table :test 'equal))
+        (omnigent-ui--workspace-again (make-hash-table :test 'equal))
+        (omnigent-ui--workspace-visible nil)
+        (omnigent-ui--workspace-closed nil)
+        a b buffer-a buffer-b panel-a panel-b events)
+    (unwind-protect
+        (save-window-excursion
+          (omnigent-functional-workspace root)
+          (omnigent-functional-workspace other-root)
+          (write-region "other workspace change\n" nil
+                        (expand-file-name "modified #1.txt" other-root) nil 'silent)
+          (setq a (omnigent-integration-create-session t root)
+                b (omnigent-integration-create-session t other-root))
+          (write-region "selected session change\n" nil (expand-file-name "modified #1.txt" root) nil 'silent)
+          (omnigent-ui-open a)
+          (setq buffer-a (current-buffer))
+          (omnigent-functional-wait "First session workspace did not load"
+            (and (not (buffer-local-value 'omnigent-conversation--loading buffer-a))
+                 (gethash a omnigent-ui--workspace-cache)))
+          (with-current-buffer buffer-a
+            (add-hook 'omnigent-conversation-event-hook
+                      (lambda (name data) (push (cons name data) events)) nil t))
+          (setq panel-a (omnigent-ui--workspace-buffer a))
+          (omnigent-ui-open b)
+          (setq buffer-b (current-buffer))
+          (omnigent-functional-wait "Second session workspace did not display"
+            (and (gethash b omnigent-ui--workspace-cache)
+                 (get-buffer-window (omnigent-ui--workspace-buffer b))))
+          (setq panel-b (omnigent-ui--workspace-buffer b))
+          (let ((previous-b (gethash b omnigent-ui--workspace-cache))
+                (panel-text-b (with-current-buffer panel-b (buffer-string)))
+                (response (omnigent-mock-test-request
+                           "PUT" (omnigent-workspace--path a "filesystem/agent%20%231.txt")
+                           '(("content" . "written through the server\n")))))
+            (should (omnigent-transport-success-p (car response)))
+            (omnigent-functional-wait "Server invalidation was not received"
+              (assoc "session.changed_files.invalidated" events))
+            (should (equal a (alist-get 'session_id
+                                       (cdr (assoc "session.changed_files.invalidated" events)))))
+            (omnigent-functional-wait "Invalidated session cache did not refresh"
+              (member "agent #1.txt" (alist-get 'paths (gethash a omnigent-ui--workspace-cache))))
+            (should (equal omnigent-ui--selected-session b))
+            (should (get-buffer-window panel-b))
+            (should-not (get-buffer-window panel-a))
+            (should (equal previous-b (gethash b omnigent-ui--workspace-cache)))
+            (with-current-buffer panel-b (should (equal panel-text-b (buffer-string))))
+            (with-current-buffer panel-a
+              (should (string-match-p "A agent #1.txt" (buffer-string))))
+            (omnigent-ui-open a)
+            (should (get-buffer-window panel-a))
+            (with-current-buffer panel-a
+              (should (string-match-p "A agent #1.txt" (buffer-string))))))
+      (dolist (buffer (list buffer-a buffer-b panel-a panel-b))
+        (when (buffer-live-p buffer) (kill-buffer buffer)))
+      (dolist (id (delq nil (list a b)))
+        (omnigent-mock-test-request "DELETE" (omnigent-transport--session-path id)))
+      (delete-directory root t)
+      (delete-directory other-root t))))
 
 (provide 'omnigent-functional-tests)
 ;;; omnigent-functional-tests.el ends here

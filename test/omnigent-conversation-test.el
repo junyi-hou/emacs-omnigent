@@ -4,6 +4,7 @@
 (require 'omnigent-conversation)
 
 (ert-deftest omnigent-conversation-snapshot-stream-and-draft ()
+  "Reconcile snapshot and stream items while keeping the editable composer."
   (let (event snapshot stopped callback (omnigent-sessions--buffers nil))
     (cl-letf (((symbol-function 'omnigent-transport-start-session-stream)
                (lambda (_id on-event on-snapshot &optional _error on-connect)
@@ -26,7 +27,8 @@
                          '((items . [((id . "a") (type . "message")
                                       (data . ((role . "assistant")
                                                (content . [((type . "output_text") (text . "hello"))]))))])))
-                (should (equal (buffer-string) "draft"))
+                (should (equal (buffer-substring-no-properties
+                                omnigent-conversation--prompt-start (point-max)) "draft"))
                 (should (equal omnigent-conversation--order '("a")))
                 (let ((item (gethash "a" omnigent-conversation--items)))
                   (should (equal (alist-get 'role item) "assistant"))

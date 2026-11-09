@@ -10,12 +10,9 @@
 (require 'subr-x)
 (require 'omnigent-transport)
 (require 'omnigent-sessions)
-(require 'omnigent-conversation)
+(require 'omnigent-ui)
 
-(add-hook 'omnigent-sessions-open-hook
-          (lambda (session)
-            (omnigent-conversation-open (alist-get 'id session)
-                                       (alist-get 'title session))))
+(add-hook 'omnigent-sessions-open-hook #'omnigent-ui-created)
 
 (defgroup omnigent nil
   "Interact with Omnigent servers."
@@ -47,8 +44,23 @@ reset session and transport state before selecting the server."
         (copy-sequence omnigent-sessions--buffers))
   (omnigent-sessions-reset)
   (omnigent-transport-reset)
+  (omnigent-ui-reset)
   (setq omnigent-server-url (string-remove-suffix "/" url))
+  (omnigent-ui-start)
   (message "Using Omnigent server %s" omnigent-server-url))
+
+;;;###autoload
+(defun omnigent-disconnect ()
+  "Disconnect from the server and close its conversation and workspace buffers.
+Unsent drafts are lost, but agents continue to run on their execution hosts."
+  (interactive)
+  (mapc (lambda (entry)
+          (when (buffer-live-p (cdr entry)) (kill-buffer (cdr entry))))
+        (copy-sequence omnigent-sessions--buffers))
+  (omnigent-sessions-reset)
+  (omnigent-transport-reset)
+  (omnigent-ui-reset)
+  (message "Disconnected from Omnigent"))
 
 (defun omnigent--server-url-from-output (buffer)
   "Return the first HTTP URL in BUFFER, or nil if none exists."

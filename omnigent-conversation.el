@@ -14,6 +14,11 @@
 Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 (defvar-local omnigent-conversation-session-id nil
   "Session ID associated with the current conversation buffer.")
+(defvar-local omnigent-conversation-agent-name nil
+  "Agent display name from the latest successful session snapshot.")
+(defvar-local omnigent-conversation--elicitations nil)
+(defvar-local omnigent-conversation--elicitation-drafts nil)
+(defvar-local omnigent-conversation--elicitation-submitting nil)
 (defvar-local omnigent-conversation--stream nil)
 (defvar-local omnigent-conversation--items nil)
 (defvar-local omnigent-conversation--order nil)
@@ -21,9 +26,15 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 (defvar-local omnigent-conversation--pending-events nil)
 (defvar-local omnigent-conversation--loading nil)
 (defvar-local omnigent-conversation--prompt-start nil)
+(defvar-local omnigent-conversation--prompt-end nil)
 (defvar-local omnigent-conversation--sending nil)
 (defvar-local omnigent-conversation--response-id nil)
 (defvar-local omnigent-conversation--section-id nil)
+(defvar-local omnigent-conversation-change-hook nil
+  "Hook run after transcript state changes in this buffer.")
+(defvar-local omnigent-conversation-event-hook nil
+  "Hook called with stream event name and data after processing.")
+(defvar-local omnigent-conversation--elicitation-order nil)
 
 
 (defun omnigent-conversation--text (item)
@@ -98,7 +109,15 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
                         (equal (alist-get 'response_id active) response-id)
                         (equal (alist-get 'type active) kind)
                         omnigent-conversation--section-id)))))
+    (when (and (equal (alist-get 'role item) "user")
+               (let ((last (gethash (car (last omnigent-conversation--order))
+                                    omnigent-conversation--items)))
+                 (and (alist-get 'omnigent-optimistic last)
+                      (equal (omnigent-conversation--text last)
+                             (omnigent-conversation--text item)))))
+      (setq provisional (car (last omnigent-conversation--order))))
     (when provisional
+      (setf (alist-get 'omnigent-previous-id item) provisional)
       (setcar (memq provisional omnigent-conversation--order) id)
       (remhash provisional omnigent-conversation--items)
       (puthash id item omnigent-conversation--items))
@@ -157,18 +176,31 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
       (push (cons name data) omnigent-conversation--pending-events)
     (pcase (cl-find-if (lambda (entry) (member name (car entry)))
                        omnigent-conversation--event-handlers)
-      (`(,_ . ,handler) (funcall handler data)))))
+      (`(,_ . ,handler) (funcall handler data)))
+    (when (and (equal name "session.status")
+               (equal (alist-get 'status data) "failed") (alist-get 'error data))
+      (omnigent-conversation--put-item
+       `((id . ,(format "error-%s" (float-time))) (type . "error")
+         (text . ,(format "%s" (alist-get 'error data))))))
+    (when (equal name "session.interrupted")
+      (omnigent-conversation--put-item
+       `((id . ,(format "interrupt-%s" (float-time))) (type . "error")
+         (text . "Interrupted"))))
+    (run-hook-with-args 'omnigent-conversation-event-hook name data)
+    (run-hooks 'omnigent-conversation-change-hook)))
 
 (defun omnigent-conversation--snapshot (status body)
   "Apply snapshot BODY when STATUS indicates success.
 Replay queued stream events and notify the elicitation change hook."
   (if (not (omnigent-transport-success-p status))
       (progn (setq omnigent-conversation--loading nil)
-             (message "Omnigent snapshot failed: %s" status)
+             (message "%s" (omnigent-transport-error-message "Omnigent snapshot failed" status body))
              (dolist (event (nreverse omnigent-conversation--pending-events))
                (omnigent-conversation--event (car event) (cdr event))))
+    (setq omnigent-conversation-agent-name (alist-get 'agent_name body))
     (clrhash omnigent-conversation--items)
     (clrhash omnigent-conversation--elicitations)
+    (setq omnigent-conversation--elicitation-order nil)
     (dolist (request (append (alist-get 'pending_elicitations body) nil))
       (omnigent-conversation--elicitation-put request))
     (maphash (lambda (id _draft)
@@ -184,7 +216,8 @@ Replay queued stream events and notify the elicitation change hook."
     (dolist (event (nreverse omnigent-conversation--pending-events))
       (omnigent-conversation--event (car event) (cdr event))))
   (setq omnigent-conversation--pending-events nil)
-  (run-hooks 'omnigent-conversation-elicitation-change-hook))
+  (run-hooks 'omnigent-conversation-elicitation-change-hook)
+  (run-hooks 'omnigent-conversation-change-hook))
 
 (defun omnigent-conversation--close ()
   "Stop the current buffer's session stream."
@@ -210,7 +243,8 @@ Use `omnigent-conversation-open' to create a conversation buffer."
         omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
         omnigent-conversation--elicitation-submitting (make-hash-table :test 'equal)
         omnigent-conversation--loading t
-        omnigent-conversation--prompt-start (copy-marker (point-min)))
+        omnigent-conversation--prompt-start (copy-marker (point-min))
+        omnigent-conversation--prompt-end (copy-marker (point-max) t))
   (add-hook 'kill-buffer-hook #'omnigent-conversation--close nil t)
   (let ((buffer (current-buffer)))
     (setq omnigent-conversation--stream
@@ -233,7 +267,7 @@ Use `omnigent-conversation-open' to create a conversation buffer."
   (let ((buffer (omnigent-sessions-buffer id)))
     (unless buffer
       (setq buffer (generate-new-buffer (format "*omnigent: %s [%s]*"
-                                                (or title "Untitled") (substring id 0 (min 9 (length id))))))
+                                                (if (or (null title) (string-empty-p title)) "Untitled" title) (substring id 0 (min 9 (length id))))))
       (condition-case err
           (progn
             (with-current-buffer buffer
@@ -246,6 +280,7 @@ Use `omnigent-conversation-open' to create a conversation buffer."
 (defun omnigent-conversation-send ()
   "Send the composer text to the current session."
   (interactive)
+  (when buffer-read-only (user-error "This session is read-only"))
   (when omnigent-conversation--sending (user-error "A message is being sent"))
   (let ((text (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max)))
         (buffer (current-buffer)))
@@ -268,12 +303,20 @@ Use `omnigent-conversation-open' to create a conversation buffer."
           (let ((draft (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max))))
             (when (string-prefix-p text draft)
               (delete-region omnigent-conversation--prompt-start
-                             (+ omnigent-conversation--prompt-start (length text)))))
+                             (+ omnigent-conversation--prompt-start (length text))))
+            (when (equal "idle" (alist-get 'status
+                                          (cl-find omnigent-conversation-session-id omnigent-sessions
+                                                   :key (lambda (row) (alist-get 'id row)) :test #'equal)))
+              (omnigent-conversation--put-item
+               `((id . ,(make-symbol "sent")) (type . "message") (role . "user")
+                 (content . ,text) (omnigent-optimistic . t)))
+              (run-hooks 'omnigent-conversation-change-hook)))
         (message "%s" (omnigent-transport-error-message "Omnigent send failed" status body))))))
 
 (defun omnigent-conversation-interrupt ()
   "Interrupt the current session asynchronously."
   (interactive)
+  (when buffer-read-only (user-error "This session is read-only"))
   (omnigent-transport-post-session-event
    omnigent-conversation-session-id '(("type" . "interrupt"))
    #'omnigent-conversation--interrupted))
@@ -286,9 +329,6 @@ Use `omnigent-conversation-open' to create a conversation buffer."
 
 ;;; Elicitations
 
-(defvar-local omnigent-conversation--elicitations nil)
-(defvar-local omnigent-conversation--elicitation-drafts nil)
-(defvar-local omnigent-conversation--elicitation-submitting nil)
 (defvar-local omnigent-conversation-elicitation-change-hook nil
   "Functions called without arguments when elicitation state changes.")
 
@@ -296,10 +336,8 @@ Use `omnigent-conversation-open' to create a conversation buffer."
   "Return pending request events for the current conversation.
 Each event contains `elicitation_id' and `params'.  Frontends must not
 modify the returned objects."
-  (let (requests)
-    (maphash (lambda (_id request) (push request requests))
-             omnigent-conversation--elicitations)
-    requests))
+  (delq nil (mapcar (lambda (id) (gethash id omnigent-conversation--elicitations))
+                    omnigent-conversation--elicitation-order)))
 
 (defun omnigent-conversation-elicitation-draft (id)
   "Return ID's draft as a hash table with string keys.
@@ -316,6 +354,35 @@ unanswered.  The frontend must use the setter to change this table."
   (puthash id (copy-hash-table content) omnigent-conversation--elicitation-drafts)
   (run-hooks 'omnigent-conversation-elicitation-change-hook))
 
+(defun omnigent-conversation-elicitation-questions (id)
+  "Return structured questions for elicitation ID."
+  (append (alist-get 'questions
+                     (alist-get 'ask_user_question
+                                (alist-get 'params (gethash id omnigent-conversation--elicitations)))) nil))
+
+(defun omnigent-conversation-elicitation-validate (id)
+  "Return (FIELD . ERROR) pairs for ID's schema or structured questions."
+  (let ((questions (omnigent-conversation-elicitation-questions id)))
+    (if (not questions)
+        (omnigent-conversation--validate-schema id)
+      (let ((draft (omnigent-conversation-elicitation-draft id)) errors (index 0))
+        (dolist (question questions)
+          (let* ((key (format "%s" (or (alist-get 'id question) index)))
+                 (value (gethash key draft))
+                 (options (mapcar (lambda (option) (alist-get 'label option))
+                                  (append (alist-get 'options question) nil)))
+                 (values (if (eq (alist-get 'multiSelect question) t)
+                             (and (vectorp value) (append value nil)) (list value))))
+            (unless (and values
+                         (cl-every (lambda (answer)
+                                     (and (stringp answer) (not (string-empty-p answer))
+                                          (or (member answer options)
+                                              (not (eq (alist-get 'isOther question) :json-false)))))
+                                   values))
+              (push (cons key "Choose an option or enter an answer") errors)))
+          (cl-incf index))
+        (nreverse errors)))))
+
 (defun omnigent-conversation-elicitation-submitting-p (id)
   "Return non-nil when a response for ID is in flight."
   (gethash id omnigent-conversation--elicitation-submitting))
@@ -323,6 +390,9 @@ unanswered.  The frontend must use the setter to change this table."
 (defun omnigent-conversation--elicitation-put (request)
   "Store elicitation REQUEST and initialize its draft from schema defaults."
   (when-let* ((id (alist-get 'elicitation_id request)))
+    (unless (gethash id omnigent-conversation--elicitations)
+      (setq omnigent-conversation--elicitation-order
+            (append omnigent-conversation--elicitation-order (list id))))
     (puthash id request omnigent-conversation--elicitations)
     (unless (gethash id omnigent-conversation--elicitation-drafts)
       (let ((draft (make-hash-table :test 'equal)))
@@ -332,14 +402,23 @@ unanswered.  The frontend must use the setter to change this table."
             (puthash (symbol-name (car property))
                      (let ((value (alist-get 'default (cdr property))))
                        (if (null value) :null value)) draft)))
+        (let ((index 0))
+          (dolist (question (omnigent-conversation-elicitation-questions id))
+            (when-let* ((input (alist-get 'textInput question))
+                        ((assq 'default input)))
+              (puthash (format "%s" (or (alist-get 'id question) index))
+                       (alist-get 'default input) draft))
+            (cl-incf index)))
         (puthash id draft omnigent-conversation--elicitation-drafts)))))
 
 (defun omnigent-conversation--elicitation-remove (id)
   "Remove elicitation ID and its draft."
+  (setq omnigent-conversation--elicitation-order
+        (delete id omnigent-conversation--elicitation-order))
   (remhash id omnigent-conversation--elicitations)
   (remhash id omnigent-conversation--elicitation-drafts))
 
-(defun omnigent-conversation-elicitation-validate (id)
+(defun omnigent-conversation--validate-schema (id)
   "Return validation errors for ID's draft as (FIELD . MESSAGE) pairs.
 A nil FIELD identifies an unsupported or invalid schema.  Supported field
 types are string, integer, number, boolean and null.  Supported constraints
@@ -376,7 +455,10 @@ are required, enum, minimum, maximum, minLength and maxLength."
                  (value (gethash name draft missing))
                  (enum (alist-get 'enum spec)))
             (unsupported spec '(type title description default enum enumNames minimum maximum
-                                     minLength maxLength) name)
+                                     minLength maxLength format secret) name)
+            (when (and (alist-get 'format spec)
+                       (not (equal (alist-get 'format spec) "password")))
+              (problem name "Unsupported string format"))
             (dolist (key '(minimum maximum minLength maxLength))
               (when (and (assq key spec)
                          (not (if (memq key '(minLength maxLength))
@@ -419,6 +501,7 @@ are required, enum, minimum, maximum, minLength and maxLength."
 ACTION is `accept', `decline', or `cancel'.  Accept validates the draft;
 validation errors signal `user-error'.  External URL requests cannot be
 submitted here.  The change hook reports state changes to the frontend."
+  (when buffer-read-only (user-error "This session is read-only"))
   (let* ((request (or (gethash id omnigent-conversation--elicitations)
                       (user-error "Unknown elicitation: %s" id)))
          (params (alist-get 'params request))
@@ -433,7 +516,8 @@ submitted here.  The change hook reports state changes to the frontend."
     (when (eq action 'accept)
       (let ((errors (omnigent-conversation-elicitation-validate id)))
         (when errors (user-error "Invalid elicitation draft: %S" errors)))
-      (when (alist-get 'requestedSchema params)
+      (when (or (alist-get 'requestedSchema params)
+                (alist-get 'ask_user_question params))
         (let ((content (omnigent-conversation-elicitation-draft id)))
           (maphash (lambda (key value) (when (eq value :null) (puthash key nil content))) content)
           (push (cons "content" content) payload))))
