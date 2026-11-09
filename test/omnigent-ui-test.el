@@ -1,7 +1,7 @@
 ;;; omnigent-ui-test.el --- Frontend tests -*- lexical-binding: t; -*-
 
 (require 'ert)
-(require 'omnigent-ui)
+(require 'omnigent)
 
 (ert-deftest omnigent-ui-session-render-preserves-selection ()
   "Render statuses and attention while preserving the selected session."

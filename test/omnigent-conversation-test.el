@@ -1,7 +1,7 @@
 ;;; omnigent-conversation-test.el --- Conversation checks -*- lexical-binding: t; -*-
 (require 'ert)
 (require 'cl-lib)
-(require 'omnigent-conversation)
+(require 'omnigent)
 
 (ert-deftest omnigent-conversation-snapshot-stream-and-draft ()
   "Reconcile snapshot and stream items while keeping the editable composer."

@@ -79,14 +79,7 @@
             (forward-line 1))
           (when (eobp) (goto-char (point-min))))))))
 
-(defun omnigent-ui-sessions-open ()
-  "Open the session at point."
-  (interactive)
-  (let* ((id (omnigent-ui--session-id-at-point))
-         (session (cl-find id omnigent-sessions :key (lambda (row) (alist-get 'id row))
-                           :test #'equal)))
-    (unless session (user-error "No session at point"))
-    (omnigent-ui-open id (alist-get 'title session))))
+
 
 (defvar omnigent-ui-sessions-mode-map
   (let ((map (make-sparse-keymap)))
@@ -100,20 +93,7 @@
     map)
   "Keymap for `omnigent-ui-sessions-mode'.")
 
-(define-derived-mode omnigent-ui-sessions-mode special-mode "Omnigent Sessions"
-  "Major mode for the Omnigent session list."
-  (setq-local truncate-lines t))
 
-;;;###autoload
-(defun omnigent-ui-sessions ()
-  "Show or hide the Omnigent session list in a left side window."
-  (interactive)
-  (let ((buffer (get-buffer-create "*omnigent-sessions*")))
-    (with-current-buffer buffer (omnigent-ui-sessions-mode))
-    (omnigent-ui-sessions-render)
-    (if-let* ((window (get-buffer-window buffer)))
-        (delete-window window)
-      (display-buffer-in-side-window buffer '((side . left) (slot . -1))))))
 
 ;;; Connection and selection
 
@@ -126,10 +106,7 @@
 (defvar omnigent-ui--changing-windows nil)
 (defvar-local omnigent-ui--workspace-id nil)
 
-(defun omnigent-ui-refresh ()
-  "Refresh the full root session list."
-  (interactive)
-  (let ((omnigent-transport-session-limit 1000)) (omnigent-sessions-refresh)))
+
 
 (defun omnigent-ui-start ()
   "Load server data and start idle refresh, without forcing side windows."
@@ -199,19 +176,9 @@
     (message "%s" (omnigent-transport-error-message
                    (format "%s session %s" action title) status body))))
 
-(defun omnigent-ui-stop ()
-  "Stop the selected session without deleting its history."
-  (interactive)
-  (pcase-let ((`(,id . ,title) (omnigent-ui--action-target)))
-    (omnigent-sessions-action id "stop_session"
-                              (apply-partially #'omnigent-ui--action-result "Stop" title))))
 
-(defun omnigent-ui-delete ()
-  "Delete the selected session after confirmation."
-  (interactive)
-  (pcase-let ((`(,id . ,title) (omnigent-ui--action-target)))
-    (when (yes-or-no-p (format "Permanently delete session %s? " title))
-      (omnigent-sessions-delete id (apply-partially #'omnigent-ui--action-result "Delete" title)))))
+
+
 
 (defun omnigent-ui--frame (frame)
   "Freeze removed sessions and close their workspace panel for FRAME."
@@ -238,9 +205,7 @@
     map)
   "Keymap for the workspace side view.")
 
-(define-derived-mode omnigent-ui-workspace-mode special-mode "Omnigent Workspace"
-  "Show changed workspace-relative paths for one session."
-  (setq-local truncate-lines t))
+
 
 (defun omnigent-ui--workspace-buffer (id)
   "Return the separate workspace buffer for session ID."
@@ -285,29 +250,9 @@
       (setq omnigent-ui--workspace-visible nil omnigent-ui--workspace-closed t))
     (omnigent-ui--selection)))
 
-(defun omnigent-ui-workspace ()
-  "Show or hide the selected session's workspace panel."
-  (interactive)
-  (unless omnigent-ui--selected-session (user-error "Select a session first"))
-  (if omnigent-ui--workspace-visible
-      (progn (omnigent-ui--workspace-hide) (setq omnigent-ui--workspace-closed t))
-    (setq omnigent-ui--workspace-closed nil omnigent-ui--workspace-visible t)
-    (omnigent-ui--workspace-display)
-    (omnigent-ui-workspace-refresh)))
 
-(defun omnigent-ui-workspace-refresh (&optional id)
-  "Refresh workspace ID, or the current panel, coalescing concurrent requests."
-  (interactive)
-  (setq id (or id omnigent-ui--workspace-id omnigent-ui--selected-session))
-  (when id
-    (if (gethash id omnigent-ui--workspace-pending)
-        (puthash id t omnigent-ui--workspace-again)
-      (let ((token (make-symbol "workspace-fetch")))
-        (puthash id token omnigent-ui--workspace-pending)
-        (condition-case nil
-            (omnigent-workspace-list id (apply-partially #'omnigent-ui--workspace-result
-                                                       id omnigent-transport--generation token))
-          (error (remhash id omnigent-ui--workspace-pending)))))))
+
+
 
 (defun omnigent-ui--workspace-result (id generation token status data)
   "Cache workspace DATA for ID on successful STATUS from GENERATION and TOKEN."
@@ -345,17 +290,7 @@
         (goto-char (point-min)) (forward-line (max 0 (1- line)))
         (when (and (eobp) (> (point) (point-min))) (forward-line -1))))))
 
-(defun omnigent-ui-workspace-diff ()
-  "Fetch a fresh file or combined diff for the selected workspace row."
-  (interactive)
-  (let ((id omnigent-ui--workspace-id)
-        (path (get-text-property (line-beginning-position) 'omnigent-ui-path)))
-    (unless (and id path) (user-error "No changed file at point"))
-    (let ((callback (apply-partially #'omnigent-ui--diff-result id path)))
-      (condition-case nil
-          (if (eq path :all) (omnigent-workspace-diff id callback)
-            (omnigent-workspace-file-diff id path callback))
-        (error nil)))))
+
 
 (defun omnigent-ui--diff-result (id path status diff)
   "Display successful DIFF for ID and PATH, leaving old buffers on failure."

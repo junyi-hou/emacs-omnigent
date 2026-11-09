@@ -232,67 +232,9 @@ Replay queued stream events and notify the elicitation change hook."
     map)
   "Keymap for `omnigent-conversation-mode'.")
 
-(define-derived-mode omnigent-conversation-mode text-mode "Omnigent"
-  "Major mode for a conversation transcript and composer.
-Use `omnigent-conversation-open' to create a conversation buffer."
-  (unless omnigent-conversation--session-id
-    (error "A session ID is required"))
-  (setq omnigent-conversation-session-id omnigent-conversation--session-id
-        omnigent-conversation--items (make-hash-table :test 'equal)
-        omnigent-conversation--elicitations (make-hash-table :test 'equal)
-        omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
-        omnigent-conversation--elicitation-submitting (make-hash-table :test 'equal)
-        omnigent-conversation--loading t
-        omnigent-conversation--prompt-start (copy-marker (point-min))
-        omnigent-conversation--prompt-end (copy-marker (point-max) t))
-  (add-hook 'kill-buffer-hook #'omnigent-conversation--close nil t)
-  (let ((buffer (current-buffer)))
-    (setq omnigent-conversation--stream
-          (omnigent-transport-start-session-stream
-           omnigent-conversation-session-id
-           (lambda (name data) (when (buffer-live-p buffer)
-                                 (with-current-buffer buffer (omnigent-conversation--event name data))))
-           (lambda (status body) (when (buffer-live-p buffer)
-                                   (with-current-buffer buffer (omnigent-conversation--snapshot status body))))
-           (lambda (err) (message "Omnigent stream: %s" err))
-           (lambda () (when (buffer-live-p buffer)
-                        (with-current-buffer buffer
-                          (setq omnigent-conversation--loading t
-                                omnigent-conversation--pending-events nil))))))))
 
-;;;###autoload
-(defun omnigent-conversation-open (id &optional title)
-  "Open the conversation for session ID, with optional TITLE."
-  (interactive "sSession ID: ")
-  (let ((buffer (omnigent-sessions-buffer id)))
-    (unless buffer
-      (setq buffer (generate-new-buffer (format "*omnigent: %s [%s]*"
-                                                (if (or (null title) (string-empty-p title)) "Untitled" title) (substring id 0 (min 9 (length id))))))
-      (condition-case err
-          (progn
-            (with-current-buffer buffer
-              (let ((omnigent-conversation--session-id id))
-                (omnigent-conversation-mode)))
-            (omnigent-sessions-register-buffer id buffer))
-        (error (kill-buffer buffer) (signal (car err) (cdr err)))))
-    (pop-to-buffer buffer)))
 
-(defun omnigent-conversation-send ()
-  "Send the composer text to the current session."
-  (interactive)
-  (when buffer-read-only (user-error "This session is read-only"))
-  (when omnigent-conversation--sending (user-error "A message is being sent"))
-  (let ((text (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max)))
-        (buffer (current-buffer)))
-    (when (string-blank-p text) (user-error "The message is empty"))
-    (setq omnigent-conversation--sending t)
-    (condition-case err
-        (omnigent-transport-post-session-event
-         omnigent-conversation-session-id
-         `(("type" . "message") ("data" . (("role" . "user")
-                    ("content" . [(("type" . "input_text") ("text" . ,text))]))))
-         (apply-partially #'omnigent-conversation--sent buffer text))
-      (error (setq omnigent-conversation--sending nil) (signal (car err) (cdr err))))))
+
 
 (defun omnigent-conversation--sent (buffer text status body)
   "Handle send STATUS in BUFFER, removing submitted TEXT only on success."
@@ -313,13 +255,7 @@ Use `omnigent-conversation-open' to create a conversation buffer."
               (run-hooks 'omnigent-conversation-change-hook)))
         (message "%s" (omnigent-transport-error-message "Omnigent send failed" status body))))))
 
-(defun omnigent-conversation-interrupt ()
-  "Interrupt the current session asynchronously."
-  (interactive)
-  (when buffer-read-only (user-error "This session is read-only"))
-  (omnigent-transport-post-session-event
-   omnigent-conversation-session-id '(("type" . "interrupt"))
-   #'omnigent-conversation--interrupted))
+
 
 (defun omnigent-conversation--interrupted (status body)
   "Report a failed interrupt STATUS; successful acceptance needs no UI change."

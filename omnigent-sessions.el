@@ -41,14 +41,7 @@
                         (cl-every (lambda (field) (stringp (alist-get field row))) fields)))
                  (alist-get key body))))
 
-(defun omnigent-sessions-refresh ()
-  "Request the root session list asynchronously.
-Run `omnigent-sessions-change-hook' on success, or the error hook on failure."
-  (interactive)
-  (let ((number (cl-incf omnigent-sessions--refresh-number))
-        (revision omnigent-sessions--revision))
-    (omnigent-transport-list-sessions
-     (apply-partially #'omnigent-sessions--refreshed number revision))))
+
 
 (defun omnigent-sessions--refreshed (number revision status body)
   "Apply list BODY for refresh NUMBER and REVISION when STATUS succeeds."
@@ -308,15 +301,6 @@ Continue through CALLBACK after validating the path on GENERATION's server."
           ((not (omnigent-sessions--rows-p body 'data 'name 'path 'type))
            (omnigent-sessions--error "Check workspace" nil "Invalid filesystem listing response"))
           (t (funcall callback (cons host-id workspace)))))))))
-
-;;;###autoload
-(defun omnigent-sessions-create ()
-  "Create a session with asynchronously fetched host, workspace, and agent choices.
-Prompt for a workspace and optional title without a default workspace.
-Report failures through `omnigent-sessions-error-hook'."
-  (interactive)
-  (omnigent-sessions--read-workspace
-   (apply-partially #'omnigent-sessions--workspace-selected omnigent-transport--generation)))
 
 (defun omnigent-sessions--workspace-selected (generation target)
   "Fetch agents for GENERATION after the user selects workspace TARGET."

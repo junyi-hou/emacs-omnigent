@@ -1,6 +1,6 @@
 ;;; omnigent-sessions-test.el --- Session state checks -*- lexical-binding: t; -*-
 (require 'ert)
-(require 'omnigent-sessions)
+(require 'omnigent)
 
 (ert-deftest omnigent-sessions-frames-and-watch-limit ()
   (let ((omnigent-sessions '(((id . "one") (title . "old"))))
