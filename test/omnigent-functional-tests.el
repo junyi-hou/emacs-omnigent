@@ -343,7 +343,7 @@
   (with-current-buffer buffer
     (goto-char (point-max))
     (insert text)
-    (omnigent-conversation-send))
+    (call-interactively (key-binding (kbd "C-c C-c"))))
   (omnigent-functional-wait "Message acknowledgement timed out"
     (not (buffer-local-value 'omnigent-conversation--sending buffer)))
   (with-current-buffer buffer
@@ -510,12 +510,17 @@
                               :key (lambda (row) (alist-get 'id row)) :test #'equal))
                            "Functional create-to-chat"))
             (omnigent-functional-send buffer "test agent_message")
-            (omnigent-functional-wait "Created session did not answer"
-              (cl-find-if (lambda (item)
-                            (and (equal (alist-get 'role item) "assistant")
-                                 (equal (omnigent-conversation--text item)
-                                        "The capital of France is Paris.")))
-                          (omnigent-functional-items buffer)))))
+            (omnigent-functional-wait "Created session did not render the exchange"
+              (with-current-buffer buffer
+                (and (string-match-p "You:\ntest agent_message" (buffer-string))
+                     (string-match-p "The capital of France is Paris\\." (buffer-string)))))
+            (omnigent-functional-wait "Created session did not finish"
+              (omnigent-functional-status-p id "idle"))
+            (kill-buffer buffer)
+            (setq buffer (omnigent-functional-open id))
+            (with-current-buffer buffer
+              (should (string-match-p "You:\ntest agent_message" (buffer-string)))
+              (should (string-match-p "The capital of France is Paris\\." (buffer-string))))))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (ert-deftest omnigent-mock-acp-decline-and-cancel-permission ()
@@ -528,16 +533,24 @@
             (omnigent-functional-send buffer "test request_permission")
             (omnigent-functional-wait "Permission request did not arrive"
               (with-current-buffer buffer (omnigent-conversation-elicitations)))
-            (with-current-buffer buffer
-              (let ((request-id (alist-get 'elicitation_id (car (omnigent-conversation-elicitations)))))
-                (omnigent-conversation-elicitation-submit
-                 request-id action (lambda (status body) (setq reply (cons status body))))))
-            (omnigent-functional-wait "Permission response was not acknowledged" reply)
-            (should (= (car reply) 202))
+            (if (eq action 'decline)
+                (with-current-buffer buffer
+                  (should (string-match-p "Decline" (buffer-string)))
+                  (let ((button (cl-find 'decline omnigent-ui--widgets
+                                         :key (lambda (widget) (widget-get widget :response-action)))))
+                    (should button)
+                    (widget-apply-action button)))
+              (with-current-buffer buffer
+                (let ((request-id (alist-get 'elicitation_id (car (omnigent-conversation-elicitations)))))
+                  (omnigent-conversation-elicitation-submit
+                   request-id action (lambda (status body) (setq reply (cons status body))))))
+              (omnigent-functional-wait "Permission response was not acknowledged" reply)
+              (should (= (car reply) 202)))
             (omnigent-functional-wait "Permission turn did not become idle"
               (omnigent-functional-status-p id "idle"))
             (with-current-buffer buffer
               (should-not (omnigent-conversation-elicitations))
+              (should-not (string-match-p "Decline" (buffer-string)))
               (should (= (hash-table-count omnigent-conversation--elicitation-submitting) 0)))
             (kill-buffer buffer)
             (setq buffer (omnigent-functional-open id))
@@ -583,6 +596,28 @@
                            "unsent next prompt"))))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
+(ert-deftest omnigent-mock-acp-ui-interrupt ()
+  "Interrupt a visible running turn and keep the composer usable."
+  (let ((id (omnigent-integration-create-session t)) buffer)
+    (unwind-protect
+        (save-window-excursion
+          (setq buffer (omnigent-functional-open id))
+          (omnigent-functional-send buffer "test long_running")
+          (omnigent-functional-wait "Running output did not appear"
+            (with-current-buffer buffer
+              (string-match-p "Thinking" (buffer-string))))
+          (with-current-buffer buffer
+            (call-interactively (key-binding (kbd "C-c C-k"))))
+          (omnigent-functional-wait "Interrupted session did not become idle"
+            (and (omnigent-functional-status-p id "idle")
+                 (with-current-buffer buffer
+                   (string-match-p "Interrupted" (buffer-string)))))
+          (with-current-buffer buffer
+            (goto-char (point-max))
+            (insert "next draft")
+            (should (string-suffix-p "next draft" (buffer-string)))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
 (ert-deftest omnigent-mock-acp-send-while-busy ()
   "Queue a second composer message during a turn and restore both exchanges."
   (let ((id (omnigent-integration-create-session t)) buffer)
@@ -615,6 +650,23 @@
         (save-window-excursion
           (setq a (omnigent-functional-open id-a)
                 b (omnigent-functional-open id-b))
+          (let (loaded)
+            (let ((omnigent-sessions-change-hook (cons (lambda () (setq loaded t))
+                                                       omnigent-sessions-change-hook)))
+              (omnigent-sessions-refresh)
+              (omnigent-functional-wait "Session list did not load" loaded))
+            (unless (get-buffer-window "*omnigent-sessions*") (omnigent-ui-sessions))
+            (dolist (entry `((,id-a . ,a) (,id-b . ,b)))
+              (select-window (get-buffer-window "*omnigent-sessions*"))
+              (goto-char (point-min))
+              (while (and (not (eobp))
+                          (not (equal (get-text-property (point) 'omnigent-ui-session-id)
+                                      (car entry))))
+                (forward-line 1))
+              (should-not (eobp))
+              (call-interactively (key-binding (kbd "RET")))
+              (should (eq (current-buffer) (cdr entry)))
+              (should (equal omnigent-ui--selected-session (car entry)))))
           (let ((stream (buffer-local-value 'omnigent-conversation--stream a)))
             (should (eq a (omnigent-functional-open id-a)))
             (should (eq stream (buffer-local-value 'omnigent-conversation--stream a))))
@@ -716,7 +768,7 @@
                            "[unified diff]\nA added.txt\nD deleted.txt\nM modified #1.txt\n"))
             (goto-char (point-min))
             (forward-line 3)
-            (omnigent-ui-workspace-diff))
+            (call-interactively (key-binding (kbd "RET"))))
           (omnigent-functional-wait "File diff did not open"
             (setq file-buffer (get-buffer (format "*omnigent-diff: %s:modified #1.txt*" id))))
           (with-current-buffer file-buffer
