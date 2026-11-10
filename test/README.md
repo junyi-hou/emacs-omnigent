@@ -6,10 +6,10 @@ temporary directory and configures Omnigent's generic ACP harness to launch it. 
 configuration, database, workspace, and artifact store. The runner stops the host
 and server and removes the temporary directory on exit.
 
-Run `pixi install` to install the ACP dependency in this project's Python
-environment. The runner uses `.pixi/envs/default/bin/omnigent` and
-`.pixi/envs/default/bin/python`. Set `OMNIGENT_BIN` or `PYTHON` to use another
-executable.
+The runner installs Pixi if necessary and runs `pixi install --environment test`. It
+also installs pinned versions of Codex and Claude Code with npm. It uses
+`.pixi/envs/test/bin/omnigent` and `.pixi/envs/test/bin/python`. Set `OMNIGENT_BIN` or
+`PYTHON` to use another executable.
 
 Run the tests with:
 

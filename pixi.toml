@@ -6,10 +6,14 @@ description = "Emacs Frontend for Omnigent"
 channels = ["conda-forge"]
 platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
 
-[dependencies]
+[feature.test.dependencies]
 tmux = "*"
-python = "3.14"
+python = "==3.14"
+nodejs = "==24.10.0"
 
-[pypi-dependencies]
+[feature.test.pypi-dependencies]
 omnigent = "*"
 agent-client-protocol = "==0.9.0"
+
+[environments]
+test = ["test"]

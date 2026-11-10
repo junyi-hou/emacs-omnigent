@@ -2,9 +2,20 @@
 set -eu
 
 cd "$(dirname "$0")/.."
-server_bin=${OMNIGENT_BIN:-"$PWD/.pixi/envs/default/bin/omnigent"}
+export PATH="$PWD/.tools/bin:$PATH"
+if ! command -v pixi >/dev/null 2>&1; then
+  mkdir -p .tools/bin
+  curl -fsSL https://pixi.sh/install.sh -o .tools/install-pixi.sh
+  PIXI_NO_PATH_UPDATE=1 PIXI_BIN_DIR="$PWD/.tools/bin" bash .tools/install-pixi.sh
+  rm .tools/install-pixi.sh
+fi
+pixi install --environment test
+export PATH="$PWD/.pixi/envs/test/bin:$PATH"
+npm install --global --prefix "$PWD/.pixi/envs/test" \
+  @openai/codex@0.160.1 @anthropic-ai/claude-code@2.1.181
+server_bin=${OMNIGENT_BIN:-"$PWD/.pixi/envs/test/bin/omnigent"}
 emacs_bin=${EMACS:-emacs}
-python_bin=${PYTHON:-"$PWD/.pixi/envs/default/bin/python"}
+python_bin=${PYTHON:-"$PWD/.pixi/envs/test/bin/python"}
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/omnigent-transport.XXXXXX")
 port=$(python3 - <<'PY'
