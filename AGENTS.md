@@ -6,6 +6,10 @@
 - changes.  If a change conflicts with a design decision, ask before changing the
 - implementation or the decision.
 
+## Style
+
+- Do not use `cl-loop`.
+
 ## Interactive functions
 
 - Define all interactive functions in `omnigent.el`.

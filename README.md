@@ -91,13 +91,13 @@ network-dependent integration runner described in
 
 The client can open at most 500 conversation buffers at once, because the server
 limits the WebSocket watch set to 500 sessions. This should be more than enough
-for normal use. Close a conversation buffer to open another session.
+for normal use.
 
 The v1 workspace diff treats missing file contents as empty. If Omnigent fails
 to read a Git baseline, the diff can show existing lines as additions or omit a
 deleted file. Omnigent does not distinguish that failure from a new file.
 
-## TODO (post-v1)
+## TODO
 
 - [ ] Use a Markdown parser to render conversation messages.
 
