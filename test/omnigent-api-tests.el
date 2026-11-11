@@ -43,7 +43,7 @@
           (should (= 0 (call-process "git" nil nil nil "-C" root "add" ".")))
           (should (= 0 (call-process "git" nil nil nil "-C" root "commit" "-qm" "baseline")))
           (let* ((agents (cdr (omnigent-mock-test-request "GET" "/v1/agents?limit=1000")))
-                 (agent (cl-find "mock-acp" (append (alist-get 'data agents) nil)
+                 (agent (cl-find omnigent-integration-agent-name (append (alist-get 'data agents) nil)
                                  :key (lambda (entry) (alist-get 'name entry)) :test #'equal))
                  (hosts (cdr (omnigent-mock-test-request "GET" "/v1/hosts")))
                  (host (cl-find "online" (append (alist-get 'hosts hosts) nil)

@@ -1,0 +1,17 @@
+spec_version: 1
+name: codex-native-ui
+description: Codex integration agent backed by the local mock model server.
+executor:
+  type: omnigent
+  config:
+    harness: codex-native
+  model: gpt-5.4
+  auth:
+    type: provider
+    name: mock
+os_env:
+  type: caller_process
+  sandbox:
+    type: none
+skills: none
+async: false

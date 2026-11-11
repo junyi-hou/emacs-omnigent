@@ -19,6 +19,13 @@
 - Add a docstring to every function, including private functions and test functions.
 - Add a docstring to every public variable.
 
+## Tests
+
+- Run `make unit-test` for unit tests.
+- Run integration tests with both native harnesses:
+  - `make integration-test HARNESS=claude-native`
+  - `make integration-test HARNESS=codex-native`
+
 ## Markdown
 
 - Run `fill-region` on changed Markdown text with `emacsclient` when it is available.

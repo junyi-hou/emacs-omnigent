@@ -13,7 +13,7 @@
           (let* ((agents (omnigent-mock-test-request "GET" "/v1/agents?limit=1000"))
                  (hosts (omnigent-mock-test-request "GET" "/v1/hosts"))
                  (agent (cl-find-if (lambda (item)
-                                      (equal (cdr (assq 'name item)) "mock-acp"))
+                                      (equal (cdr (assq 'name item)) omnigent-integration-agent-name))
                                     (append (cdr (assq 'data (cdr agents))) nil)))
                  (host (aref (cdr (assq 'hosts (cdr hosts))) 0))
                  (created (omnigent-mock-test-request
@@ -94,17 +94,26 @@
               (accept-process-output nil 0.1)))
           (should (= snapshot 200))
           (with-current-buffer buffer
-            (should (equal header-line-format
-                           "Harness: acp | Model: unknown | Effort: unknown | Access: unknown | Context: unknown [M]"))
+            (should (string-prefix-p
+                     (format "Harness: %s | Model: %s | "
+                             omnigent-integration-harness omnigent-integration-model)
+                     header-line-format))
             (insert "test usage")
             (omnigent-conversation-send))
           (with-timeout (30 (ert-fail "Mock usage turn timed out"))
-            (while (not (assoc "response.completed" events))
+            (while (not (and (assoc "response.output_text.delta" events)
+                             (omnigent-functional-status-p id "idle")))
               (accept-process-output nil 0.1)))
+          (omnigent-functional-wait "Mock usage did not reach the header"
+            (with-current-buffer buffer
+              (numberp (alist-get 'last_total_tokens omnigent-conversation-header-data))))
           (with-current-buffer buffer
-            ;; The mock sends ACP usage, but this server does not expose it here.
-            (should (equal header-line-format
-                           "Harness: acp | Model: unknown | Effort: unknown | Access: unknown | Context: unknown [M]"))))
+            (should (string-prefix-p
+                     (format "Harness: %s | Model: %s | "
+                             omnigent-integration-harness omnigent-integration-model)
+                     header-line-format))
+            (should (= (alist-get 'last_total_tokens omnigent-conversation-header-data)
+                       512))))
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (when observer (omnigent-transport-stop-session-stream observer)))))
 
@@ -143,11 +152,9 @@
             (insert "test agent_message")
             (omnigent-conversation-send))
           (with-timeout (30 (ert-fail (format "Turn did not finish: %S" events)))
-            (while (not (and (assoc "response.completed" events)
-                             (cl-some (lambda (event)
-                                        (and (equal (car event) "session.status")
-                                             (equal (alist-get 'status (cdr event)) "idle")))
-                                      events)))
+            (while (not (and (omnigent-functional-exchange-stored-p
+                             id "test agent_message" "The capital of France is Paris.")
+                            (omnigent-functional-status-p id "idle")))
               (accept-process-output nil 0.1)))
           (should-not failure)
           (kill-buffer buffer)
@@ -173,11 +180,15 @@
       (when observer (omnigent-transport-stop-session-stream observer)))))
 
 (ert-deftest omnigent-mock-acp-tool-call ()
-  "Receive a tool call over SSE and check its committed result."
-  (let ((id (omnigent-integration-create-session t))
-        snapshot events stream failure)
+  "Receive a native tool call over SSE and check its committed file result."
+  (let* ((workspace (make-temp-file "omnigent-tool-" t))
+         (id (omnigent-integration-create-session t workspace))
+         snapshot events stream failure)
     (unwind-protect
         (progn
+          (make-directory (expand-file-name "src" workspace))
+          (write-region "File read successfully\n" nil
+                        (expand-file-name "src/config.json" workspace) nil 'silent)
           (setq stream
                 (omnigent-transport-start-session-stream
                  id (lambda (name data) (push (cons name data) events))
@@ -195,7 +206,11 @@
                                               ("text" . "test tool_call"))])))))))
             (should (= (car response) 202)))
           (with-timeout (30 (ert-fail (format "Tool turn timed out: %S; events: %S" failure events)))
-            (while (not (assoc "response.completed" events))
+            (while (not (cl-some
+                         (lambda (event)
+                           (and (equal (car event) "response.output_item.done")
+                                (equal (alist-get 'type (alist-get 'item (cdr event)))
+                                       "function_call_output"))) events))
               (accept-process-output nil 0.1)))
           (should-not failure)
           (let* ((done-items
@@ -231,18 +246,23 @@
                 (should (equal (alist-get 'output output) (alist-get 'output stored-output)))
                 (should (equal (alist-get 'type stored-call) "function_call"))
                 (should (equal (alist-get 'type stored-output) "function_call_output"))
-                (should (equal (alist-get 'name stored-call) "Reading configuration file"))
-                (should (equal (alist-get 'call_id stored-call) "call_001"))
+                (should (member (alist-get 'name stored-call)
+                                (if (equal omnigent-integration-harness "claude-native")
+                                    '("Read") '("exec_command" "shell_command" "shell"))))
+                (should (string-prefix-p "call_" (alist-get 'call_id stored-call)))
                 (should (equal (alist-get 'call_id stored-output)
                                (alist-get 'call_id stored-call)))
                 (should (string-match-p "File read successfully"
                                         (format "%s" (alist-get 'output stored-output))))))))
-      (when stream (omnigent-transport-stop-session-stream stream)))))
+      (when stream (omnigent-transport-stop-session-stream stream))
+      (delete-directory workspace t))))
 
 (ert-deftest omnigent-mock-acp-interrupt-running-turn ()
   "Interrupt after the mock starts streaming, not after a fixed sleep."
-  (let ((id (omnigent-integration-create-session t))
-        snapshot events stream failure)
+  (let* ((id (omnigent-integration-create-session t))
+         (marker (make-temp-name "interrupt-check-"))
+         (prompt (concat "test long_running\n" marker))
+         snapshot events stream failure)
     (unwind-protect
         (progn
           (setq stream
@@ -256,15 +276,16 @@
           (let ((response
                  (omnigent-mock-test-request
                   "POST" (omnigent-transport--session-path id "/events")
-                  '(("type" . "message")
+                  `(("type" . "message")
                     ("data" . (("role" . "user")
                                ("content" . [(("type" . "input_text")
-                                              ("text" . "test long_running"))])))))))
+                                              ("text" . ,prompt))])))))))
             (should (= (car response) 202)))
-          (with-timeout (30 (ert-fail (format "Mock did not start reasoning: %S" events)))
-            (while (not (assoc "response.reasoning_text.delta" events))
-              (accept-process-output nil 0.1)))
-          (should-not (assoc "response.completed" events))
+          ;; Native Claude does not forward reasoning deltas before completion.
+          ;; The unique HTTP request proves the model turn, not just input delivery, began.
+          (omnigent-functional-wait "Mock did not receive the interrupt turn"
+            (omnigent-mock-model-requests marker))
+          (should (omnigent-functional-status-p id "running"))
           (setq events nil)
           (with-temp-buffer
             (setq omnigent-conversation-session-id id)
@@ -277,7 +298,12 @@
                                       events)))
               (accept-process-output nil 0.1)))
           (should-not failure)
-          (should-not (assoc "response.completed" events))
+          ;; Native input-delivery acknowledgements can complete with empty output.
+          (should-not (cl-some
+                       (lambda (event)
+                         (and (equal (car event) "response.completed")
+                              (> (length (alist-get 'output (alist-get 'response (cdr event)))) 0)))
+                       events))
           (should-not (assoc "response.output_text.delta" events))
           (should (integerp (alist-get 'requested_at
                                        (alist-get 'data (cdr (assoc "session.interrupted" events))))))
@@ -289,7 +315,7 @@
                        (let ((data (alist-get 'data item)))
                          (and (equal (alist-get 'type item) "message")
                               (equal (alist-get 'role data) "user")
-                              (equal (omnigent-conversation--text data) "test long_running"))))
+                              (equal (omnigent-conversation--text data) prompt))))
                      (append (alist-get 'items (cdr response)) nil)))))
       (when stream (omnigent-transport-stop-session-stream stream)))))
 
@@ -332,12 +358,9 @@
             (with-current-buffer buffer
               (should (equal request-id (alist-get 'elicitation_id (car (omnigent-conversation-elicitations)))))
               (should-not (gethash "unsent" (omnigent-conversation-elicitation-draft request-id)))
-              (let* ((request (car (omnigent-conversation-elicitations)))
-                     (schema (alist-get 'requestedSchema (alist-get 'params request)))
-                     (answer (alist-get 'answer (alist-get 'properties schema)))
-                     (draft (omnigent-conversation-elicitation-draft request-id)))
-                (puthash "answer" (aref (alist-get 'enum answer) 0) draft)
-                (omnigent-conversation-elicitation-set-draft request-id draft))
+              ;; Native Claude and Codex permission cards use a binary verdict.
+              (should-not (alist-get 'requestedSchema
+                                     (alist-get 'params (car (omnigent-conversation-elicitations)))))
               (omnigent-conversation-elicitation-submit
                request-id 'accept (lambda (status body) (setq reply (cons status body)))))
             (with-timeout (30 (ert-fail (format "Elicitation did not finish: reply=%S events=%S" reply events)))
@@ -380,6 +403,19 @@
     (should (equal (buffer-substring-no-properties
                     omnigent-conversation--prompt-start (point-max)) ""))))
 
+(defun omnigent-functional-exchange-stored-p (id prompt answer)
+  "Return non-nil when ID has committed both PROMPT and ANSWER.
+Native input delivery completes before the transcript forwarder commits output."
+  (let* ((reply (omnigent-mock-test-request
+                 "GET" (omnigent-transport--session-path id "/items?limit=1000&order=asc")))
+         (items (append (alist-get 'data (cdr reply)) nil)))
+    (should (= (car reply) 200))
+    (cl-every (lambda (expected)
+                (cl-some (lambda (item)
+                           (and (equal (alist-get 'role item) (car expected))
+                                (equal (omnigent-conversation--text item) (cdr expected)))) items))
+              `(("user" . ,prompt) ("assistant" . ,answer)))))
+
 (defun omnigent-functional-status-p (id status)
   "Return non-nil when ID's server state equals STATUS."
   (let ((response (omnigent-mock-test-request "GET" (omnigent-transport--session-path id))))
@@ -417,7 +453,7 @@
                          (append (alist-get 'hosts
                                             (cdr (omnigent-mock-test-request "GET" "/v1/hosts"))) nil)))
                  (agents (cdr (omnigent-mock-test-request "GET" "/v1/agents?limit=1000")))
-                 (agent (cl-find "mock-acp" (append (alist-get 'data agents) nil)
+                 (agent (cl-find omnigent-integration-agent-name (append (alist-get 'data agents) nil)
                                  :key (lambda (item) (alist-get 'name item)) :test #'equal)))
             (should agent)
             (should (= (length hosts) 2))
@@ -519,7 +555,7 @@
                        (lambda (prompt choices &rest _args)
                          (if (string-prefix-p "Workspace on " prompt)
                              workspace
-                           (car (cl-find-if (lambda (choice) (string-prefix-p "mock-acp [" (car choice)))
+                           (car (cl-find-if (lambda (choice) (string-prefix-p (concat omnigent-integration-agent-name " [") (car choice)))
                                             choices)))))
                       ((symbol-function 'read-string)
                        (lambda (&rest _args) "Functional create-to-chat")))
@@ -545,7 +581,9 @@
                 (and (string-match-p "You:\ntest agent_message" (buffer-string))
                      (string-match-p "The capital of France is Paris\\." (buffer-string)))))
             (omnigent-functional-wait "Created session did not finish"
-              (omnigent-functional-status-p id "idle"))
+              (and (omnigent-functional-exchange-stored-p
+                    id "test agent_message" "The capital of France is Paris.")
+                   (omnigent-functional-status-p id "idle")))
             (kill-buffer buffer)
             (setq buffer (omnigent-functional-open id))
             (with-current-buffer buffer
@@ -553,75 +591,120 @@
               (should (string-match-p "The capital of France is Paris\\." (buffer-string))))))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
-(ert-deftest omnigent-mock-acp-change-model ()
-  "Change the model before the first turn and check the runner's ACP result."
-  (let ((root (getenv "OMNIGENT_TEST_TMP"))
-        (id (omnigent-integration-create-session t)) buffer result)
-    (skip-unless root)
+(defun omnigent-functional-model-turn (buffer scenario)
+  "Send SCENARIO through BUFFER and return its recorded model request."
+  (let ((marker (make-temp-name "model-check-"))
+        (assistant-count (cl-count "assistant" (omnigent-functional-items buffer)
+                                   :key (lambda (item) (alist-get 'role item)) :test #'equal))
+        requests)
+    (omnigent-functional-send buffer (concat "test " scenario "\n" marker))
+    (omnigent-functional-wait "Native client did not send the model request"
+      (setq requests (omnigent-mock-model-requests marker)))
+    (omnigent-functional-wait "Native turn did not finish"
+      (and (> (cl-count "assistant" (omnigent-functional-items buffer)
+                        :key (lambda (item) (alist-get 'role item)) :test #'equal)
+              assistant-count)
+           (omnigent-functional-status-p
+            (buffer-local-value 'omnigent-conversation-session-id buffer) "idle")))
+    (car (last requests))))
+
+(defun omnigent-functional-change-model (buffer model)
+  "Change BUFFER's MODEL through the interactive command and check its reply."
+  (let (result)
+    (cl-letf* ((original (symbol-function 'omnigent-transport-set-session-model))
+               ((symbol-function 'omnigent-transport-set-session-model)
+                (lambda (session value callback)
+                  (funcall original session value
+                           (lambda (status body)
+                             (setq result (cons status body))
+                             (funcall callback status body)))))
+               ((symbol-function 'read-string) (lambda (&rest _) model)))
+      (with-current-buffer buffer (call-interactively #'omnigent-conversation-set-model))
+      (omnigent-functional-wait "Model change timed out" result))
+    (should (omnigent-transport-success-p (car result)))))
+
+(ert-deftest omnigent-mock-claude-change-model ()
+  "Change the model before the first turn and check Claude's HTTP request."
+  (let ((id (omnigent-integration-create-session t)) buffer)
     (unwind-protect
         (save-window-excursion
           (setq buffer (omnigent-functional-open id))
-          (cl-letf* ((original (symbol-function 'omnigent-transport-set-session-model))
-                     ((symbol-function 'omnigent-transport-set-session-model)
-                      (lambda (session model callback)
-                        (funcall original session model
-                                 (lambda (status body)
-                                   (setq result (cons status body))
-                                   (funcall callback status body)))))
-                     ((symbol-function 'read-string) (lambda (&rest _) "mock-model-2")))
-            (with-current-buffer buffer (call-interactively #'omnigent-conversation-set-model))
-            (omnigent-functional-wait "Model change timed out" result))
-          (should (omnigent-transport-success-p (car result)))
-          (omnigent-functional-send buffer "test model")
-          ;; The model-change note prevents mock-acp from recognizing the prompt.
-          (omnigent-functional-wait "Runner did not apply the changed model"
-            (cl-some (lambda (file)
-                       (with-temp-buffer
-                         (insert-file-contents file)
-                         (search-forward "model set to mock-model-2" nil t)))
-                     (file-expand-wildcards
-                      (expand-file-name (concat "data/logs/runner/runner-" id "-*.log") root)))))
+          (omnigent-functional-change-model buffer "claude-opus-4-6")
+          (should (equal (alist-get 'model (omnigent-functional-model-turn buffer "model"))
+                         "claude-opus-4-6")))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
-(ert-deftest omnigent-mock-acp-change-model-after-chat ()
-  "Change the model after a turn and check the runner's ACP result."
-  (let ((root (getenv "OMNIGENT_TEST_TMP"))
-        (id (omnigent-integration-create-session t)) buffer result)
-    (skip-unless root)
+(ert-deftest omnigent-mock-claude-change-model-after-chat ()
+  "Change a live Claude session's model and check the next HTTP request."
+  (let ((id (omnigent-integration-create-session t)) buffer)
     (unwind-protect
         (save-window-excursion
           (setq buffer (omnigent-functional-open id))
-          (omnigent-functional-send buffer "test model")
-          (omnigent-functional-wait "Initial model did not appear"
-            (cl-some (lambda (item)
-                       (and (equal (alist-get 'role item) "assistant")
-                            (string-match-p "mock-model"
-                                            (format "%s" (alist-get 'content item)))))
-                     (omnigent-functional-items buffer)))
-          (omnigent-functional-wait "Initial turn did not finish"
-            (omnigent-functional-status-p id "idle"))
-          (cl-letf* ((original (symbol-function 'omnigent-transport-set-session-model))
-                     ((symbol-function 'omnigent-transport-set-session-model)
-                      (lambda (session model callback)
-                        (funcall original session model
-                                 (lambda (status body)
-                                   (setq result (cons status body))
-                                   (funcall callback status body)))))
-                     ((symbol-function 'read-string) (lambda (&rest _) "mock-model-2")))
-            (with-current-buffer buffer (call-interactively #'omnigent-conversation-set-model))
-            (omnigent-functional-wait "Model change timed out" result))
-          (should (omnigent-transport-success-p (car result)))
-          (omnigent-functional-send buffer "test model")
-          ;; The replayed history prevents mock-acp from recognizing the prompt.
-          ;; The runner logs the ACP result after the mock accepts the model.
-          (omnigent-functional-wait "Runner did not apply the changed model"
-            (cl-some (lambda (file)
-                       (with-temp-buffer
-                         (insert-file-contents file)
-                         (search-forward "model set to mock-model-2" nil t)))
-                     (file-expand-wildcards
-                      (expand-file-name (concat "data/logs/runner/runner-" id "-*.log") root)))))
+          (should (equal (alist-get 'model (omnigent-functional-model-turn buffer "model"))
+                         "claude-sonnet-4-6"))
+          (omnigent-functional-change-model buffer "claude-opus-4-6")
+          (should (equal (alist-get 'model (omnigent-functional-model-turn buffer "model"))
+                         "claude-opus-4-6")))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest omnigent-mock-claude-change-effort ()
+  "Change Claude's effort and check the low and high API request values."
+  (let ((id (omnigent-integration-create-session t)) buffer)
+    (unwind-protect
+        (save-window-excursion
+          (setq buffer (omnigent-functional-open id))
+          (omnigent-functional-model-turn buffer "agent_message")
+          (dolist (effort '("low" "high"))
+            (let ((reply (omnigent-mock-test-request
+                          "PATCH" (omnigent-transport--session-path id)
+                          `(("reasoning_effort" . ,effort)))))
+              (should (omnigent-transport-success-p (car reply))))
+            (let ((request (omnigent-functional-model-turn buffer "reasoning")))
+              (should (equal (alist-get 'effort (alist-get 'output_config request)) effort)))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest omnigent-mock-claude-change-permission ()
+  "Check that default asks for a write and acceptEdits permits the next write."
+  (let* ((workspace (make-temp-file "omnigent-permission-" t))
+         (path (expand-file-name "mock-permission.txt" workspace))
+         (id (omnigent-integration-create-session t workspace)) buffer)
+    (unwind-protect
+        (save-window-excursion
+          (setq buffer (omnigent-functional-open id))
+          (omnigent-functional-model-turn buffer "agent_message")
+          (let ((reply (omnigent-mock-test-request
+                        "PATCH" (omnigent-transport--session-path id)
+                        '(("permission_mode" . "default")))))
+            (ert-info ((format "Default permission response: %S" reply))
+              (should (omnigent-transport-success-p (car reply)))))
+          (omnigent-functional-send buffer "test request_permission")
+          (omnigent-functional-wait "Default mode did not ask for permission"
+            (with-current-buffer buffer (omnigent-conversation-elicitations)))
+          (should-not (file-exists-p path))
+          (let* ((request (with-current-buffer buffer (car (omnigent-conversation-elicitations))))
+                 (reply (omnigent-mock-test-request
+                         "POST" (omnigent-transport--session-path
+                                 id (concat "/elicitations/" (alist-get 'elicitation_id request) "/resolve"))
+                         '(("action" . "decline")))))
+            (should (= (car reply) 202)))
+          (omnigent-functional-wait "Declined write did not finish"
+            (omnigent-functional-status-p id "idle"))
+          (should-not (file-exists-p path))
+          (let ((reply (omnigent-mock-test-request
+                        "PATCH" (omnigent-transport--session-path id)
+                        '(("permission_mode" . "acceptEdits")))))
+            (ert-info ((format "acceptEdits response: %S" reply))
+              (should (omnigent-transport-success-p (car reply)))))
+          (omnigent-functional-send buffer "test request_permission")
+          (omnigent-functional-wait "acceptEdits did not execute the write"
+            (should-not (with-current-buffer buffer (omnigent-conversation-elicitations)))
+            (and (file-exists-p path) (omnigent-functional-status-p id "idle")))
+          (with-temp-buffer
+            (insert-file-contents path)
+            (should (equal (buffer-string) "Mock permission granted.\n"))))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (omnigent-mock-test-request "DELETE" (omnigent-transport--session-path id))
+      (delete-directory workspace t))))
 
 (ert-deftest omnigent-mock-acp-decline-and-cancel-permission ()
   "Decline and cancel real pending permission requests without form answers."
@@ -697,15 +780,17 @@
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (ert-deftest omnigent-mock-acp-ui-interrupt ()
-  "Interrupt a visible running turn and keep the composer usable."
-  (let ((id (omnigent-integration-create-session t)) buffer)
+  "Interrupt a real running model turn through the UI and keep its composer usable."
+  (let* ((id (omnigent-integration-create-session t))
+         (marker (make-temp-name "ui-interrupt-check-"))
+         buffer)
     (unwind-protect
         (save-window-excursion
           (setq buffer (omnigent-functional-open id))
-          (omnigent-functional-send buffer "test long_running")
-          (omnigent-functional-wait "Running output did not appear"
-            (with-current-buffer buffer
-              (string-match-p "Thinking" (buffer-string))))
+          (omnigent-functional-send buffer (concat "test long_running\n" marker))
+          (omnigent-functional-wait "Model turn did not start"
+            (and (omnigent-mock-model-requests marker)
+                 (omnigent-functional-status-p id "running")))
           (with-current-buffer buffer
             (call-interactively (key-binding (kbd "C-c C-k"))))
           (omnigent-functional-wait "Interrupted session did not become idle"
@@ -802,21 +887,28 @@
 
 (ert-deftest omnigent-mock-acp-close-running-conversation ()
   "Closing stops the client stream, but the agent finishes and history survives."
-  (let ((id (omnigent-integration-create-session t)) buffer stream)
+  (let* ((id (omnigent-integration-create-session t))
+         (marker (make-temp-name "close-check-"))
+         (prompt (concat "test long_running\n" marker))
+         buffer stream)
     (unwind-protect
         (save-window-excursion
           (setq buffer (omnigent-functional-open id)
                 stream (buffer-local-value 'omnigent-conversation--stream buffer))
-          (omnigent-functional-send buffer "test long_running")
+          (omnigent-functional-send buffer prompt)
           (omnigent-functional-wait "Turn did not start before closing"
-            (omnigent-functional-status-p id "running"))
+            (and (omnigent-mock-model-requests marker)
+                 (omnigent-functional-status-p id "running")))
           (with-current-buffer buffer (insert "discard this draft"))
           (kill-buffer buffer)
           (should (omnigent-stream-stopped stream))
           (should-not (process-live-p (omnigent-stream-process stream)))
           (should-not (assoc id omnigent-sessions--buffers))
           (omnigent-functional-wait "Agent did not finish while buffer was closed"
-            (omnigent-functional-status-p id "idle"))
+            (and (omnigent-functional-exchange-stored-p
+                  id prompt
+                  (apply #'concat (make-list 3 "The capital of France is Paris.")))
+                 (omnigent-functional-status-p id "idle")))
           (setq buffer (omnigent-functional-open id))
           (let ((items (omnigent-functional-items buffer)))
             (should (= 1 (cl-count "user" items :key (lambda (item) (alist-get 'role item)) :test #'equal)))
@@ -927,6 +1019,9 @@
           (with-current-buffer buffer-a
             (add-hook 'omnigent-conversation-event-hook
                       (lambda (name data) (push (cons name data) events)) nil t))
+          ;; Read-only browsing can use the host before the native runner starts.
+          ;; A mutation needs its live environment, so finish a real native turn first.
+          (omnigent-functional-model-turn buffer-a "agent_message")
           (setq panel-a (omnigent-ui--workspace-buffer a))
           (omnigent-ui-open b)
           (setq buffer-b (current-buffer))
@@ -939,7 +1034,8 @@
                 (response (omnigent-mock-test-request
                            "PUT" (omnigent-workspace--path a "filesystem/agent%20%231.txt")
                            '(("content" . "written through the server\n")))))
-            (should (omnigent-transport-success-p (car response)))
+            (ert-info ((format "Workspace write response: %S" response))
+              (should (omnigent-transport-success-p (car response))))
             (omnigent-functional-wait "Server invalidation was not received"
               (assoc "session.changed_files.invalidated" events))
             (should (equal a (alist-get 'session_id

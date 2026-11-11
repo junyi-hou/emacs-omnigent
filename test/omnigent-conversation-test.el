@@ -366,6 +366,35 @@
     (should (equal (omnigent-conversation--text
                     (gethash "message-1" omnigent-conversation--items)) "Hello world"))))
 
+(ert-deftest omnigent-conversation-native-turn-outlives-input-delivery ()
+  "Render native deltas across independent input-completion and status events."
+  (dolist (completion-first '(t nil))
+    (with-temp-buffer
+      (setq omnigent-conversation--items (make-hash-table :test 'equal))
+      (omnigent-conversation--event "response.created" '((response . ((id . "delivery")))))
+      (when completion-first
+        (omnigent-conversation--event "response.completed" '((response . ((id . "delivery"))))))
+      (omnigent-conversation--event "session.status" '((status . "running") (response_id . "native")))
+      (omnigent-conversation--event "response.reasoning_text.delta" '((delta . "Think")))
+      (unless completion-first
+        (omnigent-conversation--event "response.completed" '((response . ((id . "delivery"))))))
+      (omnigent-conversation--event "response.output_text.delta"
+                                   '((message_id . "preview") (index . 0) (delta . "Hello ")))
+      (let ((item (gethash (car (last omnigent-conversation--order)) omnigent-conversation--items)))
+        (should (equal (alist-get 'role item) "assistant"))
+        (should (equal (omnigent-conversation--text item) "Hello ")))
+      (omnigent-conversation--event "response.output_text.delta"
+                                   '((message_id . "preview") (index . 1) (delta . "world")))
+      (dolist (item '(((id . "thought") (response_id . "native") (type . "reasoning") (content . "Think"))
+                      ((id . "answer") (response_id . "native") (type . "message")
+                       (role . "assistant") (content . "Hello world"))))
+        (omnigent-conversation--event "response.output_item.done" `((item . ,item))))
+      (should (equal omnigent-conversation--order '("thought" "answer")))
+      (should (= (hash-table-count omnigent-conversation--items) 2))
+      (omnigent-conversation--event "session.status" '((status . "idle") (response_id . "native")))
+      (omnigent-conversation--event "response.output_text.delta" '((delta . "late")))
+      (should (= (hash-table-count omnigent-conversation--items) 2)))))
+
 (ert-deftest omnigent-conversation-idless-sections-reconcile-in-order ()
   "Keep reasoning, text, tools, and repeated text in their streamed positions."
   (with-temp-buffer

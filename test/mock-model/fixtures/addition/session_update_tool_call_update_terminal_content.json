@@ -1,0 +1,12 @@
+{
+  "sessionUpdate": "tool_call_update",
+  "toolCallId": "call_001",
+  "title": "Installing dependencies",
+  "status": "in_progress",
+  "content": [
+    {
+      "type": "terminal",
+      "terminalId": "term_001"
+    }
+  ]
+}

@@ -85,9 +85,18 @@ Session lists refresh after ten seconds of idle time, including when hidden.
 Workspace refresh failures retain the previous view without a notification.
 Transcript text uses plain text, not Markdown rendering.
 
-Run `make test-unit` for offline unit checks. `make test` also runs the
-network-dependent integration runner described in
-[test/README.md](test/README.md).
+Run unit tests and both native integration suites separately:
+
+```sh
+make unit-test
+make integration-test HARNESS=claude-native
+make integration-test HARNESS=codex-native
+```
+
+Unit tests run offline. Integration tests need network access for dependency
+installation. `make test HARNESS=claude-native` runs unit tests and the selected
+integration suite together; the default harness is `claude-native`. See
+[test/README.md](test/README.md) for details.
 
 The client can open at most 500 conversation buffers at once, because the server
 limits the WebSocket watch set to 500 sessions. This should be more than enough

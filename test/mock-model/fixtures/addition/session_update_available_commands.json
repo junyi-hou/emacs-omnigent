@@ -1,0 +1,13 @@
+{
+  "sessionUpdate": "available_commands_update",
+  "availableCommands": [
+    {
+      "name": "create_plan",
+      "description": "Create a plan for the current task"
+    },
+    {
+      "name": "research_codebase",
+      "description": "Research the codebase"
+    }
+  ]
+}
