@@ -1,0 +1,15 @@
+{
+  "upstream": "tests/e2e_ui/messages/test_native_claude_render_parity.py",
+  "prompt": "test tool_call",
+  "responses_by_harness": {
+    "claude-native": [
+      {"tool_calls": [{"call_id": "call_tool_check", "name": "Read", "arguments": "{\"file_path\": \"src/config.json\"}"}]},
+      {"text": "Tool turn complete."}
+    ],
+    "codex-native": [
+      {"tool_calls": [{"call_id": "call_tool_check", "name": "exec_command", "arguments": "{\"cmd\": \"cat src/config.json\"}"}]},
+      {"text": "Tool turn complete."}
+    ]
+  },
+  "expect": {"output_contains": "File read successfully"}
+}

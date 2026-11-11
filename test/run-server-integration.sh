@@ -12,17 +12,37 @@ fi
 pixi install --environment test
 export PATH="$PWD/.pixi/envs/test/bin:$PATH"
 npm install --global --prefix "$PWD/.pixi/envs/test" \
-  @openai/codex@0.160.1 @anthropic-ai/claude-code@2.1.181
+  @openai/codex@0.142.0 @anthropic-ai/claude-code@2.1.295
 claude_bin=$(command -v claude)
 codex_bin=$(command -v codex)
-[ "$("$claude_bin" --version)" = "2.1.181 (Claude Code)" ]
-[ "$("$codex_bin" --version)" = "codex-cli 0.160.1" ]
+[ "$("$claude_bin" --version)" = "2.1.295 (Claude Code)" ]
+[ "$("$codex_bin" --version)" = "codex-cli 0.142.0" ]
 server_bin=${OMNIGENT_BIN:-"$PWD/.pixi/envs/test/bin/omnigent"}
 emacs_bin=${EMACS:-emacs}
 python_bin=${PYTHON:-"$PWD/.pixi/envs/test/bin/python"}
 
+# Pull the upstream test suite at the omnigent version pinned in pixi.lock so
+# the mock model and the installed server share one exact release.
+upstream_version=$(sed -n 's/.*\/omnigent-\([0-9][0-9.]*\)-py3-none-any\.whl.*/\1/p' pixi.lock | head -n 1)
+[ -n "$upstream_version" ] || { echo "Could not read the omnigent version from pixi.lock" >&2; exit 1; }
+upstream_dir="$PWD/test/upstream/omnigent"
+if [ ! -d "$upstream_dir/.git" ] || [ "$(git -C "$upstream_dir" describe --tags)" != "v$upstream_version" ]; then
+  rm -rf "$upstream_dir"
+  git clone --depth 1 --branch "v$upstream_version" --filter=blob:none --sparse \
+    https://github.com/omnigent-ai/omnigent.git "$upstream_dir"
+  git -C "$upstream_dir" sparse-checkout set tests
+fi
+
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/omnigent-transport.XXXXXX")
 port=$(python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+)
+mock_port=$(python3 - <<'PY'
 import socket
 s = socket.socket()
 s.bind(("127.0.0.1", 0))
@@ -46,7 +66,7 @@ cleanup() {
     kill "$model_pid" 2>/dev/null || true
     wait "$model_pid" 2>/dev/null || true
   fi
-  rm -rf "$tmp"
+  rm -rf "$tmp" || true
 }
 trap cleanup EXIT HUP INT TERM
 mkdir -p "$tmp/config" "$tmp/bin"
@@ -56,8 +76,8 @@ import shlex
 import sys
 
 root = pathlib.Path(sys.argv[1])
-for name, executable, version in (("claude", sys.argv[2], "2.1.181 (Claude Code)"),
-                                  ("codex", sys.argv[3], "codex-cli 0.160.1")):
+for name, executable, version in (("claude", sys.argv[2], "2.1.295 (Claude Code)"),
+                                  ("codex", sys.argv[3], "codex-cli 0.142.0")):
     path = root / name
     path.write_text("#!/bin/sh\nset -eu\n"
                     "export DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n"
@@ -68,22 +88,27 @@ for name, executable, version in (("claude", sys.argv[2], "2.1.181 (Claude Code)
     path.chmod(0o755)
 PY
 export PATH="$tmp/bin:$PATH"
-"$python_bin" test/mock-model/server.py --port 0 >"$tmp/model.log" 2>&1 &
+"$python_bin" "$upstream_dir/tests/server/integration/mock_llm_server.py" "$mock_port" >"$tmp/model.log" 2>&1 &
 model_pid=$!
+mock_url="http://127.0.0.1:$mock_port"
 i=0
-while [ "$i" -lt 100 ] && [ ! -s "$tmp/model.log" ]; do
+while [ "$i" -lt 100 ]; do
+  if curl --silent --fail "$mock_url/stats" >/dev/null; then
+    break
+  fi
   if ! kill -0 "$model_pid" 2>/dev/null; then
     break
   fi
   i=$((i + 1))
   sleep 0.1
 done
-export ANTHROPIC_BASE_URL=$(awk '/Mock model listening on/ {print $NF; exit}' "$tmp/model.log")
-if [ -z "$ANTHROPIC_BASE_URL" ] || ! curl --silent --fail "$ANTHROPIC_BASE_URL/health" >/dev/null; then
-  echo "Mock model server did not start:" >&2
+if [ "$i" -eq 100 ] || ! kill -0 "$model_pid" 2>/dev/null; then
+  echo "Mock LLM server did not start:" >&2
   tail -n 80 "$tmp/model.log" >&2
   exit 1
 fi
+export ANTHROPIC_BASE_URL=$mock_url
+export OMNIGENT_MOCK_URL=$mock_url
 export ANTHROPIC_API_KEY=mock-key
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export DISABLE_AUTOUPDATER=1
@@ -95,11 +120,9 @@ export HOME="$tmp/home"
 export CLAUDE_CONFIG_DIR="$HOME/.claude"
 export CODEX_HOME="$HOME/.codex"
 mkdir -p "$HOME/src" "$CODEX_HOME" "$OMNIGENT_DATA_DIR"
-printf 'File read successfully.\n' >"$HOME/src/config.json"
-printf 'def hello_world():\n    print("Hello, world!")\n' >"$HOME/src/main.py"
 export OMNIGENT_TEST_BIN="$server_bin"
 export OMNIGENT_TEST_TMP="$tmp"
-"$python_bin" - "$tmp/config/config.yaml" "$ANTHROPIC_BASE_URL" <<'PY'
+"$python_bin" - "$tmp/config/config.yaml" "$mock_url" <<'PY'
 import json
 import sys
 

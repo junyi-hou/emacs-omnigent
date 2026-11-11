@@ -2,6 +2,8 @@
 
 (require 'test-utils)
 
+;;; omnigent-functional-tests.el --- Mock ACP functional tests
+
 (ert-deftest omnigent-mock-acp-agent-turn ()
   "Send a message through Omnigent to the mock ACP agent."
   (let ((omnigent-current-session-id nil)
@@ -52,6 +54,7 @@
           (with-timeout (30 (ert-fail (format "Mock ACP turn timed out: ack=%S error=%S events=%S" acknowledgement stream-error events)))
             (while (not snapshot) (accept-process-output nil 0.1))
             (should (equal (car snapshot) 200))
+            (omnigent-mock-set-reply (omnigent-mock-fixture-reply "agent-message"))
             (setq frames nil)
             (omnigent-transport-post-session-event
              omnigent-current-session-id
@@ -98,7 +101,7 @@
                      (format "Harness: %s | Model: %s | "
                              omnigent-integration-harness omnigent-integration-model)
                      header-line-format))
-            (insert "test usage")
+            (insert (omnigent-mock-configure-fixture "usage-turn" (omnigent-functional-marker)))
             (omnigent-conversation-send))
           (with-timeout (30 (ert-fail "Mock usage turn timed out"))
             (while (not (and (assoc "response.output_text.delta" events)
@@ -147,6 +150,7 @@
                        (with-current-buffer buffer omnigent-conversation--loading))
               (accept-process-output nil 0.1)))
           (should (= snapshot 200))
+          (omnigent-mock-set-reply (omnigent-mock-fixture-reply "agent-message"))
           (with-current-buffer buffer
             (goto-char (point-max))
             (insert "test agent_message")
@@ -197,13 +201,15 @@
           (with-timeout (15 (ert-fail (format "Tool stream did not load: %S" failure)))
             (while (not snapshot) (accept-process-output nil 0.1)))
           (should (= (car snapshot) 200))
-          (let ((response
-                 (omnigent-mock-test-request
-                  "POST" (omnigent-transport--session-path id "/events")
-                  '(("type" . "message")
-                    ("data" . (("role" . "user")
-                               ("content" . [(("type" . "input_text")
-                                              ("text" . "test tool_call"))])))))))
+          (let* ((marker (omnigent-functional-marker))
+                 (prompt (omnigent-mock-configure-fixture "tool-read" marker))
+                 (response
+                  (omnigent-mock-test-request
+                   "POST" (omnigent-transport--session-path id "/events")
+                   `(("type" . "message")
+                     ("data" . (("role" . "user")
+                                ("content" . [ (("type" . "input_text")
+                                                ("text" . ,prompt))])))))))
             (should (= (car response) 202)))
           (with-timeout (30 (ert-fail (format "Tool turn timed out: %S; events: %S" failure events)))
             (while (not (cl-some
@@ -273,6 +279,7 @@
           (with-timeout (15 (ert-fail (format "Interrupt stream did not load: %S" failure)))
             (while (not snapshot) (accept-process-output nil 0.1)))
           (should (= (car snapshot) 200))
+          (omnigent-mock-configure-fixture "long-running" marker)
           (let ((response
                  (omnigent-mock-test-request
                   "POST" (omnigent-transport--session-path id "/events")
@@ -283,9 +290,9 @@
             (should (= (car response) 202)))
           ;; Native Claude does not forward reasoning deltas before completion.
           ;; The unique HTTP request proves the model turn, not just input delivery, began.
-          (omnigent-functional-wait "Mock did not receive the interrupt turn"
-            (omnigent-mock-model-requests marker))
-          (should (omnigent-functional-status-p id "running"))
+          (omnigent-functional-wait "Interrupt turn did not start running"
+            (and (omnigent-mock-model-requests marker)
+                 (omnigent-functional-status-p id "running")))
           (setq events nil)
           (with-temp-buffer
             (setq omnigent-conversation-session-id id)
@@ -332,12 +339,14 @@
           (with-timeout (15 (ert-fail "Conversation snapshot timed out"))
             (while (with-current-buffer buffer omnigent-conversation--loading)
               (accept-process-output nil 0.1)))
-          (let ((response (omnigent-mock-test-request
-                           "POST" (omnigent-transport--session-path id "/events")
-                           '(("type" . "message")
-                             ("data" . (("role" . "user")
-                                        ("content" . [(("type" . "input_text")
-                                                       ("text" . "test request_permission"))])))))))
+          (let* ((marker (omnigent-functional-marker))
+                 (prompt (omnigent-mock-configure-fixture "permission-write" marker))
+                 (response (omnigent-mock-test-request
+                            "POST" (omnigent-transport--session-path id "/events")
+                            `(("type" . "message")
+                              ("data" . (("role" . "user")
+                                         ("content" . [(("type" . "input_text")
+                                                        ("text" . ,prompt))])))))))
             (should (= (car response) 202)))
           (with-timeout (30 (ert-fail (format "No elicitation: %S" events)))
             (while (not (with-current-buffer buffer (omnigent-conversation-elicitations)))
@@ -403,6 +412,16 @@
     (should (equal (buffer-substring-no-properties
                     omnigent-conversation--prompt-start (point-max)) ""))))
 
+(defun omnigent-functional-marker ()
+  "Return a unique routing marker for one scripted mock turn."
+  (make-temp-name "turn-"))
+
+(defun omnigent-functional-fixture-turn (buffer name)
+  "Script mock fixture NAME and send its marked prompt through BUFFER.
+Return the marked prompt that was sent."
+  (let ((marker (omnigent-functional-marker)))
+    (omnigent-functional-send buffer (omnigent-mock-configure-fixture name marker))))
+
 (defun omnigent-functional-exchange-stored-p (id prompt answer)
   "Return non-nil when ID has committed both PROMPT and ANSWER.
 Native input delivery completes before the transcript forwarder commits output."
@@ -459,6 +478,7 @@ Native input delivery completes before the transcript forwarder commits output."
             (should (= (length hosts) 2))
             (should-not (equal (alist-get 'host_id (car hosts))
                                (alist-get 'host_id (cadr hosts))))
+            (omnigent-mock-set-reply (omnigent-mock-fixture-reply "agent-message"))
             (dolist (host hosts)
               (let* ((host-id (alist-get 'host_id host))
                      (created (omnigent-mock-test-request
@@ -575,6 +595,7 @@ Native input delivery completes before the transcript forwarder commits output."
             (should (equal (alist-get 'title (cl-find id omnigent-sessions
                               :key (lambda (row) (alist-get 'id row)) :test #'equal))
                            "Functional create-to-chat"))
+            (omnigent-mock-set-reply (omnigent-mock-fixture-reply "agent-message"))
             (omnigent-functional-send buffer "test agent_message")
             (omnigent-functional-wait "Created session did not render the exchange"
               (with-current-buffer buffer
@@ -591,13 +612,15 @@ Native input delivery completes before the transcript forwarder commits output."
               (should (string-match-p "The capital of France is Paris\\." (buffer-string))))))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
-(defun omnigent-functional-model-turn (buffer scenario)
-  "Send SCENARIO through BUFFER and return its recorded model request."
-  (let ((marker (make-temp-name "model-check-"))
+(defun omnigent-functional-model-turn (buffer label)
+  "Send a scripted reply turn labeled LABEL through BUFFER.
+Return the recorded model request of the turn."
+  (let ((marker (make-temp-name (concat "model-check-" label "-")))
         (assistant-count (cl-count "assistant" (omnigent-functional-items buffer)
                                    :key (lambda (item) (alist-get 'role item)) :test #'equal))
         requests)
-    (omnigent-functional-send buffer (concat "test " scenario "\n" marker))
+    (omnigent-mock-set-reply (omnigent-mock-fixture-reply "agent-message"))
+    (omnigent-functional-send buffer (concat "test " label "\n" marker))
     (omnigent-functional-wait "Native client did not send the model request"
       (setq requests (omnigent-mock-model-requests marker)))
     (omnigent-functional-wait "Native turn did not finish"
@@ -677,7 +700,7 @@ Native input delivery completes before the transcript forwarder commits output."
                         '(("permission_mode" . "default")))))
             (ert-info ((format "Default permission response: %S" reply))
               (should (omnigent-transport-success-p (car reply)))))
-          (omnigent-functional-send buffer "test request_permission")
+          (omnigent-functional-fixture-turn buffer "permission-write")
           (omnigent-functional-wait "Default mode did not ask for permission"
             (with-current-buffer buffer (omnigent-conversation-elicitations)))
           (should-not (file-exists-p path))
@@ -695,7 +718,7 @@ Native input delivery completes before the transcript forwarder commits output."
                         '(("permission_mode" . "acceptEdits")))))
             (ert-info ((format "acceptEdits response: %S" reply))
               (should (omnigent-transport-success-p (car reply)))))
-          (omnigent-functional-send buffer "test request_permission")
+          (omnigent-functional-fixture-turn buffer "permission-write")
           (omnigent-functional-wait "acceptEdits did not execute the write"
             (should-not (with-current-buffer buffer (omnigent-conversation-elicitations)))
             (and (file-exists-p path) (omnigent-functional-status-p id "idle")))
@@ -713,7 +736,7 @@ Native input delivery completes before the transcript forwarder commits output."
       (unwind-protect
           (save-window-excursion
             (setq buffer (omnigent-functional-open id))
-            (omnigent-functional-send buffer "test request_permission")
+            (omnigent-functional-fixture-turn buffer "permission-write")
             (omnigent-functional-wait "Permission request did not arrive"
               (with-current-buffer buffer (omnigent-conversation-elicitations)))
             (if (eq action 'decline)
@@ -741,39 +764,32 @@ Native input delivery completes before the transcript forwarder commits output."
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
 
 (ert-deftest omnigent-mock-acp-live-conversation-response ()
-  "Apply partial streamed text to an open buffer without changing its draft."
+  "Apply a scripted turn to an open buffer without changing its draft."
   (let ((id (omnigent-integration-create-session t)) buffer)
     (unwind-protect
         (save-window-excursion
           (setq buffer (omnigent-functional-open id))
-          (omnigent-functional-send buffer "test long_running")
+          (omnigent-functional-fixture-turn buffer "thinking-turn")
           (with-current-buffer buffer (insert "unsent next prompt"))
-          (omnigent-functional-wait "Assistant text did not reach conversation state"
-            (cl-find-if (lambda (item)
-                          (and (equal (alist-get 'role item) "assistant")
-                               (not (string-empty-p (omnigent-conversation--text item)))))
-                        (omnigent-functional-items buffer)))
-          ;; The first visible text must be one chunk, not just the final full item.
-          (let ((assistant (cl-find "assistant" (omnigent-functional-items buffer)
-                                    :key (lambda (item) (alist-get 'role item)) :test #'equal)))
-            (should (equal (omnigent-conversation--text assistant) "The capital of France is Paris.")))
-          (should (omnigent-functional-status-p id "running"))
           (omnigent-functional-wait "Streamed response did not finish"
             (and (cl-find-if
                   (lambda (item)
                     (and (equal (alist-get 'role item) "assistant")
                          (equal (omnigent-conversation--text item)
-                                (apply #'concat (make-list 3 "The capital of France is Paris.")))))
+                                (omnigent-mock-fixture-reply "thinking-turn"))))
                   (omnigent-functional-items buffer))
                  (omnigent-functional-status-p id "idle")))
           (let ((items (omnigent-functional-items buffer)))
             (should (= 1 (cl-count "assistant" items
                                   :key (lambda (item) (alist-get 'role item)) :test #'equal)))
-            (let ((thoughts (cl-remove-if-not
-                             (lambda (item) (equal (alist-get 'type item) "reasoning")) items)))
-              (should (= (length thoughts) 1))
-              (should (equal (omnigent-conversation--text (car thoughts))
-                             (apply #'concat (make-list 3 "Thinking about best approach..."))))))
+            ;; Reasoning coverage mirrors the official web UI suite, which
+            ;; scripts thinking turns on the Anthropic endpoint only.
+            (when (equal omnigent-integration-harness "claude-native")
+              (let ((thoughts (cl-remove-if-not
+                               (lambda (item) (equal (alist-get 'type item) "reasoning")) items)))
+                (should (= (length thoughts) 1))
+                (should (equal (string-trim (omnigent-conversation--text (car thoughts)))
+                               "Thinking about best approach.")))))
           (with-current-buffer buffer
             (should (equal (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max))
                            "unsent next prompt"))))
@@ -787,7 +803,8 @@ Native input delivery completes before the transcript forwarder commits output."
     (unwind-protect
         (save-window-excursion
           (setq buffer (omnigent-functional-open id))
-          (omnigent-functional-send buffer (concat "test long_running\n" marker))
+          (omnigent-functional-send
+           buffer (omnigent-mock-configure-fixture "long-running" marker))
           (omnigent-functional-wait "Model turn did not start"
             (and (omnigent-mock-model-requests marker)
                  (omnigent-functional-status-p id "running")))
@@ -809,21 +826,29 @@ Native input delivery completes before the transcript forwarder commits output."
     (unwind-protect
         (save-window-excursion
           (setq buffer (omnigent-functional-open id))
-          (omnigent-functional-send buffer "test long_running")
+          (omnigent-functional-fixture-turn buffer "long-running")
           (omnigent-functional-wait "First turn did not start"
             (omnigent-functional-status-p id "running"))
-          (omnigent-functional-send buffer "test agent_message")
+          (omnigent-functional-fixture-turn buffer "agent-message")
+          ;; Mirror the upstream draft-survival journey across a queue flush.
+          (with-current-buffer buffer (insert "draft while replies arrive"))
           (omnigent-functional-wait "Queued turn did not answer"
             (= 2 (cl-count "assistant" (omnigent-functional-items buffer)
                            :key (lambda (item) (alist-get 'role item)) :test #'equal)))
           (omnigent-functional-wait "Queued turns did not finish"
             (omnigent-functional-status-p id "idle"))
+          (with-current-buffer buffer
+            (should (equal (buffer-substring-no-properties
+                            omnigent-conversation--prompt-start (point-max))
+                           "draft while replies arrive")))
           (kill-buffer buffer)
           (setq buffer (omnigent-functional-open id))
           (let ((items (omnigent-functional-items buffer)))
-            (should (equal (mapcar #'omnigent-conversation--text
-                                  (cl-remove-if-not (lambda (item) (equal (alist-get 'role item) "user")) items))
-                           '("test long_running" "test agent_message")))
+            (let ((users (mapcar #'omnigent-conversation--text
+                                 (cl-remove-if-not (lambda (item) (equal (alist-get 'role item) "user"))
+                                                   items))))
+              (should (cl-some (lambda (text) (string-prefix-p "test long_running" text)) users))
+              (should (cl-some (lambda (text) (string-prefix-p "test agent_message" text)) users)))
             (should (= 2 (cl-count "assistant" items :key (lambda (item) (alist-get 'role item)) :test #'equal)))))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
@@ -855,10 +880,10 @@ Native input delivery completes before the transcript forwarder commits output."
           (let ((stream (buffer-local-value 'omnigent-conversation--stream a)))
             (should (eq a (omnigent-functional-open id-a)))
             (should (eq stream (buffer-local-value 'omnigent-conversation--stream a))))
-          (omnigent-functional-send a "test long_running")
+          (omnigent-functional-fixture-turn a "long-running")
           (omnigent-functional-wait "Session A did not start"
             (omnigent-functional-status-p id-a "running"))
-          (omnigent-functional-send b "test request_permission")
+          (omnigent-functional-fixture-turn b "permission-write")
           (omnigent-functional-wait "Session B did not request permission"
             (with-current-buffer b (omnigent-conversation-elicitations)))
           (with-current-buffer b (insert "draft for B"))
@@ -895,7 +920,8 @@ Native input delivery completes before the transcript forwarder commits output."
         (save-window-excursion
           (setq buffer (omnigent-functional-open id)
                 stream (buffer-local-value 'omnigent-conversation--stream buffer))
-          (omnigent-functional-send buffer prompt)
+          (omnigent-functional-send
+           buffer (omnigent-mock-configure-fixture "long-running" marker))
           (omnigent-functional-wait "Turn did not start before closing"
             (and (omnigent-mock-model-requests marker)
                  (omnigent-functional-status-p id "running")))
@@ -906,8 +932,7 @@ Native input delivery completes before the transcript forwarder commits output."
           (should-not (assoc id omnigent-sessions--buffers))
           (omnigent-functional-wait "Agent did not finish while buffer was closed"
             (and (omnigent-functional-exchange-stored-p
-                  id prompt
-                  (apply #'concat (make-list 3 "The capital of France is Paris.")))
+                  id prompt "The capital of France is Paris.")
                  (omnigent-functional-status-p id "idle")))
           (setq buffer (omnigent-functional-open id))
           (let ((items (omnigent-functional-items buffer)))
@@ -915,7 +940,7 @@ Native input delivery completes before the transcript forwarder commits output."
             (should (= 1 (cl-count "assistant" items :key (lambda (item) (alist-get 'role item)) :test #'equal)))
             (should (cl-find-if (lambda (item)
                                  (equal (omnigent-conversation--text item)
-                                        (apply #'concat (make-list 3 "The capital of France is Paris.")))) items)))
+                                        "The capital of France is Paris.")) items)))
           (with-current-buffer buffer
             (should (equal (buffer-substring-no-properties
                             omnigent-conversation--prompt-start (point-max)) ""))

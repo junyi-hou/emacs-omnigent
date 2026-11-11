@@ -1,0 +1,10 @@
+{
+  "upstream": "tests/e2e_ui/messages/test_message_render_parity.py",
+  "prompt": "test agent_message",
+  "responses": [
+    {
+      "text": "The capital of France is Paris.",
+      "stream": true
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "upstream": "tests/e2e_ui/messages/test_native_claude_reasoning_in_chat.py",
+  "prompt": "test thinking",
+  "responses": [
+    {
+      "thinking": "Thinking about best approach.",
+      "text": "The capital of France is Paris.",
+      "delay": 5,
+      "stream": true
+    }
+  ]
+}

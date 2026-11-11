@@ -1,0 +1,11 @@
+{
+  "upstream": "tests/e2e_ui/chat/test_queued_message_lifecycle.py",
+  "prompt": "test long_running",
+  "responses": [
+    {
+      "text": "The capital of France is Paris.",
+      "delay": 8,
+      "stream": true
+    }
+  ]
+}

@@ -127,6 +127,13 @@ deleted file. Omnigent does not distinguish that failure from a new file.
       session is busy (the server queues them; v1 renders them only
       after a snapshot refresh). See
       [docs/conversation-buffer.md](docs/conversation-buffer.md).
+- [ ] Support interrupt and correction of pending messages: decide how to restore sent
+      text without overwriting a draft, including when multiple messages are pending.
+      Update the conversation design and test cancellation during a model switch. Check
+      session items and pending inputs after cancellation and refresh. The upstream live
+      test is `tests/e2e_ui/chat/test_cancel_message_model_switch_live.py`; a controlled
+      delay can test the workflow without testing the real model-switch race. Interrupt
+      is session-wide, not selective cancellation.
 - [ ] Fetch sessions incrementally: load 20 first, then let the user fetch more.
 - [ ] Fetch older conversation items on demand.
 - [ ] Infer execution hosts and native workspace paths from TRAMP buffers.
@@ -136,6 +143,7 @@ deleted file. Omnigent does not distinguish that failure from a new file.
       model override, reasoning effort, launch args, and
       fork options (harness switch, fork-from-response).
 - [ ] Child-session display and management.
+- [ ] Support side chat and its MCP tool allowlist.
 - [ ] Fork sessions, including fork options.
 - [ ] `delete_worktree` option on archive (removes the session worktree).
 

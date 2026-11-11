@@ -1,0 +1,15 @@
+{
+  "upstream": "tests/e2e_ui/approvals/test_native_claude_question.py",
+  "prompt": "test request_permission",
+  "responses_by_harness": {
+    "claude-native": [
+      {"tool_calls": [{"call_id": "call_perm_check", "name": "Write", "arguments": "{\"file_path\": \"mock-permission.txt\", \"content\": \"Mock permission granted.\\n\"}"}]},
+      {"text": "Permission turn complete."}
+    ],
+    "codex-native": [
+      {"tool_calls": [{"call_id": "call_perm_check", "name": "exec_command", "arguments": "{\"cmd\": \"printf %s 'Mock permission granted.\\n' > mock-permission.txt\", \"sandbox_permissions\": \"require_escalated\", \"justification\": \"Allow the mock permission write?\"}"}]},
+      {"text": "Permission turn complete."}
+    ]
+  },
+  "expect": {"file_content": "Mock permission granted.\n"}
+}

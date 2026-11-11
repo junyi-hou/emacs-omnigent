@@ -1,0 +1,13 @@
+{
+  "upstream": "tests/e2e_ui/chat/test_context_meter_freeze_on_failed_turn.py",
+  "prompt": "test usage",
+  "responses": [
+    {
+      "text": "The capital of France is Paris.",
+      "usage": {
+        "input_tokens": 512
+      },
+      "stream": true
+    }
+  ]
+}
