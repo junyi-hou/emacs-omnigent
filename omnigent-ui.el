@@ -744,6 +744,52 @@
                       'face 'diff-header))
     (force-mode-line-update)))
 
+(defvar-local omnigent-ui--busy-overlay nil)
+(defvar-local omnigent-ui--busy-timer nil)
+(defvar-local omnigent-ui--busy-frame 0)
+
+(defun omnigent-ui--busy-tick (buffer)
+  "Advance the busy indicator in BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (and omnigent-conversation--invalid
+                 omnigent-ui--busy-timer)
+        (cancel-timer omnigent-ui--busy-timer)
+        (setq omnigent-ui--busy-timer nil))
+      (when (overlayp omnigent-ui--busy-overlay)
+        (move-overlay
+         omnigent-ui--busy-overlay
+         omnigent-ui--composer-label
+         omnigent-ui--composer-label)
+        (overlay-put
+         omnigent-ui--busy-overlay 'before-string
+         (if (and omnigent-conversation--response-id
+                  (not omnigent-conversation--invalid))
+             (prog1 (aref
+                     ["|" "/" "-" "\\"] (% omnigent-ui--busy-frame 4))
+               (cl-incf omnigent-ui--busy-frame))
+           " "))))))
+
+(defun omnigent-ui--busy-update ()
+  "Start or stop the prompt animation for the active response."
+  (if (and omnigent-conversation--response-id
+           (not omnigent-conversation--invalid))
+      (unless omnigent-ui--busy-timer
+        (omnigent-ui--busy-tick (current-buffer))
+        (setq omnigent-ui--busy-timer
+              (run-at-time 0.15 0.15 #'omnigent-ui--busy-tick
+                           (current-buffer))))
+    (when omnigent-ui--busy-timer
+      (cancel-timer omnigent-ui--busy-timer)
+      (setq omnigent-ui--busy-timer nil))
+    (omnigent-ui--busy-tick (current-buffer))))
+
+(defun omnigent-ui--busy-stop ()
+  "Stop the prompt animation when the conversation closes."
+  (when omnigent-ui--busy-timer
+    (cancel-timer omnigent-ui--busy-timer)
+    (setq omnigent-ui--busy-timer nil)))
+
 (defun omnigent-ui-conversation-setup ()
   "Initialize transcript, request and composer boundaries for this session."
   (setq
@@ -763,6 +809,14 @@
     (set-marker omnigent-conversation--prompt-start (point))
     (set-marker-insertion-type
      omnigent-conversation--prompt-start nil))
+  (setq omnigent-ui--busy-overlay
+        (make-overlay
+         omnigent-ui--composer-label omnigent-ui--composer-label))
+  (omnigent-ui--busy-update)
+  (add-hook 'kill-buffer-hook #'omnigent-ui--busy-stop nil t)
+  (add-hook
+   'omnigent-conversation-change-hook #'omnigent-ui--busy-update
+   t t)
   (omnigent-ui--conversation-header)
   (add-hook 'omnigent-conversation-change-hook
             #'omnigent-ui--conversation-header

@@ -120,6 +120,40 @@
      "response.completed" '((response . ((usage . ((total_tokens . 512)))))))
     (should (string-match-p "512 / 4.1k (12%)" header-line-format))))
 
+(ert-deftest omnigent-ui-prompt-busy-indicator ()
+  "Animate the prompt while a response is active and stop when it ends."
+  (omnigent-ui-test--conversation
+    (unwind-protect
+        (progn
+          (should
+           (equal
+            (overlay-get
+             omnigent-ui--busy-overlay 'before-string)
+            " "))
+          (omnigent-conversation--event
+           "response.created" '((response . ((id . "response")))))
+          (should (timerp omnigent-ui--busy-timer))
+          (should
+           (equal
+            (overlay-get
+             omnigent-ui--busy-overlay 'before-string)
+            "|"))
+          (omnigent-ui--busy-tick (current-buffer))
+          (should
+           (equal
+            (overlay-get
+             omnigent-ui--busy-overlay 'before-string)
+            "/"))
+          (omnigent-conversation--event
+           "response.completed" '((response . ((id . "response")))))
+          (should-not omnigent-ui--busy-timer)
+          (should
+           (equal
+            (overlay-get
+             omnigent-ui--busy-overlay 'before-string)
+            " ")))
+      (omnigent-ui--busy-stop))))
+
 (ert-deftest omnigent-ui-conversation-user-permission ()
   "Freeze read-only sessions and restore editing when permission increases."
   (omnigent-ui-test--conversation
