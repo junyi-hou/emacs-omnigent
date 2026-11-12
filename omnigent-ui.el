@@ -330,6 +330,8 @@
 (defconst omnigent-ui--tool-lines-limit 1000)
 (defvar-local omnigent-ui--request-start nil)
 (defvar-local omnigent-ui--composer-label nil)
+(defvar-local omnigent-ui--pending-start nil
+  "Marker separating request forms from submitted input blocks.")
 (defvar-local omnigent-ui--folds nil)
 (defvar-local omnigent-ui--field-errors nil)
 (defvar-local omnigent-ui--rendering nil)
@@ -462,6 +464,32 @@
                 (with-selected-window window (recenter -1))
               (set-window-start window new-start t))))))))
 
+(defun omnigent-ui--pending-inputs ()
+  "Render submitted input between request forms and the editable composer."
+  (when (and omnigent-ui--pending-start (not omnigent-ui--rendering))
+    (let ((omnigent-ui--rendering t) (inhibit-read-only t)
+          (inhibit-modification-hooks t) (buffer-undo-list t)
+          (position (copy-marker (point) t))
+          (request-start (marker-position omnigent-ui--request-start))
+          (start (marker-position omnigent-ui--pending-start)))
+      (delete-region start omnigent-ui--composer-label)
+      (goto-char start)
+      (dolist (input omnigent-conversation--pending-inputs)
+        (let ((begin (point)) (text (omnigent-conversation--text input)))
+          (insert (propertize (format "[%s] > " (alist-get 'state input))
+                              'face 'omnigent-ui-user)
+                  text "\n")
+          (when (eq (alist-get 'state input) 'unconfirmed)
+            (insert (propertize "Warning: the server may have accepted this message. Do not resend automatically.\n"
+                                'face 'omnigent-ui-error)))
+          (insert "\n")
+          (add-text-properties begin (point)
+                               '(read-only t rear-nonsticky t))))
+      (set-marker omnigent-ui--pending-start start)
+      (set-marker omnigent-ui--request-start request-start)
+      (goto-char position)
+      (set-marker position nil))))
+
 (defun omnigent-ui--composer-indent (&rest _ignored)
   "Align composer continuation lines using display properties only."
   (when (and omnigent-conversation--prompt-start (not omnigent-ui--rendering))
@@ -510,15 +538,18 @@
   (let ((inhibit-read-only t))
     (goto-char (point-min))
     (setq omnigent-ui--request-start (copy-marker (point) t)
+          omnigent-ui--pending-start (copy-marker (point) t)
           omnigent-ui--composer-label (copy-marker (point) t))
     (insert (propertize "> " 'read-only t 'rear-nonsticky t))
     (set-marker omnigent-ui--request-start (point-min))
+    (set-marker omnigent-ui--pending-start (point-min))
     (set-marker omnigent-ui--composer-label (point-min))
     (set-marker omnigent-conversation--prompt-start (point))
     (set-marker-insertion-type omnigent-conversation--prompt-start nil))
   (omnigent-ui--conversation-header)
   (add-hook 'omnigent-conversation-change-hook #'omnigent-ui--conversation-header nil t)
   (add-hook 'omnigent-conversation-change-hook #'omnigent-ui--transcript nil t)
+  (add-hook 'omnigent-conversation-change-hook #'omnigent-ui--pending-inputs nil t)
   (add-hook 'omnigent-conversation-elicitation-change-hook #'omnigent-ui--requests nil t)
   (add-hook 'omnigent-conversation-event-hook #'omnigent-ui--conversation-event nil t)
   (add-hook 'after-change-functions #'omnigent-ui--composer-indent nil t)
@@ -529,6 +560,7 @@
     (use-local-map map))
   (omnigent-ui--transcript)
   (omnigent-ui--requests)
+  (omnigent-ui--pending-inputs)
   (goto-char (point-max)))
 
 ;;; Inline request widgets
@@ -702,7 +734,7 @@ CHOICES is a widget choice list; REQUIRED and SECRET control input handling."
 
 (defun omnigent-ui--widget-after-change (start end old-length)
   "Notify request widgets of changes from START to END with OLD-LENGTH."
-  (when (< start omnigent-ui--composer-label)
+  (when (< start omnigent-ui--pending-start)
     (widget-after-change start end old-length)))
 
 (defun omnigent-ui--requests ()
@@ -722,7 +754,7 @@ CHOICES is a widget choice list; REQUIRED and SECRET control input handling."
            (start (marker-position omnigent-ui--request-start)))
       (dolist (widget omnigent-ui--widgets) (widget-delete widget))
       (setq omnigent-ui--widgets nil)
-      (delete-region start omnigent-ui--composer-label)
+      (delete-region start omnigent-ui--pending-start)
       (goto-char start)
       (dolist (request (omnigent-conversation-elicitations))
         (omnigent-ui--request request))

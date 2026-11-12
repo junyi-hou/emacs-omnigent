@@ -1,15 +1,15 @@
 # Conversation Buffer Design
 
-**Status:** Proposed. Not implemented. This document covers one conversation buffer:
-session lifecycle, transcript state, reconciliation, and
+**Status:** Implemented in `omnigent-conversation.el` and `omnigent.el`. This document
+covers one conversation buffer: session lifecycle, transcript state, reconciliation, and
 sending. [frontend.md](frontend.md) owns presentation, [transport.md](transport.md) owns
 server connections, and [session-tree.md](session-tree.md) owns session management.
 
 ## Scope and requirements
 
 Send the prompt to the server as the user enters it. The server decides what to do:
-start a turn, or queue the message behind the running one. The client builds no queue
-machinery of its own.
+start a turn, or queue the message behind the running one. Show pending messages in the
+conversation buffer. Submitted messages are read-only.
 
 ## What the server offers
 
@@ -19,8 +19,8 @@ Facts come from the server API document and the installed server.
   types: `message` (user or assistant), `function_call`, `function_call_output`, and
   `reasoning`. Each item has a stable server `id`. A `function_call` and its
   `function_call_output` share a `call_id`.
-- The SSE stream (`GET /v1/sessions/{id}/stream`) is a live tail with no
-  replay. Relevant events:
+- The SSE stream (`GET /v1/sessions/{id}/stream`) is a live tail with no replay.
+  Relevant events:
   - `response.output_item.added` / `response.output_item.done` with the full item
     payload.
   - `response.output_text.delta` and `response.reasoning_text.delta` /
@@ -29,14 +29,16 @@ Facts come from the server API document and the installed server.
   - `session.status` can report a failed startup with an error, without a
     `response.failed` event.
   - `session.interrupted` after a user interrupt.
+  - `session.input.consumed` with the committed item and, when available, the cleared
+    pending-input ID.
   - `response.elicitation_request` when the agent needs a user response.
   - `response.elicitation_resolved` when a request is answered or ends.
 - A session snapshot includes outstanding requests in `pending_elicitations`.
 - `POST /v1/sessions/{id}/events` with `{"type":"message",...}` returns 202
   `{"queued":true}`. While the session is `running`, the server queues the message
   behind the current turn and consumes it at the next iteration checkpoint. No separate
-  steer event exists. The client does not model any of this; it sends and renders the
-  result.
+  steer event exists. The client displays server-reported input state; it does not
+  schedule or manage the queue.
 
 ## Buffer and mode
 
@@ -55,11 +57,12 @@ Buffer-local state:
 
 - `session-id` and the stream handle from `omnigent-transport-start-session-stream`.
 - A hash table keyed by item id. Each entry holds markers for the rendered block and the
-  fold state.  This table is the dedupe index: an item that is already present is never
+  fold state. This table is the dedupe index: an item that is already present is never
   rendered twice, from the snapshot or the stream.
 - Pending elicitations, keyed by elicitation id, stored separately from transcript
-  items. Session management supplies status from the session-updates WebSocket for
-  queued-message display.
+  items.
+- Pending messages, kept in server queue order and separate from committed transcript
+  items. Track server identifiers for reconciliation.
 
 The conversation buffer holds the client-side transcript state while it is open. The
 server remains authoritative for persisted session state. Mode activation calls
@@ -75,9 +78,10 @@ installing the snapshot. Reconcile full items by ID and update existing blocks r
 than rendering duplicates. A final full item replaces its partial
 representation. Reconcile elicitation requests and resolutions by elicitation ID.
 
-Follow the official web frontend's snapshot and stream reconciliation behavior, rather
-than adding separate handling for edge cases it does not cover. If the stream or snapshot
-fails, report the error; do not silently present an empty transcript as complete.
+Use the official web frontend as a reference for snapshot and stream reconciliation. Do
+not copy a FIFO fallback that can remove an unrelated pending message when replaying an
+event already represented in the snapshot. If the stream or snapshot fails, report the
+error; do not silently present an empty transcript as complete.
 
 A snapshot refresh preserves fold state and point by item ID, and preserves composer
 text and elicitation drafts. Reopening a killed buffer restores only server state, not
@@ -147,24 +151,51 @@ a potentially accepted message automatically.
   `omnigent-transport-post-session-event` without checking session status. The server
   accepts or rejects the request and owns the queue. Report a rejection and keep the
   draft. Forking is deferred.
-- **Rendering rule**: use the last known status from the session-updates WebSocket, not
-  `session.status` from the conversation stream. Render the sent message only when that
-  status is `idle`. When it is `running`, `waiting`, `failed`, or unknown, do not render
-  it; a later snapshot refresh renders committed messages. Status can change between the
-  update and the POST, so this is a display heuristic, not proof that the server queued
-  the message.
-- **Known gap**: while the session is busy, a sent message is invisible in the
-  transcript until a refresh or reconnect. The live stream never re-delivers user
-  messages, so nothing renders it on its own, even after the turn finishes. Accept this
-  in v1. The README TODO tracks the follow-up: client-side tracking of queued messages
-  so the user sees what was sent while the session is busy.
-- **Duplicate guard**: the live stream never re-delivers user messages on regular
-  sessions, so an optimistic render cannot double-render. Native-terminal transcript
-  mirrors can broadcast the user's own item; if that item matches the newest optimistic
-  block's text, replace the block instead of appending. One line at render time.
+- **Accepted messages** remain visible after the server confirms acceptance. Trust the
+  server response and its identifiers: render a committed item as history, or show a
+  pending input with a `[queued]` label. A `queued: true` response can also include an
+  already-persisted `item_id`, so the flag alone does not distinguish these states. A
+  successful HTTP response can report denial; do not treat that as acceptance. Do not
+  infer message state from session status.
+- **Pending messages** are separate from committed history and retain server queue
+  order. [frontend.md](frontend.md) owns their presentation.
+- **Consumption**: dispatch `session.input.consumed` from the existing session SSE
+  stream. Store the server-provided pending ID with each pending item. Match the event's
+  `cleared_pending_id` to that ID when possible. An explicit but unmatched pending ID
+  must not trigger FIFO removal. If the committed item is already in the snapshot or
+  transcript, remove only an exactly matched pending entry. For a new committed item
+  without a pending ID, use the web frontend's FIFO fallback for eligible user messages;
+  do not remove a pending message for a system marker or an unsent draft. Render the
+  event's committed item in read-only history, deduplicated by `item_id`, and remove the
+  `[queued]` label. Do not poll or POST to check consumption. Keep submission order in
+  the buffer-local pending state; no separate temporary ID is required. The POST
+  callback retains a stable item reference and must not recreate an item already
+  consumed before the response arrived. Do not infer consumption from an interrupt or a
+  status change. If the send outcome is unknown, show an explicit unconfirmed label
+  rather than claiming acceptance.
+- **Refresh and recovery**: the server is the single source of truth. On a successful
+  snapshot refresh, rebuild committed history and pending messages from server state,
+  then reconcile buffered live events. Render snapshot pending inputs with `[queued]`
+  labels in server order. Do not merge unmatched local submission records back into the
+  recovered queue. A previously queued message can appear as committed history or be
+  absent from the recovered state. Full recovery of earlier client state is not
+  required. Preserve composer text across refreshes in an open buffer. If a snapshot
+  fails, keep the visible state and report that it may be stale. Reopening a buffer
+  restores only server state, not local drafts.
+- **Uncertain sends**: keep the composer draft and show a persistent warning that the
+  server may have accepted it. Do not automatically resend it. A failed or uncertain
+  send must not appear as confirmed queued input.
 - **Interrupt** posts `{"type":"interrupt","data":{}}`. After `session.interrupted`, the
-  buffer marks the turn as interrupted. What the server does with unconsumed messages is
-  the server's business; a snapshot refresh shows the truth.
+  buffer marks the turn as interrupted and refreshes pending input state. An interrupt
+  does not itself confirm that pending inputs were cancelled or consumed. The refreshed
+  snapshot determines which messages remain visible. No dedicated copy or correction
+  command is required.
+
+The installed Omnigent 0.21.0 server publishes consumption events on the session SSE
+stream and includes pending inputs in snapshots. The stream has no history replay, so
+refresh the snapshot after reconnect and after interrupt; buffer live events during the
+snapshot as described above. Check the exact identifiers and interrupt behavior for each
+supported harness before implementation.
 
 ## Harness and session errors
 
@@ -182,11 +213,15 @@ See [elicitation.md](elicitation.md) for request state and resolution.
 
 ## Non-goals
 
+- No full client-state recovery after reconnecting or reopening a conversation. Recover
+  the server's current committed history and pending inputs, not earlier local labels,
+  unmatched submission records, or removed pending text. Preserve drafts only while the
+  existing buffer remains open.
 - No editing or resending past messages.
 - No client-side replay or diffing of the transcript; a refresh re-renders from the
   snapshot.
-- No queue UI: no queued-bubble faces, no `session.input.consumed` tracking, no
-  `pending_inputs` rehydration. The client sends; the server decides.
+- No full queue manager: do not add reordering or cancellation unless separately
+  designed.
 
 ## References
 
@@ -202,3 +237,9 @@ See [elicitation.md](elicitation.md) for request state and resolution.
 Check mode activation with and without a session ID, reuse without restarting the
 stream, reopening from a snapshot, send failure draft preservation, and event/snapshot
 overlap. Check that closing a buffer stops its stream without stopping the session.
+Check queued ordering, output insertion above the queue, SSE consumption by ID and FIFO
+fallback, system markers, consumption before the POST response, snapshot and stream
+overlap, identical messages, interrupt refresh, uncertain sends, and draft preservation.
+Replay consumption of A after installing a snapshot with committed A and pending B; B
+must remain pending. Check that recovery renders snapshot pending inputs and drops
+unmatched local submission records.

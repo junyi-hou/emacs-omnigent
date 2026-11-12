@@ -154,6 +154,10 @@ The following transport functions are implemented in `omnigent-transport.el`:
 - `omnigent-transport-start-session-stream` and `omnigent-transport-stop-session-stream`
   manage a session SSE handle. The existing start function also requests a snapshot
   after each connection attempt and invokes the supplied snapshot callback.
+- `omnigent-transport-refresh-session-stream` requests another snapshot without
+  restarting SSE. Call it after the previous snapshot completes. It invokes the
+  connection callback before loading, so the conversation buffers live events during the
+  refresh.
 - `omnigent-transport-start-session-updates`,
   `omnigent-transport-set-session-updates-watch`, and
   `omnigent-transport-stop-session-updates` manage the session-updates WebSocket.

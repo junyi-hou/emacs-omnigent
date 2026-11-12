@@ -181,17 +181,28 @@ Use `omnigent-conversation-open' to create a conversation buffer."
   (interactive)
   (when buffer-read-only (user-error "This session is read-only"))
   (when omnigent-conversation--sending (user-error "A message is being sent"))
-  (let ((text (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max)))
-        (buffer (current-buffer)))
+  (let* ((text (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max)))
+         (entry (copy-tree `((state . submitting) (content . ,text)
+                             (pending_id . nil) (consumed-pending-ids . nil))))
+         (buffer (current-buffer)))
     (when (string-blank-p text) (user-error "The message is empty"))
-    (setq omnigent-conversation--sending t)
+    (setq omnigent-conversation--sending entry
+          omnigent-conversation--pending-inputs
+          (append omnigent-conversation--pending-inputs (list entry)))
+    (omnigent-conversation--notify-input-change)
     (condition-case err
         (omnigent-transport-post-session-event
          omnigent-conversation-session-id
          `(("type" . "message") ("data" . (("role" . "user")
                     ("content" . [(("type" . "input_text") ("text" . ,text))]))))
-         (apply-partially #'omnigent-conversation--sent buffer text))
-      (error (setq omnigent-conversation--sending nil) (signal (car err) (cdr err))))))
+         (apply-partially #'omnigent-conversation--sent buffer entry))
+      ((error quit)
+       (when omnigent-conversation--sending
+         (setq omnigent-conversation--sending nil
+               omnigent-conversation--pending-inputs
+               (delq entry omnigent-conversation--pending-inputs))
+         (omnigent-conversation--notify-input-change))
+       (signal (car err) (cdr err))))))
 
 (defun omnigent-conversation-set-model (model)
   "Change the current session's MODEL asynchronously."

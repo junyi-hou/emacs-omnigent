@@ -373,6 +373,15 @@ Return a stream handle for `omnigent-transport-stop-session-stream'."
     (omnigent-transport--stream-connect stream)
     stream))
 
+(defun omnigent-transport-refresh-session-stream (stream)
+  "Reload STREAM's snapshot without restarting its live SSE subscription.
+Call only after the previous snapshot completes.  Reconnection invalidates
+this read through the stream attempt number."
+  (unless (omnigent-stream-stopped stream)
+    (when (omnigent-stream-connect-callback stream)
+      (funcall (omnigent-stream-connect-callback stream)))
+    (omnigent-transport--stream-load-snapshot stream (omnigent-stream-attempt stream))))
+
 (defun omnigent-transport-stop-session-stream (stream)
   "Stop STREAM and prevent automatic reconnection."
   (setf (omnigent-stream-stopped stream) t)

@@ -66,8 +66,21 @@ continuation lines and visually wrapped lines with the first input character. Th
 indentation is display-only and is not sent as part of the message. `RET` inserts a
 newline; `C-c C-c` sends the message. Distinguish user, agent, tool, reasoning, and
 error text with faces. Show tool calls and reasoning in foldable blocks. Show streamed
-output before the composer. Keep the target session clear in each buffer. Detailed
-rendering and buffer behavior are in [conversation-buffer.md](conversation-buffer.md).
+output before the pending-message area and composer. Show pending messages in queue
+order immediately above the composer, with `[queued] >` labels. Place new pending
+messages below older ones. Insert incoming agent output above all pending messages. Keep
+the target session clear in each buffer. Detailed rendering and buffer behavior are in
+[conversation-buffer.md](conversation-buffer.md).
+
+### Queued messages
+
+Submitted messages are read-only. Show a confirmed pending message with a `[queued] >`
+label. When the server confirms consumption, move the message into normal read-only
+history and remove the label. Trust server-reported acceptance and message state. If the
+send outcome is unknown, show an unconfirmed state instead. After snapshot recovery,
+render the server's current history and pending messages; earlier local labels need not
+survive. Use standard Emacs commands to select and copy text; no dedicated copy command
+is needed.
 
 ### Transcript and folds
 
@@ -124,10 +137,11 @@ During submission, keep the request visible, disable its response actions, and s
 and server interactions belong to [elicitation.md](elicitation.md).
 
 The conversation implementation must keep separate boundaries for transcript, request
-blocks, and composer. Stream insertion and transcript refresh must not overwrite request
-drafts or composer text. Incoming output must not move point from the composer or
-interrupt typing. Follow incoming output only when the window is already at the bottom;
-otherwise preserve the user's reading position.
+blocks, pending messages, and composer. Place request blocks above pending messages.
+Stream insertion and transcript refresh must not overwrite request drafts or composer
+text. Incoming output must not move point from the composer or interrupt typing. Follow
+incoming output only when the window is already at the bottom; otherwise preserve the
+user's reading position.
 
 ## Workspace view
 

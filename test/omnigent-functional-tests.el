@@ -422,6 +422,44 @@ Return the marked prompt that was sent."
   (let ((marker (omnigent-functional-marker)))
     (omnigent-functional-send buffer (omnigent-mock-configure-fixture name marker))))
 
+(ert-deftest omnigent-mock-acp-follow-up-visible-and-recovered ()
+  "Keep a follow-up visible while busy and recover only server state on reopen."
+  (let* ((id (omnigent-integration-create-session t))
+         (first (omnigent-functional-marker))
+         (second (omnigent-functional-marker))
+         (answer (concat "follow-up answer " second))
+         buffer)
+    (unwind-protect
+        (save-window-excursion
+          (omnigent-mock-configure first [((text . "first answer") (block . t))])
+          (omnigent-mock-configure second `[((text . ,answer))])
+          (setq buffer (omnigent-functional-open id))
+          (omnigent-functional-send buffer first)
+          (omnigent-functional-wait "First turn did not reach the mock gate"
+            (eq (alist-get 'pending (cdr (omnigent-mock-request "GET" "/gate/pending"))) t))
+          (omnigent-functional-send buffer second)
+          (with-current-buffer buffer
+            (should (= (how-many (regexp-quote second) (point-min) (point-max)) 1))
+            (insert "local draft"))
+          (kill-buffer buffer)
+          (setq buffer (omnigent-functional-open id))
+          (with-current-buffer buffer
+            (should-not (string-match-p "local draft" (buffer-string)))
+            (should (= (how-many (regexp-quote second) (point-min) (point-max)) 1)))
+          (omnigent-mock-gate-release)
+          (omnigent-functional-wait "Follow-up did not commit or receive its answer"
+            (and (omnigent-functional-exchange-stored-p id second answer)
+                 (with-current-buffer buffer
+                   (and (not omnigent-conversation--pending-inputs)
+                        (cl-find-if (lambda (item)
+                                      (equal (omnigent-conversation--text item) answer))
+                                    (omnigent-functional-items buffer))))))
+          (with-current-buffer buffer
+            (should (= (cl-count second (omnigent-functional-items buffer)
+                                 :key #'omnigent-conversation--text :test #'equal) 1))))
+      (omnigent-mock-gate-release)
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
 (defun omnigent-functional-exchange-stored-p (id prompt answer)
   "Return non-nil when ID has committed both PROMPT and ANSWER.
 Native input delivery completes before the transcript forwarder commits output."
@@ -799,7 +837,7 @@ Return the recorded model request of the turn."
   "Interrupt a real running model turn through the UI and keep its composer usable."
   (let* ((id (omnigent-integration-create-session t))
          (marker (make-temp-name "ui-interrupt-check-"))
-         buffer)
+         buffer interrupted)
     (unwind-protect
         (save-window-excursion
           (setq buffer (omnigent-functional-open id))
@@ -809,11 +847,14 @@ Return the recorded model request of the turn."
             (and (omnigent-mock-model-requests marker)
                  (omnigent-functional-status-p id "running")))
           (with-current-buffer buffer
+            (add-hook 'omnigent-conversation-event-hook
+                      (lambda (name _data)
+                        (when (equal name "session.interrupted") (setq interrupted t))) nil t)
             (call-interactively (key-binding (kbd "C-c C-k"))))
-          (omnigent-functional-wait "Interrupted session did not become idle"
-            (and (omnigent-functional-status-p id "idle")
-                 (with-current-buffer buffer
-                   (string-match-p "Interrupted" (buffer-string)))))
+          ;; The refresh can remove a nonpersisted interrupt marker.
+          (omnigent-functional-wait "Interrupted session did not recover idle state"
+            (and interrupted (omnigent-functional-status-p id "idle")
+                 (not (buffer-local-value 'omnigent-conversation--loading buffer))))
           (with-current-buffer buffer
             (goto-char (point-max))
             (insert "next draft")

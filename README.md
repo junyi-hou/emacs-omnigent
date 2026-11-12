@@ -123,17 +123,15 @@ deleted file. Omnigent does not distinguish that failure from a new file.
       including how to identify the host and avoid opening a file on the wrong host.
 - [ ] Design centralized authentication for remote servers, including token expiration.
 - [ ] Support connections to multiple Omnigent servers.
-- [ ] Track queued messages client-side: show messages sent while the
-      session is busy (the server queues them; v1 renders them only
-      after a snapshot refresh). See
+- [x] Show pending messages while the session is busy, track server consumption, and
+      restore server pending inputs from snapshots. See
       [docs/conversation-buffer.md](docs/conversation-buffer.md).
-- [ ] Support interrupt and correction of pending messages: decide how to restore sent
-      text without overwriting a draft, including when multiple messages are pending.
-      Update the conversation design and test cancellation during a model switch. Check
-      session items and pending inputs after cancellation and refresh. The upstream live
-      test is `tests/e2e_ui/chat/test_cancel_message_model_switch_live.py`; a controlled
-      delay can test the workflow without testing the real model-switch race. Interrupt
-      is session-wide, not selective cancellation.
+- [ ] Test cancellation during a model switch. Pending-state refresh is implemented.
+      Check session items and pending inputs after cancellation and refresh. The
+      upstream live test is
+      `tests/e2e_ui/chat/test_cancel_message_model_switch_live.py`; a controlled delay
+      can test the workflow without testing the real model-switch race. Interrupt is
+      session-wide, not selective cancellation.
 - [ ] Fetch sessions incrementally: load 20 first, then let the user fetch more.
 - [ ] Fetch older conversation items on demand.
 - [ ] Infer execution hosts and native workspace paths from TRAMP buffers.

@@ -471,24 +471,23 @@
       (funcall callback 200 '((changes . (((path . "late") (status . "created"))))))
       (should-not (gethash "conv_test" omnigent-ui--workspace-cache)))))
 
-(ert-deftest omnigent-ui-send-idle-renders-once-and-busy-does-not ()
-  "Render successful idle sends and deduplicate mirrored user items."
+(ert-deftest omnigent-ui-send-uses-server-state-not-session-status ()
+  "Display queued input for every session status and commit it exactly once."
   (dolist (status '("idle" "running" "waiting" "failed" nil))
     (omnigent-ui-test--conversation
       (let ((omnigent-sessions `(((id . "conv_test") (status . ,status)))))
         (insert "sent message")
         (cl-letf (((symbol-function 'omnigent-transport-post-session-event)
-                   (lambda (_id _event callback) (funcall callback 202 nil))))
+                   (lambda (_id _event callback)
+                     (funcall callback 202 '((queued . t) (pending_id . "pending"))))))
           (omnigent-conversation-send))
-        (if (equal status "idle")
-            (progn
-              (should (= (hash-table-count omnigent-conversation--items) 1))
-              (omnigent-conversation--event
-               "response.output_item.done"
-               '((item . ((id . "mirror") (type . "message") (role . "user") (content . "sent message")))))
-              (should (equal omnigent-conversation--order '("mirror")))
-              (should (= (how-many "You:" (point-min) (point-max)) 1)))
-          (should (= (hash-table-count omnigent-conversation--items) 0)))))))
+        (should-not omnigent-conversation--order)
+        (should (string-match-p "\\[queued\\] > sent message" (buffer-string)))
+        (omnigent-ui-test--consume "committed" "sent message" "pending")
+        (omnigent-ui-test--consume "committed" "sent message" "pending")
+        (should-not omnigent-conversation--pending-inputs)
+        (should (equal omnigent-conversation--order '("committed")))
+        (should (= (how-many "You:" (point-min) (point-max)) 1))))))
 
 (ert-deftest omnigent-ui-scrolled-transcript-keeps-reading-position ()
   "Preserve point by item ID when transcript output is refreshed above the composer."
@@ -528,6 +527,195 @@
       (goto-char (widget-field-start field))
       (insert "typed")
       (should (equal (gethash "name" (omnigent-conversation-elicitation-draft "q")) "typed")))))
+
+(defun omnigent-ui-test--consume (id text &optional pending-id meta)
+  "Deliver consumption of ID with TEXT, optional PENDING-ID and META flag."
+  (omnigent-conversation--event
+   "session.input.consumed"
+   `((data . ((item_id . ,id) (type . "message")
+              (cleared_pending_id . ,pending-id)
+              (data . ((role . "user") (content . ,text) (is_meta . ,meta))))))))
+
+(ert-deftest omnigent-ui-pending-order-forms-and-draft ()
+  "Keep output, forms, queued input and composer separate."
+  (omnigent-ui-test--conversation
+    (let ((next 0))
+      (cl-letf (((symbol-function 'omnigent-transport-post-session-event)
+                 (lambda (_id _event callback)
+                   (funcall callback 202 `((queued . t) (pending_id . ,(number-to-string (cl-incf next))))))))
+        (dolist (text '("first" "second"))
+          (goto-char (point-max)) (insert text)
+          (omnigent-conversation-send))))
+    (insert "draft")
+    (omnigent-conversation--event
+     "response.elicitation_request" '((elicitation_id . "q") (params . ((message . "Approval")))))
+    (omnigent-conversation--event
+     "response.output_item.done" '((item . ((id . "answer") (content . "output")))))
+    (should (string-match-p "output\n\nQuestion\nApproval" (buffer-string)))
+    (should (string-match-p "\\[queued\\] > first\n\n\\[queued\\] > second\n\n> draft" (buffer-string)))
+    (should (= (point) (point-max)))
+    (goto-char omnigent-ui--pending-start)
+    (should-error (insert "edit") :type 'text-read-only)
+    (run-hooks 'post-command-hook)
+    (should (equal (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max)) "draft"))
+    (omnigent-conversation--event "response.elicitation_resolved" '((elicitation_id . "q")))
+    (should (string-match-p "output\n\n\\[queued\\] > first" (buffer-string)))
+    (omnigent-ui-test--consume "first" "first" "1")
+    (should (= (length omnigent-conversation--pending-inputs) 1))))
+
+(ert-deftest omnigent-ui-consumption-before-post-response ()
+  "Do not recreate consumed input when its POST acknowledgement arrives late."
+  (dolist (pending-id '(nil "pending"))
+    (omnigent-ui-test--conversation
+      (let (callback)
+        (insert "same")
+        (cl-letf (((symbol-function 'omnigent-transport-post-session-event)
+                   (lambda (_id _event cb) (setq callback cb))))
+          (omnigent-conversation-send))
+        (omnigent-ui-test--consume "committed" "same" pending-id)
+        (insert " suffix")
+        (with-temp-buffer
+          (funcall callback 202 `((queued . t) (pending_id . ,pending-id))))
+        (should-not omnigent-conversation--pending-inputs)
+        (should (equal omnigent-conversation--order '("committed")))
+        (should (equal (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max)) " suffix"))
+        (should (= (how-many "You:" (point-min) (point-max)) 1))))))
+
+(ert-deftest omnigent-ui-snapshot-is-authoritative-for-pending-input ()
+  "Replace local input records, then ignore already-recovered FIFO consumption."
+  (omnigent-ui-test--conversation
+    (insert "draft")
+    (setq omnigent-conversation--pending-inputs '(((state . queued) (content . "local"))))
+    (dolist (cleared-id '("pending-a" nil))
+      (setq omnigent-conversation--loading t)
+      (omnigent-ui-test--consume "a" "same" cleared-id)
+      (omnigent-conversation--snapshot
+       200 '((items . [((id . "a") (type . "message") (data . ((role . "user") (content . "same"))))])
+             (pending_inputs . [((pending_id . "pending-b") (content . [((type . "input_text") (text . "same"))]))])))
+      (should (= (length omnigent-conversation--pending-inputs) 1))
+      (should (equal (alist-get 'pending_id (car omnigent-conversation--pending-inputs)) "pending-b"))
+      (should (= (how-many "\\[queued\\] > same" (point-min) (point-max)) 1)))
+    (omnigent-ui-test--consume "unrelated" "other" "unknown-id")
+    (should (= (length omnigent-conversation--pending-inputs) 1))
+    (omnigent-conversation--snapshot 500 nil)
+    (should (= (length omnigent-conversation--pending-inputs) 1))
+    (omnigent-conversation--snapshot 200 '((items . []) (pending_inputs . [])))
+    (should-not omnigent-conversation--pending-inputs)
+    (should (equal (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max)) "draft"))))
+
+(ert-deftest omnigent-ui-fifo-skips-markers-and-keeps-identical-inputs ()
+  "Only new user consumption can remove one eligible FIFO input."
+  (omnigent-ui-test--conversation
+    (setq omnigent-conversation--pending-inputs
+          (list (list '(state . queued) '(content . "same"))
+                (list '(state . queued) '(content . "same"))))
+    (omnigent-ui-test--consume "meta" "injected context" nil t)
+    (omnigent-ui-test--consume "marker" "[System: task completed]")
+    (should (= (length omnigent-conversation--pending-inputs) 2))
+    (omnigent-ui-test--consume "a" "same")
+    (should (= (length omnigent-conversation--pending-inputs) 1))
+    (omnigent-ui-test--consume "a" "same")
+    (should (= (length omnigent-conversation--pending-inputs) 1))
+    (omnigent-ui-test--consume "b" "same")
+    (should-not omnigent-conversation--pending-inputs)
+    (should (equal omnigent-conversation--order '("meta" "marker" "a" "b")))))
+
+(ert-deftest omnigent-ui-send-outcomes-and-late-response-after-snapshot ()
+  "Trust response IDs, retain uncertain drafts and do not restore superseded input."
+  (dolist (response '((202 (queued . t) (item_id . "saved"))
+                      (202 (queued . t) (pending_id . "pending"))
+                      (202 (denied . t) (reason . "Denied"))
+                      (403 (detail . "Denied"))
+                      (nil) (500)))
+    (omnigent-ui-test--conversation
+      (insert "message")
+      (cl-letf (((symbol-function 'omnigent-transport-post-session-event)
+                 (lambda (_id _event callback) (funcall callback (car response) (cdr response)))))
+        (omnigent-conversation-send))
+      (cond
+       ((alist-get 'item_id (cdr response))
+        (should (equal omnigent-conversation--order '("saved")))
+        (should-not omnigent-conversation--pending-inputs))
+       ((alist-get 'pending_id (cdr response))
+        (should (string-match-p "\\[queued\\] > message" (buffer-string))))
+       ((memq (car response) '(nil 500))
+        (should (string-match-p "\\[unconfirmed\\] > message" (buffer-string)))
+        (should (string-match-p "server may have accepted" (buffer-string))))
+       (t (should-not omnigent-conversation--pending-inputs)))
+      (should (equal (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max))
+                     (if (and (equal (car response) 202) (not (eq (alist-get 'denied (cdr response)) t)))
+                         "" "message")))))
+  (omnigent-ui-test--conversation
+    (let (callback)
+      (insert "message")
+      (cl-letf (((symbol-function 'omnigent-transport-post-session-event)
+                 (lambda (_id _event cb) (setq callback cb))))
+        (omnigent-conversation-send))
+      (omnigent-conversation--snapshot 200 '((pending_inputs . [])))
+      (funcall callback 202 '((queued . t) (pending_id . "old")))
+      (should-not omnigent-conversation--pending-inputs))))
+
+(ert-deftest omnigent-ui-interrupt-refresh-buffers-events ()
+  "Refresh after interruption without losing later buffered consumption events."
+  (omnigent-ui-test--conversation
+    (let ((buffer (current-buffer)) (reads 0))
+      (setq omnigent-conversation--stream
+            (omnigent-transport--make-stream
+             :attempt 1 :connect-callback
+             (lambda () (with-current-buffer buffer
+                          (setq omnigent-conversation--loading t
+                                omnigent-conversation--pending-events nil)))))
+      (cl-letf (((symbol-function 'omnigent-transport--stream-load-snapshot)
+                 (lambda (stream attempt)
+                   (should (eq stream omnigent-conversation--stream))
+                   (should (= attempt 1))
+                   (cl-incf reads))))
+        ;; An interrupt queued during initial recovery starts another snapshot.
+        (setq omnigent-conversation--loading t)
+        (omnigent-conversation--event "session.interrupted" nil)
+        (omnigent-ui-test--consume "b" "queued" "pending-b")
+        (omnigent-conversation--snapshot
+         200 '((pending_inputs . [((pending_id . "pending-b") (content . "queued"))])))
+        (should (= reads 1))
+        (should omnigent-conversation--loading)
+        (should (= (length omnigent-conversation--pending-events) 1))
+        (omnigent-conversation--snapshot
+         200 '((pending_inputs . [((pending_id . "pending-b") (content . "queued"))])))
+        (should-not omnigent-conversation--loading)
+        (should-not omnigent-conversation--pending-inputs)
+        (should (equal omnigent-conversation--order '("b"))))
+      (setf (omnigent-stream-stopped omnigent-conversation--stream) t))))
+
+(ert-deftest omnigent-ui-send-hook-errors-and-raw-failure ()
+  "Dispatch despite observer errors and retain a draft on a raw transport failure."
+  (omnigent-ui-test--conversation
+    (insert "draft")
+    (let ((omnigent-conversation-change-hook (list (lambda () (error "Frontend failed"))))
+          callback warnings)
+      (cl-letf (((symbol-function 'display-warning)
+                 (lambda (_type text &rest _) (push text warnings)))
+                ((symbol-function 'omnigent-transport-post-session-event)
+                 (lambda (_id _event cb) (setq callback cb))))
+        (omnigent-conversation-send)
+        (should callback)
+        (funcall callback nil "Response lost")
+        (should-not omnigent-conversation--sending)
+        (should (eq (alist-get 'state (car omnigent-conversation--pending-inputs)) 'unconfirmed))
+        (should (string-suffix-p "draft" (buffer-string)))
+        (should (= (length warnings) 2))))))
+
+(ert-deftest omnigent-ui-invalid-pending-snapshot-keeps-visible-state ()
+  "Reject malformed queue arrays or identifiers without deleting visible input."
+  (dolist (pending '(nil "invalid" [((content . "missing id"))]
+                         [((pending_id . "id"))]))
+    (omnigent-ui-test--conversation
+      (insert "draft")
+      (omnigent-conversation--snapshot
+       200 '((pending_inputs . [((pending_id . "keep") (content . "queued"))])))
+      (omnigent-conversation--snapshot 200 `((pending_inputs . ,pending)))
+      (should (equal (alist-get 'pending_id (car omnigent-conversation--pending-inputs)) "keep"))
+      (should (string-match-p "\\[queued\\] > queued" (buffer-string)))
+      (should (string-suffix-p "draft" (buffer-string))))))
 
 (provide 'omnigent-ui-test)
 ;;; omnigent-ui-test.el ends here
