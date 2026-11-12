@@ -1,8 +1,12 @@
 EMACS ?= emacs
 HARNESS ?= claude-native
+ELISP_AUTOFMT ?= elisp-autofmt-cmd.py
 
-.PHONY: test unit-test integration-test
+.PHONY: test unit-test integration-test format
 test: unit-test integration-test
+
+format:
+	$(ELISP_AUTOFMT) $(wildcard *.el .*.el test/*.el)
 
 integration-test:
 	EMACS="$(EMACS)" OMNIGENT_TEST_HARNESS="$(HARNESS)" test/run-server-integration.sh

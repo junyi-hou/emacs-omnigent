@@ -9,6 +9,7 @@
 ## Style
 
 - Do not use `cl-loop`.
+- Run `make format` after editing Emacs Lisp files.
 
 ## Interactive functions
 
