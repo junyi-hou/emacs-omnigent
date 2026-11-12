@@ -164,7 +164,8 @@ workspace-relative path, regardless of status. Add a selectable `[unified diff]`
 above the files; `RET` on that row displays the combined diff. `RET` on a file displays
 its diff using Emacs window selection rules and the user's `display-buffer`
 configuration; do not force the main window. Fetch fresh data each time a diff is
-opened. Show the diff in a separate buffer using built-in `diff-mode`. If the requested
+opened. Show the diff in a separate buffer. Use `omnigent-workspace-diff-mode`
+to select its mode function; the default is `diff-mode`. If the requested
 file has no diff, report that no diff is available. If a diff request fails, do not
 report the failure; leave any existing diff buffer unchanged. Reuse the existing buffer
 for the same session and file, replacing its contents only after a successful fetch.

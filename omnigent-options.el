@@ -23,6 +23,12 @@
   :type 'boolean
   :group 'omnigent)
 
+(defcustom omnigent-workspace-diff-mode #'diff-mode
+  "Function called in the workspace diff buffer after inserting the diff.
+The function takes no arguments."
+  :type 'function
+  :group 'omnigent)
+
 (defcustom omnigent-server-url "http://127.0.0.1:6767"
   "Base URL of the Omnigent server."
   :type 'string

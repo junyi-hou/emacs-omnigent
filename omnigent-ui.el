@@ -8,6 +8,7 @@
 (require 'cl-lib)
 (require 'omnigent-conversation)
 (require 'omnigent-workspace)
+(require 'omnigent-options)
 (require 'wid-edit)
 (require 'diff-mode)
 
@@ -381,7 +382,7 @@
           (let ((inhibit-read-only t))
             (erase-buffer)
             (insert diff)
-            (diff-mode)
+            (funcall omnigent-workspace-diff-mode)
             (setq
              omnigent-ui--workspace-id id
              buffer-read-only t)
