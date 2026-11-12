@@ -899,6 +899,26 @@
              (previous-single-property-change
               (point) 'omnigent-ui-item-id)))))))
 
+(ert-deftest omnigent-ui-history-reserves-prompt-columns ()
+  "Align history text and fold indicators with the composer."
+  (omnigent-ui-test--conversation
+    (omnigent-conversation--snapshot
+     200
+     '((items
+        .
+        [((id . "message") (content . "text"))
+         ((id . "reason")
+          (type . "reasoning")
+          (content . "thought"))])
+       (pending_inputs . []) (pending_elicitations . [])))
+    (goto-char (point-min))
+    (should (equal (get-text-property (point) 'line-prefix) "  "))
+    (search-forward "▶")
+    (should (equal (get-text-property (1- (point)) 'line-prefix) " "))
+    (forward-line 1)
+    (should (equal (get-text-property (point) 'line-prefix) "  "))
+    (should (equal (get-text-property (point) 'wrap-prefix) "  "))))
+
 (ert-deftest omnigent-ui-transcript-shortened-item-keeps-point ()
   "Keep point inside its transcript item when that item becomes shorter."
   (omnigent-ui-test--conversation

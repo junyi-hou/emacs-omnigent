@@ -619,7 +619,18 @@
           (add-text-properties
            start (point)
            (list
-            'omnigent-ui-item-id id 'read-only t 'rear-nonsticky t))))
+            'omnigent-ui-item-id
+            id
+            'read-only
+            t
+            'rear-nonsticky
+            t
+            'line-prefix
+            "  "
+            'wrap-prefix
+            "  "))
+          (when (and (< start (point)) (button-at start))
+            (put-text-property start (1+ start) 'line-prefix " "))))
       (goto-char (omnigent-ui--restore-location location))
       (dolist (entry windows)
         (pcase-let ((`(,window ,start ,position ,bottom) entry))
@@ -657,7 +668,9 @@
               'face 'omnigent-ui-error)))
           (insert "\n")
           (add-text-properties
-           begin (point) '(read-only t rear-nonsticky t))))
+           begin (point)
+           '(read-only
+             t rear-nonsticky t line-prefix "  " wrap-prefix "  "))))
       (set-marker omnigent-ui--pending-start start)
       (set-marker omnigent-ui--request-start request-start)
       (goto-char position)
