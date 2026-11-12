@@ -685,36 +685,59 @@
   (when (equal name "session.changed_files.invalidated")
     (omnigent-ui-workspace-refresh omnigent-conversation-session-id)))
 
+(defun omnigent-ui--token-count (count)
+  "Format token COUNT with at most one decimal, rounded up."
+  (let ((scale
+         (cond
+          ((>= count 1000000)
+           1000000)
+          ((>= count 1000)
+           1000))))
+    (if (not scale)
+        (number-to-string count)
+      (let* ((tenths (ceiling (/ (* 10.0 count) scale)))
+             (number
+              (if (zerop (% tenths 10))
+                  (number-to-string (/ tenths 10))
+                (format "%.1f" (/ tenths 10.0)))))
+        (concat
+         number
+         (if (= scale 1000000)
+             "m"
+           "k"))))))
+
 (defun omnigent-ui--conversation-header ()
   "Update the header from the current session settings and context usage."
   (let ((data omnigent-conversation-header-data))
-    (setq
-     header-line-format
-     (format
-      "Harness: %s | Model: %s | Effort: %s | Access: %s | Context: %s%s"
-      (or (alist-get 'harness data) "unknown")
-      (or (alist-get 'llm_model data) "unknown")
-      (or (alist-get 'reasoning_effort data) "unknown")
-      (or (alist-get 'access_mode data) "unknown")
-      (let ((used (alist-get 'last_total_tokens data))
-            (window (alist-get 'context_window data)))
-        (cond
-         ((and (numberp used) (numberp window) (> window 0))
-          (format "%s / %s tokens (%.0f%%)"
-                  used
-                  window
-                  (* 100.0 (/ (float used) window))))
-         ((numberp used)
-          (format "%s tokens used (limit unknown)" used))
-         ((and (numberp window) (> window 0))
-          (format "unknown / %s tokens" window))
-         (t
-          "unknown")))
-      (pcase (alist-get 'permission_level data)
-        (1 " [R]")
-        (2 " [E]")
-        ((or 3 4) " [M]")
-        (_ ""))))
+    (setq header-line-format
+          (propertize (format "%s%s | %s | %s | %s | %s | %s"
+                              (or (alist-get 'title data) "Untitled")
+                              (pcase (alist-get 'permission_level data)
+                                (1 " [R]")
+                                (2 " [E]")
+                                ((or 3 4) " [M]")
+                                (_ ""))
+                              (or (alist-get 'harness data) "unknown")
+                              (or (alist-get 'llm_model data) "unknown")
+                              (or (alist-get 'reasoning_effort data) "unknown")
+                              (or (alist-get 'access_mode data) "unknown")
+                              (let ((used (alist-get 'last_total_tokens data))
+                                    (window (alist-get 'context_window data)))
+                                (cond
+                                 ((and (numberp used) (numberp window) (> window 0))
+                                  (format "%s / %s (%.0f%%)"
+                                          (omnigent-ui--token-count used)
+                                          (omnigent-ui--token-count window)
+                                          (* 100.0 (/ (float used) window))))
+                                 ((numberp used)
+                                  (format "%s / unknown"
+                                          (omnigent-ui--token-count used)))
+                                 ((and (numberp window) (> window 0))
+                                  (format "unknown / %s"
+                                          (omnigent-ui--token-count window)))
+                                 (t
+                                  "unknown"))))
+                      'face 'diff-header))
     (force-mode-line-update)))
 
 (defun omnigent-ui-conversation-setup ()

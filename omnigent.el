@@ -215,7 +215,10 @@ Use `omnigent-conversation-open' to create a conversation buffer."
           (progn
             (with-current-buffer buffer
               (let ((omnigent-conversation--session-id id))
-                (omnigent-conversation-mode)))
+                (omnigent-conversation-mode))
+              (when (and title (not (string-empty-p title)))
+                (setf (alist-get 'title omnigent-conversation-header-data) title)
+                (omnigent-ui--conversation-header)))
             (omnigent-sessions-register-buffer id buffer))
         (error
          (kill-buffer buffer)

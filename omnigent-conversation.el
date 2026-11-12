@@ -501,7 +501,9 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
         (setq
          omnigent-conversation-agent-name (alist-get 'agent_name body)
          omnigent-conversation-header-data
-         `((harness . ,(alist-get 'harness body))
+         `((title . ,(or (alist-get 'title body)
+                         (alist-get 'title omnigent-conversation-header-data)))
+           (harness . ,(alist-get 'harness body))
            (llm_model . ,(alist-get 'llm_model body))
            (reasoning_effort . ,(alist-get 'reasoning_effort body))
            (permission_level . ,(alist-get 'permission_level body))

@@ -62,14 +62,20 @@
 (ert-deftest omnigent-ui-conversation-header-tracks-session-data ()
   "Show snapshot settings and update them from partial stream events."
   (omnigent-ui-test--conversation
-    (should (string-match-p "Harness: unknown" header-line-format))
+    (should (string-prefix-p "Untitled | unknown" header-line-format))
+    (should (eq (get-text-property 0 'face header-line-format) 'diff-header))
+    (should
+     (equal
+      (mapcar
+       #'omnigent-ui--token-count '(10 1000 1001 1200 1000000 1050001))
+      '("10" "1k" "1.1k" "1.2k" "1m" "1.1m")))
     (omnigent-conversation--snapshot
      200
-     '((harness . "codex-native")
+     '((title . "Test session")
+       (harness . "codex-native")
        (llm_model . "model-a")
        (reasoning_effort . "high")
-       (labels
-        . ((omnigent.codex_native.approval_mode . "read-only")))
+       (labels . ((omnigent.codex_native.approval_mode . "read-only")))
        (last_total_tokens . 100)
        (context_window . 1000)
        (items . [])
@@ -78,57 +84,41 @@
     (should
      (equal
       header-line-format
-      "Harness: codex-native | Model: model-a | Effort: high | Access: read-only | Context: 100 / 1000 tokens (10%)"))
-    (omnigent-conversation--event
-     "session.model" '((model . "model-b")))
+      "Test session | codex-native | model-a | high | read-only | 100 / 1k (10%)"))
+    (omnigent-conversation--event "session.model" '((model . "model-b")))
     (omnigent-conversation--event
      "session.reasoning_effort" '((reasoning_effort . "low")))
     (omnigent-conversation--event
      "session.codex_approval_mode" '((approval_mode . "full-access")))
-    (omnigent-conversation--event
-     "session.usage" '((context_tokens . 250)))
+    (omnigent-conversation--event "session.usage" '((context_tokens . 250)))
     (should
      (equal
       header-line-format
-      "Harness: codex-native | Model: model-b | Effort: low | Access: full-access | Context: 250 / 1000 tokens (25%)"))
+      "Test session | codex-native | model-b | low | full-access | 250 / 1k (25%)"))
     (omnigent-conversation--event
      "response.completed"
      '((response
         .
         ((model . "agent-name")
-         (usage
-          .
-          ((model . "model-c")
-           (context_tokens . 300)
-           (total_tokens . 900)))))))
-    (should
-     (string-match-p
-      "Model: model-c.*Context: 300 / 1000 tokens (30%)"
-      header-line-format))
+         (usage . ((model . "model-c") (context_tokens . 300) (total_tokens . 900)))))))
+    (should (string-match-p "model-c.*300 / 1k (30%)" header-line-format))
     (omnigent-conversation--snapshot
      200
      '((last_total_tokens . 42)
        (items . [])
        (pending_inputs . [])
        (pending_elicitations . [])))
-    (should
-     (string-match-p
-      "Context: 42 tokens used (limit unknown)" header-line-format))
+    (should (string-match-p "42 / unknown" header-line-format))
     (omnigent-conversation--snapshot
      200
      '((context_window . 4096)
        (items . [])
        (pending_inputs . [])
        (pending_elicitations . [])))
-    (should
-     (string-match-p
-      "Context: unknown / 4096 tokens" header-line-format))
+    (should (string-match-p "unknown / 4.1k" header-line-format))
     (omnigent-conversation--event
-     "response.completed"
-     '((response . ((usage . ((total_tokens . 512)))))))
-    (should
-     (string-match-p
-      "Context: 512 / 4096 tokens (12%)" header-line-format))))
+     "response.completed" '((response . ((usage . ((total_tokens . 512)))))))
+    (should (string-match-p "512 / 4.1k (12%)" header-line-format))))
 
 (ert-deftest omnigent-ui-conversation-user-permission ()
   "Freeze read-only sessions and restore editing when permission increases."
@@ -141,7 +131,7 @@
        (pending_inputs . [])
        (pending_elicitations . [])))
     (should buffer-read-only)
-    (should (string-suffix-p " [R]" header-line-format))
+    (should (string-prefix-p "Untitled [R] |" header-line-format))
     (should-error (insert "more") :type 'buffer-read-only)
     (should-error (omnigent-conversation-send) :type 'user-error)
     (should-error (omnigent-conversation-interrupt) :type 'user-error)
@@ -153,7 +143,7 @@
        (pending_inputs . [])
        (pending_elicitations . [])))
     (should-not buffer-read-only)
-    (should (string-suffix-p " [E]" header-line-format))
+    (should (string-prefix-p "Untitled [E] |" header-line-format))
     (should
      (equal
       (buffer-substring-no-properties
@@ -165,7 +155,7 @@
        (items . [])
        (pending_inputs . [])
        (pending_elicitations . [])))
-    (should (string-suffix-p " [M]" header-line-format))))
+    (should (string-prefix-p "Untitled [M] |" header-line-format))))
 
 (ert-deftest omnigent-ui-transcript-stream-preserves-composer-and-fold
     ()

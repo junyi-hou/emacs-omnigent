@@ -215,8 +215,8 @@
           (should (= snapshot 200))
           (with-current-buffer buffer
             (should
-             (string-prefix-p
-              (format "Harness: %s | Model: %s | "
+             (string-match-p
+              (format " | %s | %s | "
                       omnigent-integration-harness
                       omnigent-integration-model)
               header-line-format))
@@ -238,8 +238,8 @@
                 omnigent-conversation-header-data))))
           (with-current-buffer buffer
             (should
-             (string-prefix-p
-              (format "Harness: %s | Model: %s | "
+             (string-match-p
+              (format " | %s | %s | "
                       omnigent-integration-harness
                       omnigent-integration-model)
               header-line-format))

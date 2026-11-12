@@ -1,6 +1,6 @@
 EMACS ?= emacs
 HARNESS ?= claude-native
-ELISP_AUTOFMT ?= elisp-autofmt-cmd.py
+ELISP_AUTOFMT ?= $(HOME)/.emacs.d/elpaca/sources/emacs-elisp-autofmt/elisp-autofmt-cmd.py
 
 .PHONY: test unit-test integration-test format
 test: unit-test integration-test
