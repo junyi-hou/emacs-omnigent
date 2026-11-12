@@ -11,10 +11,11 @@ handling.
 
 Use a chat-centered interface. Show one session per conversation buffer in the main
 window. Offer a session list and a workspace view as optional left side windows. When
-both are open, stack the session list above the workspace view.  Open the session list
-after the first successful server connection. Users can show or hide each view. Do not
-reopen the session list on a connection retry. Do not merge transcripts. Follow Emacs
-key binding conventions across all views.
+both are open, stack the session list above the workspace view. By default, open the
+session list after the first successful server connection. The user can disable this
+behavior with `omnigent-open-session-list-on-connect`. Users can show or hide each
+view. Do not reopen the session list on a connection retry. Do not merge transcripts.
+Follow Emacs key binding conventions across all views.
 
 ## Session list
 

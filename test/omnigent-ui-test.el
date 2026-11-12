@@ -614,6 +614,7 @@
   (save-window-excursion
     (let ((omnigent-sessions-updates nil)
           (omnigent-ui--idle-timer nil)
+          (omnigent-open-session-list-on-connect t)
           opened)
       (unwind-protect
           (cl-letf (((symbol-function
@@ -634,6 +635,25 @@
             (should-not (get-buffer-window "*omnigent-sessions*")))
         (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
           (kill-buffer buffer))))))
+
+(ert-deftest omnigent-ui-session-list-stays-closed-when-disabled ()
+  "Keep the session list closed when automatic opening is disabled."
+  (save-window-excursion
+    (let ((omnigent-sessions-updates nil)
+          (omnigent-ui--idle-timer nil)
+          (omnigent-open-session-list-on-connect nil)
+          opened)
+      (cl-letf (((symbol-function
+                  'omnigent-transport-start-session-updates)
+                 (lambda (_frame _error callback)
+                   (setq opened callback)
+                   'updates))
+                ((symbol-function 'omnigent-sessions-refresh)
+                 #'ignore)
+                ((symbol-function 'run-with-idle-timer) #'ignore))
+        (omnigent-ui-start)
+        (funcall opened)
+        (should-not (get-buffer-window "*omnigent-sessions*"))))))
 
 (ert-deftest omnigent-ui-idle-timer-stops-on-reset ()
   "Start one ten-second idle timer even with hidden views and cancel on reset."

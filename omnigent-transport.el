@@ -20,20 +20,7 @@
 (require 'subr-x)
 (require 'url)
 (require 'url-util)
-
-(defgroup omnigent-transport nil
-  "Transport settings for Omnigent."
-  :group 'applications)
-
-(defcustom omnigent-server-url "http://127.0.0.1:6767"
-  "Base URL of the Omnigent server."
-  :type 'string
-  :group 'omnigent-transport)
-
-(defcustom omnigent-transport-session-limit 1000
-  "Maximum number of sessions to fetch, between 1 and 1000."
-  :type 'integer
-  :group 'omnigent-transport)
+(require 'omnigent-options)
 
 (defvar omnigent-transport--generation 0
   "Generation of the current server connection.")
@@ -55,24 +42,6 @@
    omnigent-transport--streams nil
    omnigent-transport--updates nil))
 
-(defcustom omnigent-transport-history-limit 5000
-  "Maximum number of conversation items to keep."
-  :type '(integer :tag "Items")
-  :group 'omnigent-transport)
-(defcustom omnigent-transport-snapshot-timeout 30
-  "Maximum seconds for a complete composite session snapshot."
-  :type 'number
-  :group 'omnigent-transport)
-(defcustom omnigent-transport-connect-timeout 30
-  "Maximum seconds to receive a stream frame or open a WebSocket."
-  :type 'number
-  :group 'omnigent-transport)
-(defcustom omnigent-transport-inactivity-timeout 90
-  "Seconds without stream traffic before reconnecting.
-Omnigent 0.21.0 sends SSE heartbeats every 15 seconds and WebSocket
-heartbeats after 30 idle seconds.  Allow additional time for proxies."
-  :type 'number
-  :group 'omnigent-transport)
 (defconst omnigent-transport--watchdog-interval 5
   "Seconds between connection liveness checks.")
 (defconst omnigent-transport--reconnect-min-delay 1.0)

@@ -8,28 +8,12 @@
 ;;; Code:
 
 (require 'subr-x)
+(require 'omnigent-options)
 (require 'omnigent-transport)
 (require 'omnigent-sessions)
 (require 'omnigent-ui)
 
 (add-hook 'omnigent-sessions-open-hook #'omnigent-ui-created)
-
-(defgroup omnigent nil
-  "Interact with Omnigent servers."
-  :group 'applications)
-
-(defcustom omnigent-executable
-  (let ((local
-         (expand-file-name ".venv/bin/omnigent"
-                           (file-name-directory
-                            (or load-file-name buffer-file-name)))))
-    (if (file-executable-p local)
-        local
-      "omnigent"))
-  "Omnigent CLI executable used to start the local server.
-Use the project's local executable when available, or search `exec-path'."
-  :type 'file
-  :group 'omnigent)
 
 (defvar omnigent-start-process nil
   "CLI process that is starting the local Omnigent server.")

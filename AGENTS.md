@@ -10,6 +10,7 @@
 
 - Do not use `cl-loop`.
 - Run `make format` after editing Emacs Lisp files.
+- Define all user options in `omnigent-options.el`.
 
 ## Interactive functions
 

@@ -150,7 +150,8 @@
     (let ((omnigent-transport-session-limit 1000))
       (omnigent-sessions-start
        (lambda ()
-         (unless (get-buffer-window "*omnigent-sessions*")
+         (when (and omnigent-open-session-list-on-connect
+                    (not (get-buffer-window "*omnigent-sessions*")))
            (omnigent-ui-sessions))))))
   (unless omnigent-ui--idle-timer
     (setq omnigent-ui--idle-timer

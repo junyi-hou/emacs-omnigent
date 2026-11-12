@@ -7,6 +7,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'omnigent-options)
 (require 'omnigent-sessions)
 
 (defvar omnigent-conversation--session-id nil
@@ -32,14 +33,6 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 (defvar-local omnigent-conversation--connected t)
 (defvar-local omnigent-conversation--pending-event-count 0)
 (defvar-local omnigent-conversation--pending-event-bytes 0)
-(defcustom omnigent-conversation-recovery-event-limit 10000
-  "Maximum live events buffered during a snapshot read."
-  :type 'integer
-  :group 'omnigent-transport)
-(defcustom omnigent-conversation-recovery-byte-limit (* 8 1024 1024)
-  "Maximum approximate serialized bytes buffered during a snapshot read."
-  :type 'integer
-  :group 'omnigent-transport)
 (defvar-local omnigent-conversation--prompt-start nil)
 (defvar-local omnigent-conversation--prompt-end nil)
 (defvar-local omnigent-conversation--sending nil)
