@@ -55,6 +55,41 @@ OMNIGENT_TEST_SELECTOR='"omnigent-mock-claude-change-"' \
   test/run-server-integration.sh
 ```
 
+## Client recovery faults
+
+The recovery tests in `omnigent-functional-tests.el` run five journeys through both
+native harnesses:
+
+- Finish a running task while the client is offline, then recover the same buffer.
+- Fail a history read while SSE works, then require manual close and reopen.
+- Suppress traffic on open SSE and WebSocket sockets, then check watchdog recovery.
+- Consume queued input, resolve an elicitation, and change the session list offline.
+- Deliver a delayed snapshot after buffer close or selection of another server URL.
+
+Faults are injected in Emacs; no network proxy is required. Outage tests close client
+connections and defer their retry timers until the server-side changes finish. The
+snapshot-failure test returns a failed GET result. The late-result test holds a real GET
+callback until its buffer closes or the server URL changes. The silent-socket test
+replaces the old processes' filters with `ignore` and ages only their activity
+timestamps. Replacement connections retain normal heartbeat margins.
+
+The server, execution host, and mock model continue independently. Tests use event and
+callback barriers, not fixed sleeps. The server-selection case uses a different URL for
+the same isolated backend and opens a different session. These checks cover client
+recovery from injected faults, not failures in the network or a deployed proxy.
+
+Run only these tests with either harness:
+
+```sh
+OMNIGENT_TEST_SELECTOR='"^omnigent-reconnection-"' \
+  make integration-test HARNESS=claude-native
+OMNIGENT_TEST_SELECTOR='"^omnigent-reconnection-"' \
+  make integration-test HARNESS=codex-native
+```
+
+These tests do not guarantee gap-free snapshot/stream handoff or test physical laptop
+suspend. See [the recovery design](../docs/reconnection.md) for those limits.
+
 ## Mock fixtures
 
 Model behavior is scripted per turn. Tests own their fixtures: each
@@ -66,11 +101,10 @@ fixture format and the coverage map against the upstream suite. Plain
 reply turns use a mock fallback instead of a queue, so background
 requests such as title generation cannot drain a turn's script.
 
-Add API integration tests to `omnigent-api-tests.el`. Add end-to-end
-behavior tests to `omnigent-functional-tests.el`. Some older test
-names still contain `mock-acp`; they now run through the selected
-native harness. Codex runs exclude the four Claude-specific control
-tests by default.
+Add API integration tests to `omnigent-api-tests.el`. Add recovery fault tests and other
+end-to-end behavior tests to `omnigent-functional-tests.el`. Some older test names still
+contain `mock-acp`; they now run through the selected native harness. Codex runs exclude
+the four Claude-specific control tests by default.
 
 Run the shared suite through Codex with:
 

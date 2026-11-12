@@ -1,10 +1,11 @@
 # Emacs Transport Design
 
-**Status:** REST, SSE, session-updates WebSocket transport, and connection reset are
-implemented. Connection setup and request outcome handling remain incomplete. The
+**Status:** REST, SSE, session-updates WebSocket transport, connection setup, and
+connection reset are implemented. Native integration tests cover local client-outage
+faults; physical laptop suspend and deployed remote networking remain unverified. The
 transport implementation is [omnigent-transport.el](../omnigent-transport.el). The
 existing interactive entry points are in [omnigent.el](../omnigent.el).
-[reconnection.md](reconnection.md) proposes the complete client-outage recovery flow,
+[reconnection.md](reconnection.md) defines the client-outage recovery flow,
 including stale-connection detection, the subscription gap, and manual recovery after
 snapshot failure. Automatic snapshot retries are deferred.
 
@@ -156,19 +157,23 @@ The following transport functions are implemented in `omnigent-transport.el`:
   manage a session SSE handle. The existing start function also requests a snapshot
   after each connection attempt and invokes the supplied snapshot callback.
 - `omnigent-transport-refresh-session-stream` requests another snapshot without
-  restarting SSE. Call it after the previous snapshot completes. It invokes the
-  connection callback before loading, so the conversation buffers live events during the
-  refresh. The proposed recovery flow enforces one active snapshot operation per handle
-  and coalesces refresh requests received during a read. It does not automatically retry
-  a failed snapshot.
+  restarting SSE. It invokes the connection callback before loading, so the conversation
+  buffers live events during the refresh. It enforces one active snapshot operation per
+  handle and coalesces refresh requests received during a read. It does not
+  automatically retry a failed snapshot. A composite deadline and operation identity
+  prevent late responses from changing recovered state.
+- Session stream startup accepts an optional state callback with `connecting`,
+  `connected`, or `disconnected`. Connected means a complete stream frame arrived, not
+  that the snapshot/event handoff is gap-free. Inactivity and scheduling-gap watchdogs
+  reconnect SSE and WebSocket handles without resetting the server association.
 - `omnigent-transport-start-session-updates`,
   `omnigent-transport-set-session-updates-watch`, and
   `omnigent-transport-stop-session-updates` manage the session-updates WebSocket.
 
 `omnigent-connect` and `omnigent-start-server` are existing interactive entry points in
-`omnigent.el`, not transport functions. `omnigent-connect` resets the old transport, but
-it does not yet open the session-updates WebSocket or perform the planned session-list
-setup.
+`omnigent.el`, not transport functions. `omnigent-connect` resets the old transport,
+then starts the frontend and session management. Session management opens the
+session-updates WebSocket and loads the session list.
 
 ## Authentication
 

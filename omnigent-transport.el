@@ -54,17 +54,31 @@
   "Maximum number of conversation items to keep."
   :type '(integer :tag "Items")
   :group 'omnigent-transport)
+(defcustom omnigent-transport-snapshot-timeout 30
+  "Maximum seconds for a complete composite session snapshot."
+  :type 'number :group 'omnigent-transport)
+(defcustom omnigent-transport-connect-timeout 30
+  "Maximum seconds to receive a stream frame or open a WebSocket."
+  :type 'number :group 'omnigent-transport)
+(defcustom omnigent-transport-inactivity-timeout 90
+  "Seconds without stream traffic before reconnecting.
+Omnigent 0.21.0 sends SSE heartbeats every 15 seconds and WebSocket
+heartbeats after 30 idle seconds.  Allow additional time for proxies."
+  :type 'number :group 'omnigent-transport)
+(defconst omnigent-transport--watchdog-interval 5
+  "Seconds between connection liveness checks.")
 (defconst omnigent-transport--reconnect-min-delay 1.0)
 (defconst omnigent-transport--reconnect-max-delay 15.0)
 
 (cl-defstruct (omnigent-stream (:constructor omnigent-transport--make-stream))
   session-id event-callback snapshot-callback error-callback connect-callback process timer
-  stopped failures attempt)
+  stopped failures attempt state-callback ready last-activity last-check watchdog
+  snapshot-active snapshot-timer snapshot-again)
 
 (cl-defstruct (omnigent-session-updates
                (:constructor omnigent-transport--make-session-updates))
   frame-callback error-callback open-callback websocket timer session-ids stopped failures
-  attempt connected failed)
+  attempt connected failed last-activity last-check watchdog)
 
 (defun omnigent-transport--url (path)
   "Return the server URL with PATH appended."
@@ -196,7 +210,8 @@ only formats text; the caller decides how to present it."
         (let* ((colon (string-match ":" line))
                (field (if colon (substring line 0 colon) line))
                (value (if colon
-                          (substring line (if (eq (aref line (1+ colon)) ?\s)
+                          (substring line (if (and (< (1+ colon) (length line))
+                                              (eq (aref line (1+ colon)) ?\s))
                                               (+ colon 2)
                                             (1+ colon)))
                         "")))
@@ -207,19 +222,31 @@ only formats text; the caller decides how to present it."
       (cons event (mapconcat #'identity (nreverse data) "\n")))))
 
 (defun omnigent-transport--notify-error (stream error)
-  "Send ERROR to STREAM's error callback if it exists."
+  "Send ERROR to STREAM's error callback without interrupting recovery."
   (when (omnigent-stream-error-callback stream)
-    (funcall (omnigent-stream-error-callback stream) error)))
+    (condition-case err
+        (funcall (omnigent-stream-error-callback stream) error)
+      (error
+       (display-warning 'omnigent
+                        (format "Stream error callback failed: %s"
+                                (error-message-string err)))))))
 
 (defun omnigent-transport--stream-filter (process chunk)
   "Parse SSE frames from PROCESS output CHUNK and deliver their events."
   (let* ((stream (process-get process 'omnigent-stream))
          (split (omnigent-transport--split-sse-frames
                  (or (process-get process 'omnigent-pending) "") chunk)))
+    (when (and (eq process (omnigent-stream-process stream))
+               (not (omnigent-stream-stopped stream)))
+      (setf (omnigent-stream-last-activity stream) (float-time)))
     (process-put process 'omnigent-pending (cdr split))
     (dolist (frame (car split))
       (unless (or (omnigent-stream-stopped stream)
+                  (not (eq process (omnigent-stream-process stream)))
                   (process-get process 'omnigent-done))
+        (unless (omnigent-stream-ready stream)
+          (setf (omnigent-stream-ready stream) t)
+          (omnigent-transport--stream-state stream 'connected))
         (let ((parsed (omnigent-transport--parse-sse-frame frame)))
           (when parsed
             (let ((data (cdr parsed)))
@@ -227,17 +254,20 @@ only formats text; the caller decides how to present it."
                   (progn
                     (process-put process 'omnigent-done t)
                     (delete-process process))
-                (condition-case err
+                (let ((payload
+                       (condition-case err
+                           (json-parse-string data :object-type 'alist
+                                              :array-type 'array
+                                              :null-object nil
+                                              :false-object :json-false)
+                         (error
+                          (omnigent-transport--notify-error
+                           stream (format "Invalid SSE JSON: %s"
+                                          (error-message-string err)))
+                          :invalid))))
+                  (unless (eq payload :invalid)
                     (funcall (omnigent-stream-event-callback stream)
-                             (car parsed)
-                             (json-parse-string data :object-type 'alist
-                                                :array-type 'array
-                                                :null-object nil
-                                                :false-object :json-false))
-                  (error
-                   (omnigent-transport--notify-error
-                    stream (format "Invalid SSE JSON: %s"
-                                   (error-message-string err)))))))))))))
+                             (car parsed) payload)))))))))))
 
 (defun omnigent-transport--stream-command (session-id)
   "Return the curl command that streams events for SESSION-ID."
@@ -246,47 +276,121 @@ only formats text; the caller decides how to present it."
         (omnigent-transport--url
          (concat (omnigent-transport--session-path session-id) "/stream"))))
 
-(defun omnigent-transport--stream-snapshot (stream attempt status body)
-  "Deliver snapshot STATUS and BODY for STREAM's current ATTEMPT."
-  (when (and (not (omnigent-stream-stopped stream))
-             (= attempt (omnigent-stream-attempt stream)))
-    (funcall (omnigent-stream-snapshot-callback stream) status body)))
+(defun omnigent-transport--snapshot-current-p (stream attempt operation)
+  "Return non-nil for STREAM's active ATTEMPT and snapshot OPERATION."
+  (and (not (omnigent-stream-stopped stream))
+       (= attempt (omnigent-stream-attempt stream))
+       (eq operation (omnigent-stream-snapshot-active stream))))
 
-(defun omnigent-transport--stream-load-items (stream attempt body remaining before items)
-  "Load item pages for STREAM and ATTEMPT into snapshot BODY.
-REMAINING limits the number of items.  BEFORE is the pagination cursor;
-ITEMS contains items already fetched in chronological order."
+(defun omnigent-transport--cancel-snapshot (stream)
+  "Invalidate STREAM's composite read and cancel its deadline."
+  (when (timerp (omnigent-stream-snapshot-timer stream))
+    (cancel-timer (omnigent-stream-snapshot-timer stream)))
+  (setf (omnigent-stream-snapshot-active stream) nil
+        (omnigent-stream-snapshot-timer stream) nil
+        (omnigent-stream-snapshot-again stream) nil))
+
+(defun omnigent-transport--stream-snapshot (stream attempt status body &optional operation)
+  "Deliver snapshot STATUS and BODY for STREAM's ATTEMPT and OPERATION once."
+  (when (and (not (omnigent-stream-stopped stream))
+             (= attempt (omnigent-stream-attempt stream))
+             (or (null operation)
+                 (eq operation (omnigent-stream-snapshot-active stream))))
+    (let ((again (omnigent-stream-snapshot-again stream)))
+      ;; Keep the operation active through the consumer: replay may request refresh.
+      (when (timerp (omnigent-stream-snapshot-timer stream))
+        (cancel-timer (omnigent-stream-snapshot-timer stream)))
+      (unwind-protect
+          (funcall (omnigent-stream-snapshot-callback stream) status body)
+        (setq again (or again (omnigent-stream-snapshot-again stream)))
+        (omnigent-transport--cancel-snapshot stream))
+      (when (and again (omnigent-transport-success-p status)
+                 (not (omnigent-stream-stopped stream)))
+        (omnigent-transport-refresh-session-stream stream)))))
+
+(defun omnigent-transport--snapshot-timeout (stream attempt operation)
+  "Fail STREAM's current snapshot OPERATION on ATTEMPT after its deadline."
+  (when (omnigent-transport--snapshot-current-p stream attempt operation)
+    (omnigent-transport--stream-snapshot
+     stream attempt nil "Session snapshot timed out" operation)))
+
+(defun omnigent-transport--stream-load-items (stream attempt operation body remaining before items)
+  "Load bounded history for STREAM's ATTEMPT and OPERATION into BODY.
+REMAINING limits items; BEFORE is the cursor and ITEMS is chronological."
   (let* ((path (omnigent-transport--session-path (omnigent-stream-session-id stream)))
          (query (format "/items?limit=%d&order=desc" (min 1000 remaining))))
     (when before (setq query (concat query "&after=" (url-hexify-string before))))
     (omnigent-transport-request
      "GET" (concat path query)
      (lambda (status page)
-       (when (and (not (omnigent-stream-stopped stream))
-                  (= attempt (omnigent-stream-attempt stream)))
-         (if (not (omnigent-transport-success-p status))
-             (omnigent-transport--stream-snapshot stream attempt status page)
+       (when (omnigent-transport--snapshot-current-p stream attempt operation)
+         (cond
+          ((not (omnigent-transport-success-p status))
+           (omnigent-transport--stream-snapshot stream attempt status page operation))
+          ((not (and (listp page) (vectorp (alist-get 'data page))
+                     (memq (alist-get 'has_more page) '(t :json-false))
+                     (<= (length (alist-get 'data page)) (min 1000 remaining))
+                     (or (not (eq (alist-get 'has_more page) t))
+                         (and (> (length (alist-get 'data page)) 0)
+                              (stringp (alist-get 'last_id page))
+                              (not (string-empty-p (alist-get 'last_id page)))
+                              (not (equal before (alist-get 'last_id page)))))))
+           (omnigent-transport--stream-snapshot
+            stream attempt nil "Invalid session history page" operation))
+          (t
            (let* ((data (append (alist-get 'data page) nil))
                   (remaining (- remaining (length data)))
                   (items (nconc (nreverse data) items))
                   (cursor (alist-get 'last_id page)))
-             (if (and (> remaining 0) (eq (alist-get 'has_more page) t) cursor data)
-                 (omnigent-transport--stream-load-items stream attempt body remaining cursor items)
+             (if (and (> remaining 0) (eq (alist-get 'has_more page) t))
+                 (condition-case err
+                     (omnigent-transport--stream-load-items
+                      stream attempt operation body remaining cursor items)
+                   (error
+                    (if (omnigent-transport--snapshot-current-p stream attempt operation)
+                        (omnigent-transport--stream-snapshot
+                         stream attempt nil (error-message-string err) operation)
+                      (signal (car err) (cdr err)))))
                (setf (alist-get 'items body) (vconcat items))
-               (omnigent-transport--stream-snapshot stream attempt status body)))))))))
+               (omnigent-transport--stream-snapshot stream attempt status body operation))))))))))
 
 (defun omnigent-transport--stream-load-snapshot (stream attempt)
-  "Fetch session metadata and bounded item history for STREAM and ATTEMPT."
-  (let ((path (omnigent-transport--session-path (omnigent-stream-session-id stream))))
-    (omnigent-transport-request
-     "GET" (concat path "?include_items=false")
-     (lambda (status body)
-       (when (and (not (omnigent-stream-stopped stream))
-                  (= attempt (omnigent-stream-attempt stream)))
-         (if (not (omnigent-transport-success-p status))
-             (omnigent-transport--stream-snapshot stream attempt status body)
-           (omnigent-transport--stream-load-items
-            stream attempt body (max 1 omnigent-transport-history-limit) nil nil)))))))
+  "Start one composite snapshot for STREAM and ATTEMPT, coalescing refreshes."
+  (if (omnigent-stream-snapshot-active stream)
+      (setf (omnigent-stream-snapshot-again stream) t)
+    (let ((operation (make-symbol "snapshot"))
+          (path (omnigent-transport--session-path (omnigent-stream-session-id stream))))
+      (setf (omnigent-stream-snapshot-active stream) operation
+            (omnigent-stream-snapshot-timer stream)
+            (run-at-time omnigent-transport-snapshot-timeout nil
+                         #'omnigent-transport--snapshot-timeout stream attempt operation))
+      (when (omnigent-stream-connect-callback stream)
+        (funcall (omnigent-stream-connect-callback stream)))
+      (condition-case err
+          (omnigent-transport-request
+           "GET" (concat path "?include_items=false")
+           (lambda (status body)
+             (when (omnigent-transport--snapshot-current-p stream attempt operation)
+               (cond
+                ((not (omnigent-transport-success-p status))
+                 (omnigent-transport--stream-snapshot stream attempt status body operation))
+                ((not (listp body))
+                 (omnigent-transport--stream-snapshot
+                  stream attempt nil "Invalid session metadata" operation))
+                (t
+                 (condition-case setup-error
+                     (omnigent-transport--stream-load-items
+                      stream attempt operation body (max 1 omnigent-transport-history-limit) nil nil)
+                   (error
+                    (if (omnigent-transport--snapshot-current-p stream attempt operation)
+                        (omnigent-transport--stream-snapshot
+                         stream attempt nil (error-message-string setup-error) operation)
+                      (signal (car setup-error) (cdr setup-error))))))))))
+        (error
+         (if (omnigent-transport--snapshot-current-p stream attempt operation)
+             (omnigent-transport--stream-snapshot
+              stream attempt nil (error-message-string err) operation)
+           (signal (car err) (cdr err))))))))
 
 (defun omnigent-transport--reconnect-delay (failures)
   "Return the capped reconnect delay in seconds for FAILURES."
@@ -294,6 +398,27 @@ ITEMS contains items already fetched in chronological order."
       omnigent-transport--reconnect-min-delay
     (min omnigent-transport--reconnect-max-delay
          (* omnigent-transport--reconnect-min-delay (expt 2 (1- failures))))))
+
+(defun omnigent-transport--stream-state (stream state)
+  "Notify STREAM's owner of connection STATE."
+  (when (omnigent-stream-state-callback stream)
+    (funcall (omnigent-stream-state-callback stream) state)))
+
+(defun omnigent-transport--stream-watchdog (stream attempt)
+  "Reconnect STREAM's ATTEMPT after silence or a long scheduling gap."
+  (when (and (not (omnigent-stream-stopped stream))
+             (= attempt (omnigent-stream-attempt stream)))
+    (let* ((now (float-time))
+           (gap (- now (omnigent-stream-last-check stream)))
+           (idle (- now (omnigent-stream-last-activity stream))))
+      (setf (omnigent-stream-last-check stream) now)
+      (when (or (> gap (* 3 omnigent-transport--watchdog-interval))
+                (> idle (if (omnigent-stream-ready stream)
+                            omnigent-transport-inactivity-timeout
+                          omnigent-transport-connect-timeout)))
+        (omnigent-transport--notify-error stream "Session stream disconnected or inactive")
+        (when (process-live-p (omnigent-stream-process stream))
+          (delete-process (omnigent-stream-process stream)))))))
 
 (defun omnigent-transport--stream-sentinel (process _event)
   "Handle PROCESS exit, report errors, and schedule reconnection.
@@ -309,8 +434,14 @@ Ignore _EVENT."
           (omnigent-transport--notify-error
            stream (with-current-buffer stderr (string-trim (buffer-string)))))
         (kill-buffer stderr))
-      (when stream
-        (setf (omnigent-stream-process stream) nil)
+      (when (and stream (eq process (omnigent-stream-process stream)))
+        (when (timerp (omnigent-stream-watchdog stream))
+          (cancel-timer (omnigent-stream-watchdog stream)))
+        (omnigent-transport--cancel-snapshot stream)
+        (setf (omnigent-stream-process stream) nil
+              (omnigent-stream-ready stream) nil
+              (omnigent-stream-watchdog stream) nil)
+        (omnigent-transport--stream-state stream 'disconnected)
         (unless (omnigent-stream-stopped stream)
           (let ((failures (if (or done (zerop (process-exit-status process)))
                               0
@@ -322,7 +453,15 @@ Ignore _EVENT."
 
 (defun omnigent-transport--stream-connect (stream)
   "Start STREAM's curl process and load a snapshot, or schedule a retry."
-  (unless (omnigent-stream-stopped stream)
+  (unless (or (omnigent-stream-stopped stream)
+              (process-live-p (omnigent-stream-process stream)))
+    (when (timerp (omnigent-stream-timer stream))
+      (cancel-timer (omnigent-stream-timer stream)))
+    (setf (omnigent-stream-timer stream) nil)
+    (when (timerp (omnigent-stream-watchdog stream))
+      (cancel-timer (omnigent-stream-watchdog stream)))
+    (omnigent-transport--cancel-snapshot stream)
+    (omnigent-transport--stream-state stream 'connecting)
     (let* ((stderr (generate-new-buffer " *omnigent-curl-stderr*"))
            (attempt (1+ (omnigent-stream-attempt stream)))
            process)
@@ -349,42 +488,52 @@ Ignore _EVENT."
                 (omnigent-transport--reconnect-delay (omnigent-stream-failures stream))
                 nil #'omnigent-transport--stream-connect stream))))
       (when process
-        (when (omnigent-stream-connect-callback stream)
-          (funcall (omnigent-stream-connect-callback stream)))
         (process-put process 'omnigent-stream stream)
         (process-put process 'omnigent-stderr stderr)
-        (setf (omnigent-stream-process stream) process)
+        (setf (omnigent-stream-process stream) process
+              (omnigent-stream-ready stream) nil
+              (omnigent-stream-last-check stream) (float-time)
+              (omnigent-stream-last-activity stream) (float-time)
+              (omnigent-stream-watchdog stream)
+              (run-at-time omnigent-transport--watchdog-interval
+                           omnigent-transport--watchdog-interval
+                           #'omnigent-transport--stream-watchdog stream attempt))
         (omnigent-transport--stream-load-snapshot stream attempt)))))
 
-(defun omnigent-transport-start-session-stream (session-id on-event on-snapshot &optional on-error on-connect)
+(defun omnigent-transport-start-session-stream (session-id on-event on-snapshot &optional on-error on-connect on-state)
   "Start the SSE stream for SESSION-ID.
 
 ON-EVENT receives (EVENT-NAME DATA).  ON-SNAPSHOT receives (STATUS BODY)
 after each stream connection starts.  ON-ERROR, when non-nil, receives an
 error string.  ON-CONNECT runs before each snapshot request.
+ON-STATE receives `connecting', `connected', or `disconnected'.  Connected
+means live traffic arrived, not that the snapshot/event handoff is gap-free.
 Return a stream handle for `omnigent-transport-stop-session-stream'."
   (unless (executable-find "curl")
     (user-error "Omnigent session streams require curl"))
   (let ((stream (omnigent-transport--make-stream
                  :session-id session-id :event-callback on-event
                  :snapshot-callback on-snapshot :error-callback on-error
-                 :connect-callback on-connect :stopped nil :failures 0 :attempt 0)))
+                 :connect-callback on-connect :state-callback on-state
+                 :stopped nil :failures 0 :attempt 0)))
     (push stream omnigent-transport--streams)
     (omnigent-transport--stream-connect stream)
     stream))
 
 (defun omnigent-transport-refresh-session-stream (stream)
   "Reload STREAM's snapshot without restarting its live SSE subscription.
-Call only after the previous snapshot completes.  Reconnection invalidates
+Coalesce requests while a snapshot is active.  Reconnection invalidates
 this read through the stream attempt number."
   (unless (omnigent-stream-stopped stream)
-    (when (omnigent-stream-connect-callback stream)
-      (funcall (omnigent-stream-connect-callback stream)))
     (omnigent-transport--stream-load-snapshot stream (omnigent-stream-attempt stream))))
 
 (defun omnigent-transport-stop-session-stream (stream)
   "Stop STREAM and prevent automatic reconnection."
   (setf (omnigent-stream-stopped stream) t)
+  (omnigent-transport--cancel-snapshot stream)
+  (when (timerp (omnigent-stream-watchdog stream))
+    (cancel-timer (omnigent-stream-watchdog stream)))
+  (setf (omnigent-stream-watchdog stream) nil)
   (setq omnigent-transport--streams (delq stream omnigent-transport--streams))
   (when (timerp (omnigent-stream-timer stream))
     (cancel-timer (omnigent-stream-timer stream)))
@@ -437,13 +586,30 @@ this read through the stream attempt number."
           (run-at-time delay nil
                        #'omnigent-transport--updates-connect updates))))
 
+(defun omnigent-transport--updates-watchdog (updates attempt)
+  "Reconnect UPDATES' ATTEMPT after inactivity or a long scheduling gap."
+  (when (omnigent-transport--updates-current-p updates attempt)
+    (let* ((now (float-time))
+           (gap (- now (omnigent-session-updates-last-check updates)))
+           (idle (- now (omnigent-session-updates-last-activity updates))))
+      (setf (omnigent-session-updates-last-check updates) now)
+      (when (or (> gap (* 3 omnigent-transport--watchdog-interval))
+                (> idle (if (omnigent-session-updates-connected updates)
+                            omnigent-transport-inactivity-timeout
+                          omnigent-transport-connect-timeout)))
+        (omnigent-transport--updates-notify-error updates "Session updates disconnected or inactive")
+        (let ((websocket (omnigent-session-updates-websocket updates)))
+          (omnigent-transport--updates-closed updates attempt websocket)
+          (when websocket (ignore-errors (websocket-close websocket))))))))
+
 (defun omnigent-transport--updates-opened (updates websocket attempt)
   "Record an open WEBSOCKET for UPDATES and ATTEMPT, then send the watch set."
   (when (omnigent-transport--updates-current-p updates attempt)
     (setf (omnigent-session-updates-websocket updates) websocket
           (omnigent-session-updates-connected updates) t
           (omnigent-session-updates-failed updates) nil
-          (omnigent-session-updates-failures updates) 0)
+          (omnigent-session-updates-failures updates) 0
+          (omnigent-session-updates-last-activity updates) (float-time))
     (omnigent-transport--updates-send-watch updates websocket attempt)
     (when (omnigent-session-updates-open-callback updates)
       (funcall (omnigent-session-updates-open-callback updates)))))
@@ -451,6 +617,7 @@ this read through the stream attempt number."
 (defun omnigent-transport--updates-message (updates websocket attempt frame)
   "Parse FRAME from WEBSOCKET and deliver it for UPDATES' current ATTEMPT."
   (when (omnigent-transport--updates-current-p updates attempt)
+    (setf (omnigent-session-updates-last-activity updates) (float-time))
     (let ((data
            (condition-case err
                (json-parse-string (websocket-frame-text frame)
@@ -476,7 +643,11 @@ Ignore _WEBSOCKET."
   "Schedule reconnection after UPDATES' current ATTEMPT closes.
 Ignore _WEBSOCKET."
   (when (omnigent-transport--updates-current-p updates attempt)
-    (setf (omnigent-session-updates-websocket updates) nil)
+    (when (timerp (omnigent-session-updates-watchdog updates))
+      (cancel-timer (omnigent-session-updates-watchdog updates)))
+    (setf (omnigent-session-updates-watchdog updates) nil
+          (omnigent-session-updates-websocket updates) nil)
+    (cl-incf (omnigent-session-updates-attempt updates))
     (let ((failed (or (omnigent-session-updates-failed updates)
                       (not (omnigent-session-updates-connected updates)))))
       (setf (omnigent-session-updates-failures updates)
@@ -489,13 +660,22 @@ Ignore _WEBSOCKET."
 
 (defun omnigent-transport--updates-connect (updates)
   "Open the WebSocket for UPDATES, or schedule a retry on failure."
-  (unless (omnigent-session-updates-stopped updates)
+  (unless (or (omnigent-session-updates-stopped updates)
+              (omnigent-session-updates-websocket updates))
+    (when (timerp (omnigent-session-updates-timer updates))
+      (cancel-timer (omnigent-session-updates-timer updates)))
     (setf (omnigent-session-updates-timer updates) nil)
     (let* ((attempt (1+ (omnigent-session-updates-attempt updates)))
            websocket)
       (setf (omnigent-session-updates-attempt updates) attempt
             (omnigent-session-updates-connected updates) nil
-            (omnigent-session-updates-failed updates) nil)
+            (omnigent-session-updates-failed updates) nil
+            (omnigent-session-updates-last-check updates) (float-time)
+            (omnigent-session-updates-last-activity updates) (float-time)
+            (omnigent-session-updates-watchdog updates)
+            (run-at-time omnigent-transport--watchdog-interval
+                         omnigent-transport--watchdog-interval
+                         #'omnigent-transport--updates-watchdog updates attempt))
       (condition-case err
           (setq websocket
                 (websocket-open
@@ -514,14 +694,10 @@ Ignore _WEBSOCKET."
                              (omnigent-transport--updates-error
                               updates attempt ws type error))))
         (error
-         (setf (omnigent-session-updates-failures updates)
-               (1+ (omnigent-session-updates-failures updates)))
-         (omnigent-transport--updates-notify-error
-          updates (error-message-string err))
-         (omnigent-transport--updates-schedule-reconnect
-          updates (omnigent-transport--reconnect-delay
-                   (omnigent-session-updates-failures updates)))))
-      (when websocket
+         (setf (omnigent-session-updates-failed updates) t)
+         (omnigent-transport--updates-notify-error updates (error-message-string err))
+         (omnigent-transport--updates-closed updates attempt nil)))
+      (when (and websocket (omnigent-transport--updates-current-p updates attempt))
         (setf (omnigent-session-updates-websocket updates) websocket)))))
 
 (defun omnigent-transport-start-session-updates (on-frame &optional on-error on-open)
@@ -555,6 +731,9 @@ SESSION-IDS must be a list of at most 500 strings."
 (defun omnigent-transport-stop-session-updates (updates)
   "Stop UPDATES and prevent automatic reconnection."
   (setf (omnigent-session-updates-stopped updates) t)
+  (when (timerp (omnigent-session-updates-watchdog updates))
+    (cancel-timer (omnigent-session-updates-watchdog updates)))
+  (setf (omnigent-session-updates-watchdog updates) nil)
   (setq omnigent-transport--updates (delq updates omnigent-transport--updates))
   (when (timerp (omnigent-session-updates-timer updates))
     (cancel-timer (omnigent-session-updates-timer updates)))

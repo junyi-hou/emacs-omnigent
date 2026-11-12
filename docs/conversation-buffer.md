@@ -73,10 +73,13 @@ connection or reconnection attempt. The snapshot contains committed `items` and
 transport forwards parsed data and the snapshot callback. Follow the web frontend's
 approach to reconciling snapshot items and stream events: use item IDs to avoid
 duplicate transcript entries, and reconcile pending inputs with their server IDs. Buffer
-stream events while the snapshot is in flight, then apply them in arrival order after
-installing the snapshot. Reconcile full items by ID and update existing blocks rather
-than rendering duplicates. A final full item replaces its partial
-representation. Reconcile elicitation requests and resolutions by elicitation ID.
+stream events while the snapshot is in flight. After installing the snapshot, discard
+buffered text and reasoning deltas whose overlap with committed text is unknown. Apply
+other buffered events in arrival order. Reconcile full items by ID and update existing
+blocks rather than rendering duplicates. Added items and later deltas cannot change
+committed snapshot or final items. A final full item replaces its partial
+representation. Partial text can remain incomplete until that full item arrives.
+Reconcile elicitation requests and resolutions by elicitation ID.
 
 Use the official web frontend as a reference for snapshot and stream reconciliation. Do
 not copy a FIFO fallback that can remove an unrelated pending message when replaying an

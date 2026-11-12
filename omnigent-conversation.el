@@ -28,6 +28,16 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 (defvar-local omnigent-conversation--order-tail nil)
 (defvar-local omnigent-conversation--pending-events nil)
 (defvar-local omnigent-conversation--loading nil)
+(defvar-local omnigent-conversation--invalid nil)
+(defvar-local omnigent-conversation--connected t)
+(defvar-local omnigent-conversation--pending-event-count 0)
+(defvar-local omnigent-conversation--pending-event-bytes 0)
+(defcustom omnigent-conversation-recovery-event-limit 10000
+  "Maximum live events buffered during a snapshot read."
+  :type 'integer :group 'omnigent-transport)
+(defcustom omnigent-conversation-recovery-byte-limit (* 8 1024 1024)
+  "Maximum approximate serialized bytes buffered during a snapshot read."
+  :type 'integer :group 'omnigent-transport)
 (defvar-local omnigent-conversation--prompt-start nil)
 (defvar-local omnigent-conversation--prompt-end nil)
 (defvar-local omnigent-conversation--sending nil)
@@ -87,7 +97,7 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
         (when (equal kind "message") (push '(role . "assistant") item))
         (omnigent-conversation--put-item item)
         (setq omnigent-conversation--section-id id)))
-    (when item
+    (when (and item (not (alist-get 'omnigent-committed item)))
       (setf (alist-get 'content item)
             (concat (omnigent-conversation--text item) (or (alist-get 'delta data) ""))))))
 
@@ -114,19 +124,21 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
                         (equal (alist-get 'response_id active) response-id)
                         (equal (alist-get 'type active) kind)
                         omnigent-conversation--section-id)))))
-    (when provisional
-      (setf (alist-get 'omnigent-previous-id item) provisional)
-      (setcar (memq provisional omnigent-conversation--order) id)
-      (remhash provisional omnigent-conversation--items)
-      (puthash id item omnigent-conversation--items))
-    (when (or (equal id omnigent-conversation--section-id)
-              (eq provisional omnigent-conversation--section-id)
-              (not (member kind '("message" "reasoning"))))
-      (setq omnigent-conversation--section-id nil))
-    (omnigent-conversation--put-item item)
-    (when (and added (member kind '("message" "reasoning"))
-               (not (equal (alist-get 'role item) "user")))
-      (setq omnigent-conversation--section-id id))))
+    (unless (and added (alist-get 'omnigent-committed (gethash id omnigent-conversation--items)))
+      (unless added (setf (alist-get 'omnigent-committed item) t))
+      (when provisional
+	(setf (alist-get 'omnigent-previous-id item) provisional)
+	(setcar (memq provisional omnigent-conversation--order) id)
+	(remhash provisional omnigent-conversation--items)
+	(puthash id item omnigent-conversation--items))
+      (when (or (equal id omnigent-conversation--section-id)
+		(eq provisional omnigent-conversation--section-id)
+		(not (member kind '("message" "reasoning"))))
+	(setq omnigent-conversation--section-id nil))
+      (omnigent-conversation--put-item item)
+      (when (and added (member kind '("message" "reasoning"))
+		 (not (equal (alist-get 'role item) "user")))
+	(setq omnigent-conversation--section-id id)))))
 
 (defun omnigent-conversation--consume-input (data)
   "Commit the input in event DATA and settle only its matching pending entry."
@@ -217,108 +229,191 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 
 (defun omnigent-conversation--event (name data)
   "Apply stream event NAME with DATA, or queue it while loading."
-  (if omnigent-conversation--loading
-      (push (cons name data) omnigent-conversation--pending-events)
-    (pcase (cl-find-if (lambda (entry) (member name (car entry)))
-                       omnigent-conversation--event-handlers)
-      (`(,_ . ,handler) (funcall handler data)))
-    (pcase name
-      ("session.model"
-       (setf (alist-get 'llm_model omnigent-conversation-header-data) (alist-get 'model data)))
-      ("session.reasoning_effort"
-       (setf (alist-get 'reasoning_effort omnigent-conversation-header-data)
-             (alist-get 'reasoning_effort data)))
-      ((or "session.permission_mode" "session.codex_approval_mode")
-       (setf (alist-get 'access_mode omnigent-conversation-header-data)
-             (alist-get (if (equal name "session.permission_mode")
-                            'permission_mode 'approval_mode) data)))
-      ("session.usage"
-       (dolist (field '((context_tokens . last_total_tokens) (context_window . context_window)))
-         (when (numberp (alist-get (car field) data))
-           (setf (alist-get (cdr field) omnigent-conversation-header-data)
-                 (alist-get (car field) data)))))
-      ("response.completed"
-       (let* ((usage (alist-get 'usage (alist-get 'response data)))
-              (tokens (or (alist-get 'context_tokens usage) (alist-get 'total_tokens usage)))
-              (model (alist-get 'model usage)))
-         (when (numberp tokens)
-           (setf (alist-get 'last_total_tokens omnigent-conversation-header-data) tokens))
-         (when (and (stringp model) (not (string-empty-p model)))
-           (setf (alist-get 'llm_model omnigent-conversation-header-data) model)))))
-    (when (and (equal name "session.status")
-               (equal (alist-get 'status data) "failed") (alist-get 'error data))
-      (omnigent-conversation--put-item
-       `((id . ,(format "error-%s" (float-time))) (type . "error")
-         (text . ,(format "%s" (alist-get 'error data))))))
-    (when (equal name "session.interrupted")
-      (omnigent-conversation--put-item
-       `((id . ,(format "interrupt-%s" (float-time))) (type . "error")
-         (text . "Interrupted")))
-      (when omnigent-conversation--stream
-        (omnigent-transport-refresh-session-stream omnigent-conversation--stream)))
-    (run-hook-with-args 'omnigent-conversation-event-hook name data)
-    (run-hooks 'omnigent-conversation-change-hook)))
+  (unless omnigent-conversation--invalid
+    (if omnigent-conversation--loading
+	(progn
+          (cl-incf omnigent-conversation--pending-event-count)
+          (cl-incf omnigent-conversation--pending-event-bytes
+                   (+ (string-bytes name) (string-bytes (prin1-to-string data))))
+          (if (or (> omnigent-conversation--pending-event-count
+                     omnigent-conversation-recovery-event-limit)
+                  (> omnigent-conversation--pending-event-bytes
+                     omnigent-conversation-recovery-byte-limit))
+              (omnigent-conversation--invalidate nil "Snapshot event buffer overflow")
+            (push (cons name data) omnigent-conversation--pending-events)))
+      (pcase (cl-find-if (lambda (entry) (member name (car entry)))
+			 omnigent-conversation--event-handlers)
+	(`(,_ . ,handler) (funcall handler data)))
+      (pcase name
+	("session.model"
+	 (setf (alist-get 'llm_model omnigent-conversation-header-data) (alist-get 'model data)))
+	("session.reasoning_effort"
+	 (setf (alist-get 'reasoning_effort omnigent-conversation-header-data)
+               (alist-get 'reasoning_effort data)))
+	((or "session.permission_mode" "session.codex_approval_mode")
+	 (setf (alist-get 'access_mode omnigent-conversation-header-data)
+               (alist-get (if (equal name "session.permission_mode")
+                              'permission_mode 'approval_mode) data)))
+	("session.usage"
+	 (dolist (field '((context_tokens . last_total_tokens) (context_window . context_window)))
+           (when (numberp (alist-get (car field) data))
+             (setf (alist-get (cdr field) omnigent-conversation-header-data)
+                   (alist-get (car field) data)))))
+	("response.completed"
+	 (let* ((usage (alist-get 'usage (alist-get 'response data)))
+		(tokens (or (alist-get 'context_tokens usage) (alist-get 'total_tokens usage)))
+		(model (alist-get 'model usage)))
+           (when (numberp tokens)
+             (setf (alist-get 'last_total_tokens omnigent-conversation-header-data) tokens))
+           (when (and (stringp model) (not (string-empty-p model)))
+             (setf (alist-get 'llm_model omnigent-conversation-header-data) model)))))
+      (when (and (equal name "session.status")
+		 (equal (alist-get 'status data) "failed") (alist-get 'error data))
+	(omnigent-conversation--put-item
+	 `((id . ,(format "error-%s" (float-time))) (type . "error")
+           (text . ,(format "%s" (alist-get 'error data))))))
+      (when (equal name "session.interrupted")
+	(omnigent-conversation--put-item
+	 `((id . ,(format "interrupt-%s" (float-time))) (type . "error")
+           (text . "Interrupted")))
+	(when omnigent-conversation--stream
+          (omnigent-transport-refresh-session-stream omnigent-conversation--stream)))
+      (run-hook-with-args 'omnigent-conversation-event-hook name data)
+      (run-hooks 'omnigent-conversation-change-hook))))
+
+(defun omnigent-conversation--read-only ()
+  "Apply recovery and server permission restrictions without losing drafts."
+  (let ((previous buffer-read-only))
+    (setq buffer-read-only
+          (or omnigent-conversation--invalid omnigent-conversation--loading
+              (not omnigent-conversation--connected)
+              omnigent-conversation--permission-read-only))
+    (unless (eq previous buffer-read-only)
+      (omnigent-conversation--notify-submission-change))))
+
+(defun omnigent-conversation--connection-state (state)
+  "Apply stream connection STATE to this conversation."
+  (unless omnigent-conversation--invalid
+    (setq omnigent-conversation--connected (eq state 'connected))
+    (omnigent-conversation--read-only)))
+
+(defun omnigent-conversation--begin-snapshot ()
+  "Make this conversation read-only and buffer events during its next snapshot."
+  (unless omnigent-conversation--invalid
+    (setq omnigent-conversation--loading t
+          omnigent-conversation--pending-events nil
+          omnigent-conversation--pending-event-count 0
+          omnigent-conversation--pending-event-bytes 0)
+    (omnigent-conversation--read-only)))
+
+(defun omnigent-conversation--freeze ()
+  "Stop recovery and preserve this conversation and its drafts as read-only."
+  (setq omnigent-conversation--invalid t
+        omnigent-conversation--loading nil
+        omnigent-conversation--connected nil
+        omnigent-conversation--pending-events nil
+        omnigent-conversation--pending-event-count 0
+        omnigent-conversation--pending-event-bytes 0)
+  (omnigent-conversation--close)
+  (omnigent-conversation--read-only))
+
+(defun omnigent-conversation--invalidate (status body)
+  "Freeze this buffer after snapshot failure STATUS and BODY and report recovery."
+  (unless omnigent-conversation--invalid
+    (omnigent-conversation--freeze)
+    (when (equal status 404)
+      (omnigent-sessions--frame
+       `((type . "removed") (ids . ,(vector omnigent-conversation-session-id)))))
+    (message "%s. Copy any drafts, then close and reopen this session to try again"
+             (omnigent-transport-error-message "Omnigent snapshot failed" status body))))
+
+(defun omnigent-conversation--snapshot-valid-p (body)
+  "Check required snapshot arrays and fields before replacing state with BODY."
+  (condition-case nil
+      (and (listp body)
+           (cl-every (lambda (key) (vectorp (alist-get key body)))
+                     '(items pending_inputs pending_elicitations))
+           (cl-every
+            (lambda (item)
+              (and (listp item) (stringp (alist-get 'id item))
+                   (not (string-empty-p (alist-get 'id item)))
+                   (listp (alist-get 'data item))))
+            (alist-get 'items body))
+           (cl-every
+            (lambda (input)
+              (and (listp input) (stringp (alist-get 'pending_id input))
+                   (not (string-empty-p (alist-get 'pending_id input)))
+                   (or (stringp (alist-get 'content input))
+                       (vectorp (alist-get 'content input)))))
+            (alist-get 'pending_inputs body))
+           (cl-every
+            (lambda (request)
+              (and (listp request) (stringp (alist-get 'elicitation_id request))
+                   (not (string-empty-p (alist-get 'elicitation_id request)))
+                   (listp (alist-get 'params request))
+                   (listp (alist-get 'requestedSchema (alist-get 'params request)))
+                   (cl-every (lambda (property)
+                               (and (consp property) (symbolp (car property))
+                                    (listp (cdr property))))
+                             (alist-get 'properties
+                                        (alist-get 'requestedSchema (alist-get 'params request))))))
+            (alist-get 'pending_elicitations body)))
+    (error nil)))
 
 (defun omnigent-conversation--snapshot (status body)
-  "Apply snapshot BODY when STATUS indicates success.
-Replay queued stream events and notify the elicitation change hook."
-  (when (and (omnigent-transport-success-p status)
-             (listp body) (assq 'pending_inputs body)
-             (not (and (vectorp (alist-get 'pending_inputs body))
-                       (cl-every (lambda (input)
-                                   (and (listp input)
-                                        (stringp (alist-get 'pending_id input))
-                                        (not (string-empty-p (alist-get 'pending_id input)))
-                                        (or (stringp (alist-get 'content input))
-                                            (vectorp (alist-get 'content input)))))
-                                 (alist-get 'pending_inputs body)))))
-    (setq status nil body "Invalid pending-input snapshot"))
-  (let ((events (nreverse omnigent-conversation--pending-events)))
-    (setq omnigent-conversation--pending-events nil)
+  "Validate and apply snapshot BODY once, or invalidate on failed STATUS."
+  (unless omnigent-conversation--invalid
+    (when (and (omnigent-transport-success-p status)
+               (not (omnigent-conversation--snapshot-valid-p body)))
+      (setq status nil body "Invalid session snapshot"))
     (if (not (omnigent-transport-success-p status))
-	(progn (setq omnigent-conversation--loading nil)
-               (message "%s; displayed state may be stale"
-			(omnigent-transport-error-message "Omnigent snapshot failed" status body))
-               (dolist (event events)
-		 (omnigent-conversation--event (car event) (cdr event))))
-      (when omnigent-conversation--permission-read-only
-	(setq buffer-read-only nil))
-      (setq omnigent-conversation--permission-read-only
-            (equal (alist-get 'permission_level body) 1))
-      (when omnigent-conversation--permission-read-only
-	(setq buffer-read-only t))
-      (setq omnigent-conversation-agent-name (alist-get 'agent_name body)
-            omnigent-conversation-header-data
-            `((harness . ,(alist-get 'harness body))
-              (llm_model . ,(alist-get 'llm_model body))
-              (reasoning_effort . ,(alist-get 'reasoning_effort body))
-              (permission_level . ,(alist-get 'permission_level body))
-              (access_mode . ,(or (alist-get 'omnigent.claude_native.permission_mode (alist-get 'labels body))
-                                  (alist-get 'omnigent.codex_native.approval_mode (alist-get 'labels body))))
-              (last_total_tokens . ,(alist-get 'last_total_tokens body))
-              (context_window . ,(alist-get 'context_window body))))
-      (clrhash omnigent-conversation--items)
-      (clrhash omnigent-conversation--elicitations)
-      (setq omnigent-conversation--elicitation-order nil)
-      (dolist (request (append (alist-get 'pending_elicitations body) nil))
-	(omnigent-conversation--elicitation-put request))
-      (maphash (lambda (id _draft)
-		 (unless (gethash id omnigent-conversation--elicitations)
-                   (remhash id omnigent-conversation--elicitation-drafts)))
-               omnigent-conversation--elicitation-drafts)
-      (setq omnigent-conversation--pending-inputs
-            (mapcar (lambda (input) (copy-tree (cons '(state . queued) input) t))
-                    (append (alist-get 'pending_inputs body) nil)))
-      (setq omnigent-conversation--order nil omnigent-conversation--order-tail nil
-            omnigent-conversation--response-id (alist-get 'active_response_id body)
-            omnigent-conversation--section-id nil
-            omnigent-conversation--loading nil)
-      (dolist (item (append (alist-get 'items body) nil))
-	(omnigent-conversation--put-item item))
-      (dolist (event events)
-	(omnigent-conversation--event (car event) (cdr event))))
-    (run-hooks 'omnigent-conversation-elicitation-change-hook)
-    (run-hooks 'omnigent-conversation-change-hook)))
+        (omnigent-conversation--invalidate status body)
+      (let ((events (nreverse omnigent-conversation--pending-events)))
+        (setq omnigent-conversation--pending-events nil
+              omnigent-conversation--pending-event-count 0
+              omnigent-conversation--pending-event-bytes 0)
+	(setq omnigent-conversation--permission-read-only
+              (equal (alist-get 'permission_level body) 1))
+	(setq omnigent-conversation-agent-name (alist-get 'agent_name body)
+              omnigent-conversation-header-data
+              `((harness . ,(alist-get 'harness body))
+		(llm_model . ,(alist-get 'llm_model body))
+		(reasoning_effort . ,(alist-get 'reasoning_effort body))
+		(permission_level . ,(alist-get 'permission_level body))
+		(access_mode . ,(or (alist-get 'omnigent.claude_native.permission_mode (alist-get 'labels body))
+                                    (alist-get 'omnigent.codex_native.approval_mode (alist-get 'labels body))))
+		(last_total_tokens . ,(alist-get 'last_total_tokens body))
+		(context_window . ,(alist-get 'context_window body))))
+	(clrhash omnigent-conversation--items)
+	(clrhash omnigent-conversation--elicitations)
+	(setq omnigent-conversation--elicitation-order nil)
+	(dolist (request (append (alist-get 'pending_elicitations body) nil))
+	  (omnigent-conversation--elicitation-put request))
+	(maphash (lambda (id _draft)
+		   (unless (gethash id omnigent-conversation--elicitations)
+                     (remhash id omnigent-conversation--elicitation-drafts)))
+		 omnigent-conversation--elicitation-drafts)
+	(setq omnigent-conversation--pending-inputs
+              (mapcar (lambda (input) (copy-tree (cons '(state . queued) input) t))
+                      (append (alist-get 'pending_inputs body) nil)))
+	(setq omnigent-conversation--order nil omnigent-conversation--order-tail nil
+              omnigent-conversation--response-id (alist-get 'active_response_id body)
+              omnigent-conversation--section-id nil
+              omnigent-conversation--loading nil)
+	(dolist (item (append (alist-get 'items body) nil))
+          (setq item (copy-tree item t))
+          (setf (alist-get 'omnigent-committed item) t)
+          (omnigent-conversation--put-item item))
+	(dolist (event events)
+          ;; Without shared sequence numbers, partial deltas can overlap committed text.
+          ;; Final full items recover authoritative content; keep other event types.
+          (unless (member (car event) '("response.output_text.delta"
+					"response.reasoning_text.delta"
+					"response.reasoning_summary_text.delta"))
+            (omnigent-conversation--event (car event) (cdr event))))
+	(omnigent-conversation--read-only)
+	(run-hooks 'omnigent-conversation-elicitation-change-hook)
+	(run-hooks 'omnigent-conversation-change-hook)))))
 
 (defun omnigent-conversation--close ()
   "Stop the current buffer's session stream."
@@ -348,7 +443,8 @@ Replay queued stream events and notify the elicitation change hook."
 
 (defun omnigent-conversation--sent (buffer entry status body)
   "Apply send STATUS and BODY to ENTRY in BUFFER without recreating old input."
-  (when (buffer-live-p buffer)
+  (when (and (buffer-live-p buffer)
+             (not (buffer-local-value 'omnigent-conversation--invalid buffer)))
     (with-current-buffer buffer
       (setq omnigent-conversation--sending nil)
       (let* ((data (and (listp body) body))
@@ -624,7 +720,8 @@ Report hook errors as client warnings, not request failures."
 
 (defun omnigent-conversation--elicitation-submitted (buffer id callback status body)
   "Apply submission STATUS and BODY for ID in BUFFER, then call CALLBACK."
-  (when (buffer-live-p buffer)
+  (when (and (buffer-live-p buffer)
+             (not (buffer-local-value 'omnigent-conversation--invalid buffer)))
     (with-current-buffer buffer
       (remhash id omnigent-conversation--elicitation-submitting)
       (when (omnigent-transport-success-p status)

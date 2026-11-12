@@ -142,6 +142,8 @@ Use `omnigent-conversation-open' to create a conversation buffer."
         omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
         omnigent-conversation--elicitation-submitting (make-hash-table :test 'equal)
         omnigent-conversation--loading t
+        omnigent-conversation--connected nil
+        buffer-read-only t
         omnigent-conversation--prompt-start (copy-marker (point-min))
         omnigent-conversation--prompt-end (copy-marker (point-max) t))
   (add-hook 'kill-buffer-hook #'omnigent-conversation--close nil t)
@@ -156,8 +158,13 @@ Use `omnigent-conversation-open' to create a conversation buffer."
            (lambda (err) (message "Omnigent stream: %s" err))
            (lambda () (when (buffer-live-p buffer)
                         (with-current-buffer buffer
-                          (setq omnigent-conversation--loading t
-                                omnigent-conversation--pending-events nil))))))))
+                          (omnigent-conversation--begin-snapshot))))
+           (lambda (state) (when (buffer-live-p buffer)
+                             (with-current-buffer buffer
+                               (omnigent-conversation--connection-state state))))))
+    ;; A synchronous snapshot setup failure can arrive before the handle is assigned.
+    (when omnigent-conversation--invalid
+      (omnigent-conversation--close))))
 
 ;;;###autoload
 (defun omnigent-conversation-open (id &optional title)

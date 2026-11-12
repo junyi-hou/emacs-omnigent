@@ -1,15 +1,16 @@
 # Client Reconnection and State Recovery
 
-**Status:** Proposed. Basic reconnect and snapshot loading exist. The complete flow
-below is not implemented. This document covers client outages, not execution-host
-outages or recovery of an agent process that stops.
+**Status:** Implemented with unit and native integration coverage. Emacs-side fault
+injection tests use a real server and mock model with both native harnesses. Physical
+laptop suspend and deployed remote networking remain unverified. This document covers
+client outages, not execution-host outages or recovery of an agent process that stops.
 
 [transport.md](transport.md) owns connections and requests.
 [session-tree.md](session-tree.md) owns the session list and watch set.
 [conversation-buffer.md](conversation-buffer.md) owns transcript reconciliation and drafts.
 
 REST reads and writes follow the [API callback design](api-callbacks.md) for
-result delivery and invalidation. The recovery-specific deadlines below remain proposed.
+result delivery and invalidation. Composite snapshot reads have a bounded deadline.
 Automatic snapshot retries are deferred. SSE and WebSocket callbacks have separate
 subscription contracts.
 
@@ -32,11 +33,11 @@ in this client. See [transport authentication](transport.md#authentication).
 
 | Area | Implemented | Remaining work |
 |---|---|---|
-| SSE | Restart curl after exit, with capped reconnect backoff. | Detect silent broken connections and laptop resume. |
-| Session snapshot | Fetch metadata and bounded history on each stream attempt. | Check snapshot/stream overlap and invalidate the conversation after a failed snapshot. |
-| Conversation state | Buffer events during loading and reconcile full items by ID. | Verify overlap and recovery across a complete client outage. |
-| Session updates | Reconnect the WebSocket, restore its watch set, and refresh the list through its open callback. | Detect silent broken connections. |
-| Initial connection | Reset state and select the server URL. | Call session-list and WebSocket startup from the connection entry point. |
+| SSE | Reconnect after exit, inactivity, or a long scheduling gap, with capped backoff. | Verify physical laptop suspend and deployed proxies. |
+| Session snapshot | Serialize bounded composite reads; invalidate on read failure, timeout, or malformed data. | Verify commits during real-server snapshot pagination. |
+| Conversation state | Preserve drafts and history as read-only during recovery; reconcile full items by ID. | Verify physical laptop suspend and deployed remote networking. |
+| Session updates | Detect inactivity, reconnect, restore the watch set, and refresh the list on open. | Verify deployed proxies. |
+| Initial connection | Reset state, select the server URL, start session updates, and load the list. | None for this flow. |
 
 `curl -N` disables buffering. It does not reconnect or replay events. During laptop
 sleep, curl can remain suspended with a socket that no longer works after resume.
@@ -103,8 +104,12 @@ gap-free recovery. Closing that gap requires a verified server guarantee or a se
 contract change.
 
 The web frontend processes live events during its snapshot request and merges the
-snapshot by item ID. The current conversation design buffers events during snapshot
-loading. That difference needs overlap tests before changing reconciliation behavior.
+snapshot by item ID. This client buffers events during snapshot loading. During
+reconciliation, discard buffered text and reasoning deltas because their overlap with
+snapshot text is unknown. Apply full items and lifecycle, input, and elicitation events
+in arrival order. An added item cannot replace an already committed item. New live
+deltas update provisional items only; snapshot and final items remain authoritative.
+Partial streamed text can remain incomplete until a final full item arrives.
 
 The interface also has no shared snapshot/event sequence number. Stable item IDs
 support full-item deduplication, but do not by themselves deduplicate text deltas.
@@ -127,9 +132,14 @@ checks do not remove the subscription gap described above.
 
 ### Liveness and retry rules
 
-- Detect SSE and WebSocket inactivity using their verified heartbeat contracts.
-  Normal idle sessions must not trigger false failures. Choose timeout margins after
-  checking the server intervals and proxy behavior.
+- Omnigent 0.21.0 sends SSE heartbeats every 15 seconds and WebSocket heartbeats after
+  30 idle seconds. Check connections every five seconds. Reconnect after 90 seconds
+  without traffic, or a scheduling gap longer than 15 seconds. Any stream traffic
+  updates the activity time; normal idle heartbeats keep connections alive.
+- Allow 30 seconds for the first SSE frame or WebSocket open, and 30 seconds for the
+  complete composite snapshot. The transport timeout options control these deadlines.
+  Buffer at most 10,000 events or approximately 8 MiB during snapshot loading; the
+  conversation recovery options control these limits.
 - After laptop resume or a long scheduling gap, restart stale connections through
   their existing handles. Do not call the destructive server-selection reset.
 - Give connection establishment and snapshot reads bounded timeouts. Cancel or ignore

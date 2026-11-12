@@ -35,7 +35,9 @@
      (cl-letf (((symbol-function 'omnigent-transport-start-session-stream) (lambda (&rest _) nil)))
        (with-temp-buffer
          (let ((omnigent-conversation--session-id "conv_test")) (omnigent-conversation-mode))
-         (setq omnigent-conversation--loading nil)
+         (setq omnigent-conversation--loading nil
+               omnigent-conversation--connected t
+               buffer-read-only nil)
          ,@body))))
 
 (ert-deftest omnigent-ui-conversation-header-tracks-session-data ()
@@ -46,7 +48,7 @@
      200 '((harness . "codex-native") (llm_model . "model-a")
            (reasoning_effort . "high")
            (labels . ((omnigent.codex_native.approval_mode . "read-only")))
-           (last_total_tokens . 100) (context_window . 1000) (items . [])))
+           (last_total_tokens . 100) (context_window . 1000) (items . []) (pending_inputs . []) (pending_elicitations . [])))
     (should (equal header-line-format
                    "Harness: codex-native | Model: model-a | Effort: high | Access: read-only | Context: 100 / 1000 tokens (10%)"))
     (omnigent-conversation--event "session.model" '((model . "model-b")))
@@ -60,9 +62,9 @@
                                           (usage . ((model . "model-c") (context_tokens . 300)
                                                     (total_tokens . 900)))))))
     (should (string-match-p "Model: model-c.*Context: 300 / 1000 tokens (30%)" header-line-format))
-    (omnigent-conversation--snapshot 200 '((last_total_tokens . 42) (items . [])))
+    (omnigent-conversation--snapshot 200 '((last_total_tokens . 42) (items . []) (pending_inputs . []) (pending_elicitations . [])))
     (should (string-match-p "Context: 42 tokens used (limit unknown)" header-line-format))
-    (omnigent-conversation--snapshot 200 '((context_window . 4096) (items . [])))
+    (omnigent-conversation--snapshot 200 '((context_window . 4096) (items . []) (pending_inputs . []) (pending_elicitations . [])))
     (should (string-match-p "Context: unknown / 4096 tokens" header-line-format))
     (omnigent-conversation--event "response.completed" '((response . ((usage . ((total_tokens . 512)))))))
     (should (string-match-p "Context: 512 / 4096 tokens (12%)" header-line-format))))
@@ -71,19 +73,19 @@
   "Freeze read-only sessions and restore editing when permission increases."
   (omnigent-ui-test--conversation
     (insert "unsent draft")
-    (omnigent-conversation--snapshot 200 '((permission_level . 1) (items . [])))
+    (omnigent-conversation--snapshot 200 '((permission_level . 1) (items . []) (pending_inputs . []) (pending_elicitations . [])))
     (should buffer-read-only)
     (should (string-suffix-p " [R]" header-line-format))
     (should-error (insert "more") :type 'buffer-read-only)
     (should-error (omnigent-conversation-send) :type 'user-error)
     (should-error (omnigent-conversation-interrupt) :type 'user-error)
     (should-error (omnigent-ui-stop) :type 'user-error)
-    (omnigent-conversation--snapshot 200 '((permission_level . 2) (items . [])))
+    (omnigent-conversation--snapshot 200 '((permission_level . 2) (items . []) (pending_inputs . []) (pending_elicitations . [])))
     (should-not buffer-read-only)
     (should (string-suffix-p " [E]" header-line-format))
     (should (equal (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max))
                    "unsent draft"))
-    (omnigent-conversation--snapshot 200 '((permission_level . 4) (items . [])))
+    (omnigent-conversation--snapshot 200 '((permission_level . 4) (items . []) (pending_inputs . []) (pending_elicitations . [])))
     (should (string-suffix-p " [M]" header-line-format))))
 
 (ert-deftest omnigent-ui-transcript-stream-preserves-composer-and-fold ()
@@ -109,7 +111,7 @@
       (goto-char (point-min)) (forward-line 1)
       (should-not (invisible-p (point)))
       (omnigent-conversation--snapshot
-       200 '((items . [((id . "r") (type . "reasoning") (content . "final"))])))
+       200 '((items . [((id . "r") (type . "reasoning") (content . "final"))]) (pending_inputs . []) (pending_elicitations . [])))
       (goto-char (point-min)) (forward-line 1)
       (should-not (invisible-p (point)))
       (should-error (delete-char 1) :type 'text-read-only))))
@@ -494,12 +496,12 @@
   (omnigent-ui-test--conversation
     (omnigent-conversation--snapshot
      200 '((items . [((id . "first") (type . "message") (content . "first text"))
-                      ((id . "second") (type . "message") (content . "second text"))])))
+                      ((id . "second") (type . "message") (content . "second text"))]) (pending_inputs . []) (pending_elicitations . [])))
     (goto-char (point-min)) (search-forward "second te")
     (let ((offset (- (point) (previous-single-property-change (point) 'omnigent-ui-item-id))))
       (omnigent-conversation--snapshot
        200 '((items . [((id . "first") (type . "message") (content . "a longer first text"))
-                        ((id . "second") (type . "message") (content . "second text"))])))
+                        ((id . "second") (type . "message") (content . "second text"))]) (pending_inputs . []) (pending_elicitations . [])))
       (should (equal (get-text-property (point) 'omnigent-ui-item-id) "second"))
       (should (= offset (- (point) (previous-single-property-change (point) 'omnigent-ui-item-id)))))))
 
@@ -591,16 +593,17 @@
       (omnigent-ui-test--consume "a" "same" cleared-id)
       (omnigent-conversation--snapshot
        200 '((items . [((id . "a") (type . "message") (data . ((role . "user") (content . "same"))))])
-             (pending_inputs . [((pending_id . "pending-b") (content . [((type . "input_text") (text . "same"))]))])))
+             (pending_inputs . [((pending_id . "pending-b") (content . [((type . "input_text") (text . "same"))]))]) (pending_elicitations . [])))
       (should (= (length omnigent-conversation--pending-inputs) 1))
       (should (equal (alist-get 'pending_id (car omnigent-conversation--pending-inputs)) "pending-b"))
       (should (= (how-many "\\[queued\\] > same" (point-min) (point-max)) 1)))
     (omnigent-ui-test--consume "unrelated" "other" "unknown-id")
     (should (= (length omnigent-conversation--pending-inputs) 1))
-    (omnigent-conversation--snapshot 500 nil)
-    (should (= (length omnigent-conversation--pending-inputs) 1))
-    (omnigent-conversation--snapshot 200 '((items . []) (pending_inputs . [])))
+    (omnigent-conversation--snapshot 200 '((items . []) (pending_inputs . []) (pending_elicitations . [])))
     (should-not omnigent-conversation--pending-inputs)
+    (omnigent-conversation--snapshot 500 nil)
+    (should omnigent-conversation--invalid)
+    (should buffer-read-only)
     (should (equal (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max)) "draft"))))
 
 (ert-deftest omnigent-ui-fifo-skips-markers-and-keeps-identical-inputs ()
@@ -651,7 +654,7 @@
       (cl-letf (((symbol-function 'omnigent-transport-post-session-event)
                  (lambda (_id _event cb) (setq callback cb))))
         (omnigent-conversation-send))
-      (omnigent-conversation--snapshot 200 '((pending_inputs . [])))
+      (omnigent-conversation--snapshot 200 '((pending_inputs . []) (items . []) (pending_elicitations . [])))
       (funcall callback 202 '((queued . t) (pending_id . "old")))
       (should-not omnigent-conversation--pending-inputs))))
 
@@ -669,18 +672,19 @@
                  (lambda (stream attempt)
                    (should (eq stream omnigent-conversation--stream))
                    (should (= attempt 1))
-                   (cl-incf reads))))
+                   (cl-incf reads)
+                   (funcall (omnigent-stream-connect-callback stream)))))
         ;; An interrupt queued during initial recovery starts another snapshot.
         (setq omnigent-conversation--loading t)
         (omnigent-conversation--event "session.interrupted" nil)
         (omnigent-ui-test--consume "b" "queued" "pending-b")
         (omnigent-conversation--snapshot
-         200 '((pending_inputs . [((pending_id . "pending-b") (content . "queued"))])))
+         200 '((pending_inputs . [((pending_id . "pending-b") (content . "queued"))]) (items . []) (pending_elicitations . [])))
         (should (= reads 1))
         (should omnigent-conversation--loading)
         (should (= (length omnigent-conversation--pending-events) 1))
         (omnigent-conversation--snapshot
-         200 '((pending_inputs . [((pending_id . "pending-b") (content . "queued"))])))
+         200 '((pending_inputs . [((pending_id . "pending-b") (content . "queued"))]) (items . []) (pending_elicitations . [])))
         (should-not omnigent-conversation--loading)
         (should-not omnigent-conversation--pending-inputs)
         (should (equal omnigent-conversation--order '("b"))))
@@ -711,8 +715,8 @@
     (omnigent-ui-test--conversation
       (insert "draft")
       (omnigent-conversation--snapshot
-       200 '((pending_inputs . [((pending_id . "keep") (content . "queued"))])))
-      (omnigent-conversation--snapshot 200 `((pending_inputs . ,pending)))
+       200 '((pending_inputs . [((pending_id . "keep") (content . "queued"))]) (items . []) (pending_elicitations . [])))
+      (omnigent-conversation--snapshot 200 `((pending_inputs . ,pending) (items . []) (pending_elicitations . [])))
       (should (equal (alist-get 'pending_id (car omnigent-conversation--pending-inputs)) "keep"))
       (should (string-match-p "\\[queued\\] > queued" (buffer-string)))
       (should (string-suffix-p "draft" (buffer-string))))))

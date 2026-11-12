@@ -7,9 +7,10 @@
   "Reconcile snapshot and stream items while keeping the editable composer."
   (let (event snapshot stopped callback (omnigent-sessions--buffers nil))
     (cl-letf (((symbol-function 'omnigent-transport-start-session-stream)
-               (lambda (_id on-event on-snapshot &optional _error on-connect)
+               (lambda (_id on-event on-snapshot &optional _error on-connect on-state)
                  (setq event on-event snapshot on-snapshot)
-                 (funcall on-connect) 'stream))
+                 (funcall on-connect)
+                 (funcall on-state 'connected) 'stream))
               ((symbol-function 'omnigent-transport-stop-session-stream)
                (lambda (stream) (setq stopped stream)))
               ((symbol-function 'omnigent-transport-post-session-event)
@@ -19,14 +20,15 @@
         (let ((buffer (current-buffer)))
           (unwind-protect
               (progn
-                (insert "draft")
+                (should buffer-read-only)
+                (let ((inhibit-read-only t)) (insert "draft"))
                 (funcall event "response.output_item.done"
                          '((item . ((id . "a") (type . "message")
                                     (data . ((role . "assistant") (content . "hello")))))))
                 (funcall snapshot 200
                          '((items . [((id . "a") (type . "message")
                                       (data . ((role . "assistant")
-                                               (content . [((type . "output_text") (text . "hello"))]))))])))
+                                               (content . [((type . "output_text") (text . "hello"))]))))]) (pending_inputs . []) (pending_elicitations . [])))
                 (should (equal (buffer-substring-no-properties
                                 omnigent-conversation--prompt-start (point-max)) "draft"))
                 (should (equal omnigent-conversation--order '("a")))
@@ -55,7 +57,7 @@
     (omnigent-conversation--event "response.elicitation_request"
                                   '((elicitation_id . "new")))
     (omnigent-conversation--snapshot
-     200 '((pending_elicitations . [((elicitation_id . "old"))])))
+     200 '((pending_elicitations . [((elicitation_id . "old"))]) (items . []) (pending_inputs . [])))
     (should-not (gethash "old" omnigent-conversation--elicitations))
     (should (gethash "new" omnigent-conversation--elicitations))))
 
@@ -76,7 +78,7 @@
       (omnigent-conversation--event "response.elicitation_request" '((elicitation_id . "stale")))
       (setq omnigent-conversation--loading t)
       (omnigent-conversation--snapshot
-       200 '((pending_elicitations . [((elicitation_id . "keep"))])))
+       200 '((pending_elicitations . [((elicitation_id . "keep"))]) (items . []) (pending_inputs . [])))
       (should (= changes 4))
       (should (equal (gethash "answer" (omnigent-conversation-elicitation-draft "keep")) "draft"))
       (should-not (gethash "stale" omnigent-conversation--elicitation-drafts))
@@ -271,50 +273,28 @@
       (should-not omnigent-conversation--sending)
       (should (equal (buffer-string) "")))))
 
-(ert-deftest omnigent-conversation-failed-snapshot-replays-events-and-recovers ()
-  "Retain existing items on failure and replay queued events in order."
+(ert-deftest omnigent-conversation-recovery-provisional-overlap ()
+  "Drop ambiguous buffered deltas but accept new provisional text until finalization."
   (with-temp-buffer
     (setq omnigent-conversation--items (make-hash-table :test 'equal)
           omnigent-conversation--elicitations (make-hash-table :test 'equal)
           omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
           omnigent-conversation--loading t)
-    (omnigent-conversation--put-item '((id . "existing") (content . "keep")))
     (omnigent-conversation--event
-     "response.output_item.added" '((item . ((id . "new") (content . "")))))
+     "response.output_item.added" '((item . ((id . "new") (type . "message") (content . "")))))
     (omnigent-conversation--event
-     "response.output_text.delta" '((item_id . "new") (delta . "first")))
-    (omnigent-conversation--event
-     "response.output_text.delta" '((item_id . "new") (delta . " second")))
-    (should (= (length omnigent-conversation--pending-events) 3))
-    (should-not (gethash "new" omnigent-conversation--items))
-    (omnigent-conversation--snapshot 500 nil)
-    (should-not omnigent-conversation--loading)
-    (should-not omnigent-conversation--pending-events)
-    (should (equal omnigent-conversation--order '("existing" "new")))
-    (should (equal (omnigent-conversation--text
-                    (gethash "existing" omnigent-conversation--items)) "keep"))
-    (should (equal (omnigent-conversation--text
-                    (gethash "new" omnigent-conversation--items)) "first second"))
-    ;; The next connection loads a fresh snapshot before applying new deltas.
-    (setq omnigent-conversation--loading t)
-    (omnigent-conversation--event
-     "response.output_text.delta" '((item_id . "new") (delta . " recovered")))
+     "response.output_text.delta" '((item_id . "new") (delta . "ambiguous")))
     (omnigent-conversation--snapshot
-     200 '((items . [((id . "new") (content . "snapshot"))])))
-    (should-not omnigent-conversation--loading)
-    (should-not omnigent-conversation--pending-events)
-    (should-not (gethash "existing" omnigent-conversation--items))
-    (should (equal omnigent-conversation--order '("new")))
-    (omnigent-conversation--put-item '((id . "after-reload")))
-    (should (equal omnigent-conversation--order '("new" "after-reload")))
-    (should (equal (omnigent-conversation--text
-                    (gethash "new" omnigent-conversation--items))
-                   "snapshot recovered"))
+     200 '((items . []) (pending_inputs . []) (pending_elicitations . [])))
+    (should (equal (omnigent-conversation--text (gethash "new" omnigent-conversation--items)) ""))
     (omnigent-conversation--event
      "response.output_text.delta" '((item_id . "new") (delta . " live")))
-    (should (equal (omnigent-conversation--text
-                    (gethash "new" omnigent-conversation--items))
-                   "snapshot recovered live"))))
+    (should (equal (omnigent-conversation--text (gethash "new" omnigent-conversation--items)) " live"))
+    (omnigent-conversation--event
+     "response.output_item.done" '((item . ((id . "new") (content . "complete")))))
+    (omnigent-conversation--event
+     "response.output_text.delta" '((item_id . "new") (delta . " duplicate")))
+    (should (equal (omnigent-conversation--text (gethash "new" omnigent-conversation--items)) "complete"))))
 
 (ert-deftest omnigent-conversation-history-limit ()
   (with-temp-buffer
@@ -477,7 +457,7 @@
       (insert "draft")
       (omnigent-conversation--event "response.in_progress" '((response . ((id . "old")))))
       (omnigent-conversation--event "response.output_text.delta" '((delta . "discard")))
-      (omnigent-conversation--snapshot 200 '((active_response_id . "new") (items . [])))
+      (omnigent-conversation--snapshot 200 '((active_response_id . "new") (items . []) (pending_inputs . []) (pending_elicitations . [])))
       (omnigent-conversation--event "response.output_text.delta" '((delta . "restored turn")))
       (should (= (length omnigent-conversation--order) 1))
       (should (equal (omnigent-conversation--text
@@ -644,4 +624,151 @@
         (should (= calls 1))
         (should-not (omnigent-conversation-elicitation-submitting-p "id"))))))
 
+(ert-deftest omnigent-conversation-recovery-gates-actions-and-reconciles-overlap ()
+  "Keep drafts read-only until both snapshot and traffic recover, merging by ID."
+  (let (event snapshot begin state
+        (stream (omnigent-transport--make-stream)))
+    (cl-letf (((symbol-function 'omnigent-transport-start-session-stream)
+               (lambda (_id on-event on-snapshot _error on-begin on-state)
+                 (setq event on-event snapshot on-snapshot begin on-begin state on-state)
+                 stream))
+              ((symbol-function 'omnigent-transport-request)
+               (lambda (&rest _) (error "Unexpected mutation"))))
+      (with-temp-buffer
+        (let ((omnigent-conversation--session-id "session"))
+          (omnigent-conversation-mode))
+        (funcall snapshot 200 '((items . []) (pending_inputs . []) (pending_elicitations . [])))
+        (should buffer-read-only)
+        (funcall state 'connected)
+        (should-not buffer-read-only)
+        (insert "composer draft")
+        (omnigent-conversation--elicitation-put '((elicitation_id . "keep")))
+        (let ((draft (omnigent-conversation-elicitation-draft "keep")))
+          (puthash "answer" "elicitation draft" draft)
+          (omnigent-conversation-elicitation-set-draft "keep" draft))
+        (funcall state 'disconnected)
+        (should buffer-read-only)
+        (should-error (omnigent-conversation-send) :type 'user-error)
+        (should-error (omnigent-conversation-interrupt) :type 'user-error)
+        (should-error (omnigent-conversation-set-model "model") :type 'user-error)
+        (should-error (omnigent-conversation-elicitation-submit "keep" 'decline nil)
+                      :type 'user-error)
+        (funcall begin)
+        (funcall event "session.input.consumed"
+                 '((data . ((item_id . "a") (type . "message")
+                            (cleared_pending_id . "input-a")
+                            (data . ((role . "user") (content . "A")))))))
+        (funcall event "response.elicitation_resolved" '((elicitation_id . "resolved")))
+        (funcall event "session.status" '((status . "running") (response_id . "new")))
+        (funcall event "response.completed" '((response . ((id . "new")))))
+        (funcall snapshot 200
+                 '((active_response_id . "old")
+                   (items . [((id . "a") (type . "message")
+                              (data . ((role . "user") (content . "A"))))])
+                   (pending_inputs . [((pending_id . "input-b") (content . "B"))])
+                   (pending_elicitations . [((elicitation_id . "keep"))
+                                             ((elicitation_id . "resolved"))])))
+        (should buffer-read-only)
+        (should (equal omnigent-conversation--order '("a")))
+        (should (equal (mapcar (lambda (input) (alist-get 'pending_id input))
+                              omnigent-conversation--pending-inputs)
+                       '("input-b")))
+        (should-not (gethash "resolved" omnigent-conversation--elicitations))
+        (should (equal (gethash "answer" (omnigent-conversation-elicitation-draft "keep"))
+                       "elicitation draft"))
+        (should-not omnigent-conversation--response-id)
+        (funcall state 'connected)
+        (should-not buffer-read-only)
+        (should (equal (buffer-substring-no-properties
+                        omnigent-conversation--prompt-start (point-max))
+                       "composer draft"))))))
+
+(ert-deftest omnigent-conversation-recovery-stops-synchronous-snapshot-failure ()
+  "Stop the assigned stream even when snapshot setup fails before start returns."
+  (let ((stream (omnigent-transport--make-stream)))
+    (cl-letf (((symbol-function 'omnigent-transport-start-session-stream)
+               (lambda (_id _event snapshot &rest _)
+                 (funcall snapshot nil "Request setup failed")
+                 stream)))
+      (with-temp-buffer
+        (let ((omnigent-conversation--session-id "session"))
+          (omnigent-conversation-mode))
+        (should omnigent-conversation--invalid)
+        (should buffer-read-only)
+        (should (omnigent-stream-stopped stream))))))
+
+(ert-deftest omnigent-conversation-recovery-failure-freezes-and-rejects-late-work ()
+  "Snapshot failure retains drafts and history but permanently stops this buffer."
+  (with-temp-buffer
+    (setq omnigent-conversation--items (make-hash-table :test 'equal)
+          omnigent-conversation--elicitations (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
+          omnigent-conversation--loading t
+          omnigent-conversation--stream (omnigent-transport--make-stream))
+    (insert "draft")
+    (omnigent-conversation--put-item '((id . "old") (content . "keep")))
+    (omnigent-conversation--event "response.output_item.done" '((item . ((id . "new")))))
+    (omnigent-conversation--snapshot 503 '((detail . "Unavailable")))
+    (should buffer-read-only)
+    (should omnigent-conversation--invalid)
+    (should (omnigent-stream-stopped omnigent-conversation--stream))
+    (should-not omnigent-conversation--pending-events)
+    (omnigent-conversation--event "response.output_item.done" '((item . ((id . "late")))))
+    (omnigent-conversation--snapshot
+     200 '((items . []) (pending_inputs . []) (pending_elicitations . [])))
+    (omnigent-conversation--connection-state 'connected)
+    (let (called)
+      (omnigent-conversation--sent (current-buffer) nil 202 nil)
+      (omnigent-conversation--elicitation-submitted
+       (current-buffer) "old" (lambda (&rest _) (setq called t)) 202 nil)
+      (should-not called))
+    (should buffer-read-only)
+    (should (equal omnigent-conversation--order '("old")))
+    (should (equal (buffer-string) "draft"))))
+
+(ert-deftest omnigent-conversation-recovery-validates-before-replacement ()
+  "Missing required snapshot arrays invalidate without deleting existing state."
+  (dolist (body '(nil ((items . []))
+                  ((items . [((content . "no id"))]) (pending_inputs . []) (pending_elicitations . []))
+                  ((items . []) (pending_inputs . []) (pending_elicitations . [((params . nil))]))))
+    (with-temp-buffer
+      (setq omnigent-conversation--items (make-hash-table :test 'equal))
+      (omnigent-conversation--put-item '((id . "old")))
+      (omnigent-conversation--snapshot 200 body)
+      (should buffer-read-only)
+      (should (equal omnigent-conversation--order '("old"))))))
+
+(ert-deftest omnigent-conversation-recovery-bounds-event-buffer ()
+  "Overflow invalidates rather than silently dropping events and claiming success."
+  (with-temp-buffer
+    (let ((omnigent-conversation-recovery-event-limit 1))
+      (setq omnigent-conversation--loading t)
+      (omnigent-conversation--event "session.heartbeat" nil)
+      (omnigent-conversation--event "session.heartbeat" nil)
+      (should omnigent-conversation--invalid)
+      (should buffer-read-only)
+      (should-not omnigent-conversation--pending-events))))
+
+(ert-deftest omnigent-conversation-recovery-overlap-keeps-committed-content ()
+  "Buffered added and delta events cannot regress a committed snapshot item."
+  (with-temp-buffer
+    (setq omnigent-conversation--items (make-hash-table :test 'equal)
+          omnigent-conversation--elicitations (make-hash-table :test 'equal)
+          omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)
+          omnigent-conversation--loading t)
+    (omnigent-conversation--event "response.output_item.added"
+                                 '((item . ((id . "a") (type . "message") (content . "")))))
+    (omnigent-conversation--event "response.output_text.delta" '((item_id . "a") (delta . "full")))
+    (omnigent-conversation--snapshot
+     200 '((items . [((id . "a") (type . "message") (content . "full"))])
+           (pending_inputs . []) (pending_elicitations . [])))
+    (should (equal (omnigent-conversation--text (gethash "a" omnigent-conversation--items)) "full"))
+    (omnigent-conversation--event "response.output_text.delta" '((item_id . "a") (delta . "late")))
+    (should (equal (omnigent-conversation--text (gethash "a" omnigent-conversation--items)) "full"))
+    (omnigent-conversation--event "response.output_item.done"
+                                 '((item . ((id . "a") (content . "final")))))
+    (should (equal omnigent-conversation--order '("a")))
+    (should (equal (omnigent-conversation--text (gethash "a" omnigent-conversation--items)) "final"))))
+
 (provide 'omnigent-conversation-test)
+;;; omnigent-conversation-test.el ends here

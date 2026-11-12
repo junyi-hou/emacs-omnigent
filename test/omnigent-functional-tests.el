@@ -81,6 +81,38 @@
       (when stream (omnigent-transport-stop-session-stream stream))
       (when updates (omnigent-transport-stop-session-updates updates)))))
 
+(ert-deftest omnigent-external-message-reaches-conversation ()
+  "Show an externally submitted message and reply in the conversation."
+  (let ((id (omnigent-integration-create-session t)) buffer)
+    (unwind-protect
+        (save-window-excursion
+          (omnigent-conversation-open id)
+          (setq buffer (current-buffer))
+          (with-timeout (15 (ert-fail "Conversation snapshot timed out"))
+            (while (with-current-buffer buffer omnigent-conversation--loading)
+              (accept-process-output nil 0.1)))
+          (let* ((marker (format "external-%s" (float-time)))
+                 (prompt (omnigent-mock-configure-fixture "agent-message" marker))
+                 (payload (json-encode
+                           `((type . "message")
+                             (data . ((role . "user")
+                                      (content . [((type . "input_text")
+                                                   (text . ,prompt))])))))))
+            (with-temp-buffer
+              (should (zerop (call-process "curl" nil t nil "--fail" "--silent"
+                                           "-H" "Content-Type: application/json"
+                                           "-d" payload
+                                           (concat omnigent-server-url "/v1/sessions/" id "/events")))))
+            (with-timeout (45 (ert-fail "External exchange did not reach the conversation"))
+              (while (not (with-current-buffer buffer
+                            (and (string-match-p (regexp-quote marker) (buffer-string))
+                                 (string-match-p "The capital of France is Paris\\."
+                                                 (buffer-string)))))
+                (accept-process-output nil 0.1)))
+            (with-current-buffer buffer
+              (should (= 1 (how-many (regexp-quote marker) (point-min) (point-max)))))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
 (ert-deftest omnigent-mock-acp-conversation-header ()
   "Show available session data before and after a mock ACP usage update."
   (let ((id (omnigent-integration-create-session t)) buffer observer snapshot events)
@@ -1125,6 +1157,392 @@ Return the recorded model request of the turn."
         (omnigent-mock-test-request "DELETE" (omnigent-transport--session-path id)))
       (delete-directory root t)
       (delete-directory other-root t))))
+
+;;; Client outage recovery
+
+(defvar omnigent-reconnection-test--requests nil
+  "HTTP methods and paths dispatched during the current recovery test.")
+(defvar omnigent-reconnection-test--origin nil
+  "Server URL used by the independent client in the current test.")
+
+(defun omnigent-reconnection-test--direct (method path &optional data)
+  "Make an independent client request with METHOD, PATH, and DATA."
+  (let ((omnigent-server-url omnigent-reconnection-test--origin))
+    (omnigent-mock-test-request method path data)))
+
+(defmacro omnigent-reconnection-test--with-client (&rest body)
+  "Run BODY with isolated client state and recorded real HTTP requests."
+  (declare (indent 0))
+  `(let* ((omnigent-reconnection-test--origin omnigent-server-url)
+          (omnigent-server-url omnigent-server-url)
+          (omnigent-reconnection-test--requests nil)
+          (request-function (symbol-function 'omnigent-transport-request))
+          (omnigent-transport--streams nil) (omnigent-transport--updates nil)
+          (omnigent-sessions nil) (omnigent-sessions-truncated nil)
+          (omnigent-sessions-updates nil) (omnigent-sessions--buffers nil)
+          (omnigent-sessions--refresh-number 0) (omnigent-sessions--revision 0)
+          (omnigent-ui--idle-timer nil) (omnigent-ui--selected-session nil)
+          (omnigent-ui--workspace-cache (make-hash-table :test 'equal))
+          (omnigent-ui--workspace-pending (make-hash-table :test 'equal))
+          (omnigent-ui--workspace-again (make-hash-table :test 'equal))
+          (omnigent-ui--workspace-visible nil) (omnigent-ui--workspace-closed nil))
+     (cl-letf (((symbol-function 'omnigent-transport-request)
+                (lambda (method path callback &optional data)
+                  (push `((method . ,method) (path . ,path)) omnigent-reconnection-test--requests)
+                  (funcall request-function method path callback data))))
+       (unwind-protect
+           (save-window-excursion
+             ;; Exercise watch restoration and the on-open list refresh, not idle polling.
+             (omnigent-sessions-start)
+             ,@body)
+         (omnigent-disconnect)))))
+
+(defun omnigent-reconnection-test--disconnect ()
+  "Close client connections and defer retries until the test's recovery barrier."
+  ;; Keep retries outside the 30-second wait even if close callbacks are slow.
+  (cl-letf (((symbol-function 'omnigent-transport--reconnect-delay) (lambda (_) 60)))
+    (dolist (stream (copy-sequence omnigent-transport--streams))
+      (when (process-live-p (omnigent-stream-process stream))
+	(delete-process (omnigent-stream-process stream))))
+    (dolist (updates omnigent-transport--updates)
+      (when (omnigent-session-updates-websocket updates)
+	(websocket-close (omnigent-session-updates-websocket updates))))
+    (omnigent-functional-wait "Client connection close callbacks did not finish"
+			      (and (cl-every (lambda (stream) (null (omnigent-stream-process stream)))
+					     omnigent-transport--streams)
+				   (cl-every (lambda (updates) (null (omnigent-session-updates-websocket updates)))
+					     omnigent-transport--updates)))
+    (dolist (stream omnigent-transport--streams)
+      (when (timerp (omnigent-stream-timer stream))
+	(cancel-timer (omnigent-stream-timer stream)))
+      (setf (omnigent-stream-timer stream) nil))
+    (dolist (updates omnigent-transport--updates)
+      (when (timerp (omnigent-session-updates-timer updates))
+	(cancel-timer (omnigent-session-updates-timer updates)))
+      (setf (omnigent-session-updates-timer updates) nil))))
+
+(defun omnigent-reconnection-test--reconnect ()
+  "Run the deferred connection retries after the test's outage barrier."
+  (mapc #'omnigent-transport--updates-connect omnigent-transport--updates)
+  (mapc #'omnigent-transport--stream-connect (copy-sequence omnigent-transport--streams)))
+
+(defun omnigent-reconnection-test--open (id)
+  "Open ID and wait for both snapshot completion and live stream traffic."
+  (let ((buffer (omnigent-functional-open id)))
+    (omnigent-functional-wait "Conversation never became editable"
+			      (not (buffer-local-value 'buffer-read-only buffer)))
+    buffer))
+
+(defun omnigent-reconnection-test--composer (buffer)
+  "Return BUFFER's composer without text properties."
+  (with-current-buffer buffer
+    (buffer-substring-no-properties omnigent-conversation--prompt-start (point-max))))
+
+(defun omnigent-reconnection-test--assert-history (id buffer)
+  "Compare BUFFER's committed IDs, order, types, and content with REST for ID."
+  (let* ((reply (omnigent-reconnection-test--direct
+                 "GET" (omnigent-transport--session-path id "/items?limit=1000&order=asc")))
+         (items (append (alist-get 'data (cdr reply)) nil)))
+    (should (= (car reply) 200))
+    (with-current-buffer buffer
+      (should (equal omnigent-conversation--order
+                     (mapcar (lambda (item) (alist-get 'id item)) items)))
+      (should (= (hash-table-count omnigent-conversation--items) (length items)))
+      (dolist (item items)
+        (let ((rendered (gethash (alist-get 'id item) omnigent-conversation--items))
+              (expected (append item (alist-get 'data item))))
+          (should (equal (alist-get 'type rendered) (alist-get 'type expected)))
+          (should (equal (alist-get 'role rendered) (alist-get 'role expected)))
+          (should (equal (omnigent-conversation--text rendered)
+                         (omnigent-conversation--text expected))))))))
+
+(defun omnigent-reconnection-test--read-count (id)
+  "Count dispatched snapshot and history requests for session ID."
+  (cl-count-if
+   (lambda (request)
+     (and (equal (alist-get 'method request) "GET")
+          (string-prefix-p (omnigent-transport--session-path id) (alist-get 'path request))
+          (not (equal (alist-get 'path request) (omnigent-transport--session-path id "/stream")))))
+   omnigent-reconnection-test--requests))
+
+(ert-deftest omnigent-reconnection-running-turn-recovers-in-place ()
+  "Let a task finish during a client outage, then recover once without resending."
+  (omnigent-reconnection-test--with-client
+   (let* ((id (omnigent-integration-create-session t))
+          (marker (omnigent-functional-marker))
+          (answer (concat "Recovered answer " marker))
+          (buffer (omnigent-reconnection-test--open id)))
+     (unwind-protect
+         (progn
+           (omnigent-mock-configure marker `[((text . ,answer) (block . t))])
+           (omnigent-functional-send buffer marker)
+           (omnigent-functional-wait "Turn did not reach the model gate"
+				     (eq (alist-get 'pending (cdr (omnigent-mock-request "GET" "/gate/pending"))) t))
+           (with-current-buffer buffer (insert "unsent recovery draft"))
+           (omnigent-reconnection-test--disconnect)
+           (omnigent-functional-wait "Client did not detect its closed stream"
+				     (buffer-local-value 'buffer-read-only buffer))
+           (omnigent-mock-gate-release)
+           (omnigent-functional-wait "Remote task did not finish while client was offline"
+				     (let ((omnigent-server-url omnigent-reconnection-test--origin))
+				       (and (omnigent-functional-exchange-stored-p id marker answer)
+					    (omnigent-functional-status-p id "idle"))))
+           (should-not (cl-find answer (omnigent-functional-items buffer)
+                                :key #'omnigent-conversation--text :test #'equal))
+           (omnigent-reconnection-test--reconnect)
+           (omnigent-functional-wait "Conversation did not recover in place"
+				     (and (not (buffer-local-value 'buffer-read-only buffer))
+					  (cl-find answer (omnigent-functional-items buffer)
+						   :key #'omnigent-conversation--text :test #'equal)
+					  (equal (alist-get 'status
+							    (cl-find id omnigent-sessions
+								     :key (lambda (row) (alist-get 'id row))
+								     :test #'equal))
+						 "idle")))
+           (should (eq buffer (omnigent-sessions-buffer id)))
+           (should (equal (omnigent-reconnection-test--composer buffer) "unsent recovery draft"))
+           (omnigent-reconnection-test--assert-history id buffer)
+           (should (= 1 (cl-count-if
+                         (lambda (request)
+                           (and (equal (alist-get 'method request) "POST")
+                                (equal (alist-get 'path request)
+                                       (omnigent-transport--session-path id "/events"))))
+                         omnigent-reconnection-test--requests))))
+       (omnigent-mock-gate-release)))))
+
+(ert-deftest omnigent-reconnection-history-failure-requires-manual-reopen ()
+  "A failed history page freezes a live conversation until it is closed and reopened."
+  (omnigent-reconnection-test--with-client
+   (let* ((id (omnigent-integration-create-session))
+          (buffer (omnigent-reconnection-test--open id))
+          (stream (buffer-local-value 'omnigent-conversation--stream buffer))
+          messages before failed
+          (original-request (symbol-function 'omnigent-transport-request))
+          (original-message (symbol-function 'message)))
+     (with-current-buffer buffer
+       (insert "copy this draft before closing")
+       (setq before (buffer-substring-no-properties (point-min) (point-max))))
+     (cl-letf (((symbol-function 'omnigent-transport-request)
+                (lambda (method path callback &optional data)
+                  (if (and (not failed) (equal method "GET")
+                           (string-prefix-p (omnigent-transport--session-path id "/items") path))
+                      (progn
+                        (setq failed t)
+                        (push `((method . ,method) (path . ,path)) omnigent-reconnection-test--requests)
+                        (funcall callback 503 '((detail . "Injected history read failure"))))
+                    (funcall original-request method path callback data))))
+               ((symbol-function 'message)
+                (lambda (format-string &rest args)
+                  (when format-string
+                    (push (apply #'format format-string args) messages))
+                  (apply original-message format-string args))))
+       (omnigent-transport-refresh-session-stream stream)
+       (omnigent-functional-wait "Failed snapshot did not invalidate its conversation"
+				 (buffer-local-value 'omnigent-conversation--invalid buffer)))
+     (should (cl-some (lambda (text)
+                        (and (string-match-p "503" text)
+                             (string-match-p "Injected history read failure" text)
+                             (string-match-p "Copy any drafts" text))) messages))
+     (with-current-buffer buffer
+       (should buffer-read-only)
+       (should (equal before (buffer-substring-no-properties (point-min) (point-max))))
+       (should-error (omnigent-conversation-send) :type 'user-error))
+     (should (omnigent-stream-stopped stream))
+     (should-not (process-live-p (omnigent-stream-process stream)))
+     (should-not (omnigent-stream-timer stream))
+     (should-not (omnigent-stream-watchdog stream))
+     (should-not (omnigent-stream-snapshot-active stream))
+     (let ((count (omnigent-reconnection-test--read-count id)))
+       (omnigent-transport-refresh-session-stream stream)
+       (omnigent-transport--stream-watchdog stream (omnigent-stream-attempt stream))
+       (omnigent-conversation-open id)
+       (should (eq (current-buffer) buffer))
+       (should (= count (omnigent-reconnection-test--read-count id))))
+     (kill-buffer buffer)
+     (setq buffer (omnigent-reconnection-test--open id))
+     (should-not (eq stream (buffer-local-value 'omnigent-conversation--stream buffer)))
+     (should-not (buffer-local-value 'omnigent-conversation--invalid buffer))
+     (should (equal (omnigent-reconnection-test--composer buffer) "")))))
+
+(ert-deftest omnigent-reconnection-silent-sockets-recover-once ()
+  "Detect silent open SSE and WebSocket sockets and retain one connection per handle."
+  (omnigent-reconnection-test--with-client
+   (let* ((id (omnigent-integration-create-session))
+          (buffer (omnigent-reconnection-test--open id))
+          (stream (buffer-local-value 'omnigent-conversation--stream buffer))
+          (updates omnigent-sessions-updates)
+          (process (omnigent-stream-process stream))
+          (attempt (omnigent-stream-attempt stream))
+          (updates-attempt (omnigent-session-updates-attempt updates))
+          websocket states
+          (state-callback (omnigent-stream-state-callback stream)))
+     (omnigent-functional-wait "WebSocket did not open"
+			       (omnigent-session-updates-connected updates))
+     (setq websocket (omnigent-session-updates-websocket updates))
+     (setf (omnigent-stream-state-callback stream)
+           (lambda (state) (push state states) (funcall state-callback state)))
+     (set-process-filter process #'ignore)
+     (set-process-filter (websocket-conn websocket) #'ignore)
+     (should (process-live-p process))
+     (should (websocket-openp (omnigent-session-updates-websocket updates)))
+     ;; Age only the faulted connections; replacements keep normal heartbeat margins.
+     (let ((expired (- (float-time) omnigent-transport-inactivity-timeout 1)))
+       (setf (omnigent-stream-last-activity stream) expired
+             (omnigent-session-updates-last-activity updates) expired))
+     (omnigent-functional-wait "Silent connections did not recover through their watchdogs"
+			       (and (> (omnigent-stream-attempt stream) attempt)
+				    (> (omnigent-session-updates-attempt updates) updates-attempt)
+				    (omnigent-session-updates-connected updates)
+				    (not (buffer-local-value 'buffer-read-only buffer))))
+     (should (memq 'disconnected states))
+     (should-not (process-live-p process))
+     (should-not (eq process (omnigent-stream-process stream)))
+     (should-not (process-live-p (websocket-conn websocket)))
+     (should-not (omnigent-stream-timer stream))
+     (should-not (omnigent-session-updates-timer updates))
+     (should (= 1 (length omnigent-transport--streams)))
+     (should (= 1 (length omnigent-transport--updates)))
+     (should (process-live-p (omnigent-stream-process stream)))
+     (should (websocket-openp (omnigent-session-updates-websocket updates))))))
+
+(ert-deftest omnigent-reconnection-offline-inputs-elicitations-and-session-list ()
+  "Recover consumed inputs, resolved requests, preserved drafts, and session inventory."
+  (omnigent-reconnection-test--with-client
+   (let* ((id (omnigent-integration-create-session t))
+          (approval (omnigent-integration-create-session t))
+          (keep (omnigent-integration-create-session t))
+          (removed (omnigent-integration-create-session))
+          (buffer (omnigent-reconnection-test--open id))
+          (approval-buffer (omnigent-reconnection-test--open approval))
+          (keep-buffer (omnigent-reconnection-test--open keep))
+          (removed-buffer (omnigent-reconnection-test--open removed))
+          (first (omnigent-functional-marker)) (second (omnigent-functional-marker))
+          (answer (concat "Consumed offline " second))
+          request-id keep-id created)
+     (unwind-protect
+         (progn
+           (omnigent-functional-fixture-turn approval-buffer "permission-write")
+           (omnigent-functional-wait "Approval did not arrive"
+				     (with-current-buffer approval-buffer (omnigent-conversation-elicitations)))
+           (omnigent-functional-fixture-turn keep-buffer "permission-write")
+           (omnigent-functional-wait "Second approval did not arrive"
+				     (with-current-buffer keep-buffer (omnigent-conversation-elicitations)))
+           (setq request-id (with-current-buffer approval-buffer
+                              (alist-get 'elicitation_id (car (omnigent-conversation-elicitations))))
+                 keep-id (with-current-buffer keep-buffer
+                           (alist-get 'elicitation_id (car (omnigent-conversation-elicitations)))))
+           (with-current-buffer keep-buffer
+             (let ((draft (omnigent-conversation-elicitation-draft keep-id)))
+               (puthash "unsent" "keep elicitation draft" draft)
+               (omnigent-conversation-elicitation-set-draft keep-id draft)))
+           (omnigent-mock-configure first [((text . "first answer") (block . t))])
+           (omnigent-mock-configure second `[((text . ,answer))])
+           (omnigent-functional-send buffer first)
+           (omnigent-functional-wait "First input did not reach the gate"
+				     (eq (alist-get 'pending (cdr (omnigent-mock-request "GET" "/gate/pending"))) t))
+           (omnigent-functional-send buffer second)
+           (omnigent-functional-wait "Follow-up was not represented as pending"
+				     (buffer-local-value 'omnigent-conversation--pending-inputs buffer))
+           (dolist (target (list buffer approval-buffer keep-buffer))
+             (with-current-buffer target (insert "unrelated composer draft")))
+           (let ((attempt (omnigent-session-updates-attempt omnigent-sessions-updates))
+                 (watch (sort (copy-sequence
+                               (omnigent-session-updates-session-ids omnigent-sessions-updates))
+                              #'string<)))
+             (omnigent-reconnection-test--disconnect)
+             (omnigent-functional-wait "Open conversations did not become read-only"
+				       (cl-every (lambda (target) (buffer-local-value 'buffer-read-only target))
+						 (list buffer approval-buffer keep-buffer)))
+             (should (= 202 (car (omnigent-reconnection-test--direct
+                                  "POST" (omnigent-transport--session-path
+                                          approval (concat "/elicitations/" request-id "/resolve"))
+                                  '(("action" . "accept"))))))
+             (omnigent-mock-gate-release)
+             (omnigent-functional-wait "Queued input did not commit while client was offline"
+				       (let ((omnigent-server-url omnigent-reconnection-test--origin))
+					 (and (omnigent-functional-exchange-stored-p id second answer)
+					      (omnigent-functional-status-p id "idle"))))
+             (should (memq (car (omnigent-reconnection-test--direct
+                                 "DELETE" (omnigent-transport--session-path removed))) '(200 204)))
+             (setq created (let ((omnigent-server-url omnigent-reconnection-test--origin))
+                             (omnigent-integration-create-session)))
+             (omnigent-reconnection-test--reconnect)
+             (omnigent-functional-wait "Watch restoration and REST inventory refresh did not recover"
+				       (and (> (omnigent-session-updates-attempt omnigent-sessions-updates) attempt)
+					    (cl-find created omnigent-sessions :key (lambda (row) (alist-get 'id row))
+						     :test #'equal)
+					    (not (cl-find removed omnigent-sessions :key (lambda (row) (alist-get 'id row))
+							  :test #'equal))
+					    (cl-every (lambda (target) (not (buffer-local-value 'buffer-read-only target)))
+						      (list buffer approval-buffer keep-buffer))))
+             (should (equal watch (sort (copy-sequence
+                                         (omnigent-session-updates-session-ids omnigent-sessions-updates))
+                                        #'string<))))
+           (omnigent-functional-wait "Removed session did not freeze"
+				     (buffer-local-value 'omnigent-conversation--invalid removed-buffer))
+           (should-not (buffer-local-value 'omnigent-conversation--pending-inputs buffer))
+           (should-not (with-current-buffer approval-buffer (omnigent-conversation-elicitations)))
+           (with-current-buffer keep-buffer
+             (should (gethash keep-id omnigent-conversation--elicitations))
+             (should (equal (gethash "unsent" (omnigent-conversation-elicitation-draft keep-id))
+                            "keep elicitation draft")))
+           (dolist (target (list buffer approval-buffer keep-buffer))
+             (should (equal (omnigent-reconnection-test--composer target) "unrelated composer draft")))
+           (omnigent-reconnection-test--assert-history id buffer))
+       (omnigent-mock-gate-release)
+       (when keep-id
+         (omnigent-reconnection-test--direct
+          "POST" (omnigent-transport--session-path keep (concat "/elicitations/" keep-id "/resolve"))
+          '(("action" . "decline"))))))))
+
+(ert-deftest omnigent-reconnection-late-snapshot-after-close-or-server-change ()
+  "Release a real GET result after buffer close or server selection without revival."
+  (dolist (transition '(close server))
+    (omnigent-reconnection-test--with-client
+     (let* ((id (omnigent-integration-create-session))
+            (other (omnigent-integration-create-session))
+            (buffer (omnigent-reconnection-test--open id))
+            (stream (buffer-local-value 'omnigent-conversation--stream buffer))
+            (generation omnigent-transport--generation)
+            (path (omnigent-transport--session-path id "/items"))
+            (callback (omnigent-stream-snapshot-callback stream))
+            (original-request (symbol-function 'omnigent-transport-request))
+            (deliveries 0) held replacement)
+       (setf (omnigent-stream-snapshot-callback stream)
+             (lambda (status body) (cl-incf deliveries) (funcall callback status body)))
+       (cl-letf (((symbol-function 'omnigent-transport-request)
+                  (lambda (method requested-path on-result &optional data)
+                    (funcall original-request method requested-path
+                             (if (and (equal method "GET") (string-prefix-p path requested-path))
+                                 (lambda (status body)
+                                   (should (= status 200))
+                                   (setq held (lambda () (funcall on-result status body))))
+                               on-result)
+                             data))))
+         (omnigent-transport-refresh-session-stream stream)
+         (omnigent-functional-wait "History GET did not reach the callback barrier" held))
+       (if (eq transition 'close)
+           (progn
+             (kill-buffer buffer)
+             (setq replacement (omnigent-reconnection-test--open id)))
+         ;; Change the URL association without starting a second test backend.
+         (let ((url (url-generic-parse-url omnigent-reconnection-test--origin)))
+           (setf (url-host url) (if (equal (url-host url) "localhost") "127.0.0.1" "localhost"))
+           (omnigent-connect (url-recreate-url url)))
+         (should (> omnigent-transport--generation generation))
+         (setq replacement (omnigent-reconnection-test--open other)))
+       (with-current-buffer replacement (insert "new association draft"))
+       (funcall held)
+       (should-not (buffer-live-p buffer))
+       (should (= deliveries 0))
+       (should (omnigent-stream-stopped stream))
+       (should-not (omnigent-stream-timer stream))
+       (should-not (omnigent-stream-watchdog stream))
+       (should-not (omnigent-stream-snapshot-active stream))
+       (should-not (process-live-p (omnigent-stream-process stream)))
+       (should (equal (omnigent-reconnection-test--composer replacement) "new association draft"))
+       (should-not (buffer-local-value 'buffer-read-only replacement))
+       (should (= 1 (length omnigent-transport--streams)))))))
 
 (provide 'omnigent-functional-tests)
 ;;; omnigent-functional-tests.el ends here

@@ -191,8 +191,7 @@
     (dolist (id (append (alist-get 'ids frame) nil))
       (when-let* ((buffer (omnigent-sessions-buffer id)))
         (with-current-buffer buffer
-          (omnigent-conversation--close)
-          (setq buffer-read-only t omnigent-conversation--permission-read-only nil)
+          (omnigent-conversation--freeze)
           (dolist (widget omnigent-ui--widgets) (widget-apply widget :deactivate))))
       (remhash id omnigent-ui--workspace-cache)
       (remhash id omnigent-ui--workspace-pending)
