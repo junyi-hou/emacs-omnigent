@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        emacs: ['30.2', '31.1']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: purcell/setup-emacs@v7
+        with:
+          version: ${{ matrix.emacs }}
+      - run: make unit-test
+      - run: make integration-test HARNESS=claude-native
+      - run: make integration-test HARNESS=codex-native
