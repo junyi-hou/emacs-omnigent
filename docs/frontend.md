@@ -9,11 +9,12 @@ handling.
 
 ## Arrangement
 
-Use a chat-centered interface. Show one session per conversation buffer in the
-main window. Offer a session list and a workspace view as optional left side
-windows. When both are open, stack the session list above the workspace view.
-Users can show or hide each view. Do not merge transcripts. Follow Emacs key
-binding conventions across all views.
+Use a chat-centered interface. Show one session per conversation buffer in the main
+window. Offer a session list and a workspace view as optional left side windows. When
+both are open, stack the session list above the workspace view.  Open the session list
+after the first successful server connection. Users can show or hide each view. Do not
+reopen the session list on a connection retry. Do not merge transcripts. Follow Emacs
+key binding conventions across all views.
 
 ## Session list
 

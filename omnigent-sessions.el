@@ -188,14 +188,19 @@ Signal a user error if ID already has a different live buffer or the
    omnigent-sessions-updates nil
    omnigent-sessions--buffers nil))
 
-(defun omnigent-sessions-start ()
-  "Start the session update connection and load the list."
+(defun omnigent-sessions-start (&optional on-first-open)
+  "Start session updates and invoke ON-FIRST-OPEN after the first connection."
   (setq omnigent-sessions-updates
         (omnigent-transport-start-session-updates
          #'omnigent-sessions--frame
          (lambda (error)
            (omnigent-sessions--error "Session updates" error))
-         #'omnigent-sessions-refresh))
+         (lambda ()
+           (when on-first-open
+             (let ((callback on-first-open))
+               (setq on-first-open nil)
+               (funcall callback)))
+           (omnigent-sessions-refresh))))
   (omnigent-sessions-refresh))
 
 (defun omnigent-sessions--filesystem-path

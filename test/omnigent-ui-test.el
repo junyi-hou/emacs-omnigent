@@ -609,6 +609,32 @@
         (when (buffer-live-p buffer)
           (kill-buffer buffer))))))
 
+(ert-deftest omnigent-ui-session-list-opens-on-first-connection ()
+  "Open the session list only after the first successful connection."
+  (save-window-excursion
+    (let ((omnigent-sessions-updates nil)
+          (omnigent-ui--idle-timer nil)
+          opened)
+      (unwind-protect
+          (cl-letf (((symbol-function
+                      'omnigent-transport-start-session-updates)
+                     (lambda (_frame _error callback)
+                       (setq opened callback)
+                       'updates))
+                    ((symbol-function 'omnigent-sessions-refresh)
+                     #'ignore)
+                    ((symbol-function 'run-with-idle-timer) #'ignore))
+            (omnigent-ui-start)
+            (should-not (get-buffer-window "*omnigent-sessions*"))
+            (funcall opened)
+            (should (get-buffer-window "*omnigent-sessions*"))
+            (omnigent-ui-sessions)
+            (should-not (get-buffer-window "*omnigent-sessions*"))
+            (funcall opened)
+            (should-not (get-buffer-window "*omnigent-sessions*")))
+        (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
+          (kill-buffer buffer))))))
+
 (ert-deftest omnigent-ui-idle-timer-stops-on-reset ()
   "Start one ten-second idle timer even with hidden views and cancel on reset."
   (let ((omnigent-ui--idle-timer nil)
