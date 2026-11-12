@@ -649,7 +649,13 @@
                  (setq late-callback directory-callback)
                  "repo")))
       (omnigent-sessions--select-workspace
-       omnigent-transport--generation "host" "Host" #'ignore 200 nil)
+       omnigent-transport--generation
+       "host"
+       "Host"
+       #'ignore
+       nil
+       200
+       nil)
       (cl-letf (((symbol-function 'active-minibuffer-window)
                  (lambda ()
                    (ert-fail
@@ -845,7 +851,7 @@
                  (lambda (_method _path cb &optional _data)
                    (funcall cb 200 body))))
         (omnigent-sessions--select-host
-         omnigent-transport--generation #'ignore 200 body)
+         omnigent-transport--generation #'ignore nil 200 body)
         (omnigent-sessions--select-agent
          omnigent-transport--generation '("host" . "/repo") 200 body)
         (omnigent-sessions--workspace-directories
@@ -874,6 +880,7 @@
        "host"
        "Host"
        (lambda (_) (setq selected t))
+       nil
        200
        nil)
       (should-not selected)
@@ -925,3 +932,34 @@
 
 (provide 'omnigent-sessions-test)
 ;;; omnigent-sessions-test.el ends here
+
+(ert-deftest omnigent-sessions-workspace-uses-matching-host-default ()
+  "Offer the session workspace only on its execution host."
+  (dolist (host '("host-a" "host-b"))
+    (let (default)
+      (cl-letf (((symbol-function
+                  'omnigent-sessions--workspace-directories)
+                 (lambda (_host _path callback &rest _)
+                   (funcall callback 200 nil)))
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt
+                          _table
+                          _predicate
+                          _require
+                          _initial
+                          _history
+                          value
+                          &rest
+                          _)
+                   (setq default value)
+                   "/chosen"))
+                ((symbol-function 'omnigent-transport-request)
+                 #'ignore))
+        (omnigent-sessions--select-host
+         omnigent-transport--generation
+         #'ignore
+         '((host_id . "host-a") (workspace . "/original"))
+         200
+         `((hosts . [((host_id . ,host) (status . "online"))])))
+        (should
+         (equal default (and (equal host "host-a") "/original")))))))

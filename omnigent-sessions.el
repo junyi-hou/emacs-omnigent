@@ -271,18 +271,19 @@ AFTER and DIRECTORIES carry the cursor and entries across listing pages."
       input
     (concat "~/" input)))
 
-(defun omnigent-sessions--read-workspace (callback)
+(defun omnigent-sessions--read-workspace (callback &optional session)
   "Select a host and workspace asynchronously, then call CALLBACK with their cons.
 Use the sole online host, or prompt when several hosts are online.
+Use SESSION as a workspace default when its host matches.
 Report discovery failures through `omnigent-sessions-error-hook'."
   (message "Reading execution hosts...")
   (omnigent-transport-request
    "GET" "/v1/hosts"
    (apply-partially #'omnigent-sessions--select-host
-                    omnigent-transport--generation callback)))
+                    omnigent-transport--generation callback session)))
 
 (defun omnigent-sessions--select-host
-    (generation callback status body)
+    (generation callback session status body)
   "Present hosts from BODY for GENERATION and continue through CALLBACK."
   (cond
    ((not (omnigent-transport-success-p status))
@@ -317,12 +318,16 @@ Report discovery failures through `omnigent-sessions-error-hook'."
           (message "Reading workspaces on %s..." choice)
           (omnigent-sessions--workspace-directories
            host-id ""
-           (apply-partially #'omnigent-sessions--select-workspace
-                            generation host-id choice callback))))))))
+           (apply-partially
+            #'omnigent-sessions--select-workspace
+            generation host-id choice callback
+            (and (equal host-id (alist-get 'host_id session))
+                 (alist-get 'workspace session))))))))))
 
 (defun omnigent-sessions--select-workspace
-    (generation host-id choice callback status directories)
+    (generation host-id choice callback default status directories)
   "Prompt with DIRECTORIES for HOST-ID and CHOICE after successful STATUS.
+Use DEFAULT as the workspace default.
 Continue through CALLBACK after validating the path on GENERATION's server."
   (if (not (omnigent-transport-success-p status))
       (omnigent-sessions--error "List workspaces" status directories)
@@ -401,6 +406,8 @@ Continue through CALLBACK after validating the path on GENERATION's server."
              nil
              nil
              nil
+             nil
+             default
              t)))
         (setq active nil))
       (unless (= generation omnigent-transport--generation)

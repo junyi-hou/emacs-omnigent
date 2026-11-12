@@ -53,9 +53,9 @@ online, prompt with their names and IDs. If none are online, report the problem.
 Do not assume that a host runs on the server machine or the Emacs machine.
 
 Always prompt for the workspace with a `find-file`-style `completing-read` table.
-Use no initial directory, default selection, or prefix argument. Query the selected
-host's filesystem through the server; do not inspect the Emacs filesystem. Empty
-input has no default and cannot create a session. Completion initially lists the
+Use the workspace of the session at point as the default when its host matches.
+Otherwise use no default. Query the selected
+host's filesystem through the server; do not inspect the Emacs filesystem. Empty input selects that default when available. Otherwise it cannot create a session. Completion initially lists the
 host's home directory. Relative input resolves under that home; absolute and
 host-relative tilde paths retain their meaning on the selected host.
 

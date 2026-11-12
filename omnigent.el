@@ -130,12 +130,23 @@ Run `omnigent-sessions-change-hook' on success, or the error hook on failure."
 ;;;###autoload
 (defun omnigent-sessions-create ()
   "Create a session with asynchronously fetched host, workspace, and agent choices.
-Prompt for a workspace and optional title without a default workspace.
+Use the session at point as the workspace default when its host matches.
 Report failures through `omnigent-sessions-error-hook'."
   (interactive)
-  (omnigent-sessions--read-workspace
-   (apply-partially #'omnigent-sessions--workspace-selected
-                    omnigent-transport--generation)))
+  (let* ((id (omnigent-ui--session-id-at-point))
+         (session
+          (and id
+               (cl-find
+                id
+                omnigent-sessions
+                :key (lambda (row) (alist-get 'id row))
+                :test #'equal)))
+         (callback
+          (apply-partially #'omnigent-sessions--workspace-selected
+                           omnigent-transport--generation)))
+    (if session
+        (omnigent-sessions--read-workspace callback session)
+      (omnigent-sessions--read-workspace callback))))
 
 (define-derived-mode
  omnigent-conversation-mode
