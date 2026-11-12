@@ -65,8 +65,9 @@ filesystem request before creation, including paths the user types directly.
 Send the host ID and native workspace path in the create request. Reject TRAMP
 syntax rather than send it to the agent. Abort if the server changes during selection.
 The selection helpers live in `omnigent-sessions.el`. Fetch hosts, directory
-listings, and agents asynchronously. Show an echo-area message while each
-request runs. A response callback presents the next prompt or processes a
+listings, and agents asynchronously. Show an echo-area message while each request
+runs, except during directory completion. A response callback presents the next prompt
+or processes a
 failure. Directory completion uses cached results and refreshes when an
 asynchronous listing arrives.  Do not wait for network output inside a command
 or completion table.

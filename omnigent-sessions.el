@@ -351,7 +351,6 @@ Continue through CALLBACK after validating the path on GENERATION's server."
                    (when (eq
                           (gethash parent cache 'missing) 'missing)
                      (puthash parent 'pending cache)
-                     (message "Reading directories...")
                      (omnigent-sessions--workspace-directories
                       host-id
                       (if (string-empty-p parent)
@@ -382,7 +381,8 @@ Continue through CALLBACK after validating the path on GENERATION's server."
                                       (file-name-directory
                                        (minibuffer-contents-no-properties))
                                       ""))
-                                  (minibuffer-complete)))))))))
+                                  (run-hooks 'post-command-hook)
+                                  (redisplay)))))))))
                    (let ((entries
                           (gethash parent cache)))
                      (complete-with-action

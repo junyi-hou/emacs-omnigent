@@ -627,8 +627,9 @@
                (lambda () (selected-window)))
               ((symbol-function 'minibuffer-contents-no-properties)
                (lambda () "repo/"))
-              ((symbol-function 'minibuffer-complete)
-               (lambda () (cl-incf updates)))
+              ((symbol-function 'run-hooks)
+               (lambda (&rest _) (cl-incf updates)))
+              ((symbol-function 'redisplay) #'ignore)
               ((symbol-function 'completing-read)
                (lambda (_prompt table &rest _)
                  (should
