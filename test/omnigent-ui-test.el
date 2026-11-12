@@ -853,6 +853,48 @@
              (previous-single-property-change
               (point) 'omnigent-ui-item-id)))))))
 
+(ert-deftest omnigent-ui-transcript-shortened-item-keeps-point ()
+  "Keep point inside its transcript item when that item becomes shorter."
+  (omnigent-ui-test--conversation
+    (omnigent-conversation--snapshot
+     200
+     '((items
+        .
+        [((id . "first") (content . "a long first item"))
+         ((id . "second") (content . "second item"))])
+       (pending_inputs . []) (pending_elicitations . [])))
+    (goto-char (point-min))
+    (search-forward "long first item")
+    (omnigent-conversation--snapshot
+     200
+     '((items
+        .
+        [((id . "first") (content . "x"))
+         ((id . "second") (content . "second item"))])
+       (pending_inputs . []) (pending_elicitations . [])))
+    (should
+     (equal
+      (get-text-property (point) 'omnigent-ui-item-id) "first"))))
+
+(ert-deftest omnigent-ui-transcript-does-not-recenter-reading-point ()
+  "Do not recenter on transcript point when the window reaches the bottom."
+  (save-window-excursion
+    (omnigent-ui-test--conversation
+      (set-window-buffer (selected-window) (current-buffer))
+      (omnigent-conversation--snapshot
+       200
+       '((items . [((id . "first") (content . "text"))])
+         (pending_inputs . [])
+         (pending_elicitations . [])))
+      (goto-char (point-min))
+      (let ((recentered nil))
+        (cl-letf (((symbol-function 'window-end)
+                   (lambda (&rest _) (point-max)))
+                  ((symbol-function 'recenter)
+                   (lambda (&rest _) (setq recentered t))))
+          (omnigent-ui--transcript))
+        (should-not recentered)))))
+
 (ert-deftest omnigent-ui-rejected-edit-does-not-lock-composer ()
   "A rejected transcript edit must not install widget-only editing on the composer."
   (omnigent-ui-test--conversation

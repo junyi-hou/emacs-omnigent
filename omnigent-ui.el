@@ -477,8 +477,12 @@
               (or (next-single-property-change
                    position 'omnigent-ui-item-id)
                   omnigent-ui--request-start)))
-      (min (+ position (or (cadr location) 0))
-           omnigent-ui--request-start))))
+      (if (>= position omnigent-ui--request-start)
+          omnigent-ui--request-start
+        (min (+ position (or (cadr location) 0))
+             (1- (or (next-single-property-change
+                      position 'omnigent-ui-item-id)
+                     omnigent-ui--request-start)))))))
 
 (defun omnigent-ui--fold-button (button)
   "Toggle the fold identified by BUTTON without changing any other fold."
@@ -622,7 +626,7 @@
           (let ((new-start (omnigent-ui--restore-location start))
                 (new-point (omnigent-ui--restore-location position)))
             (set-window-point window new-point)
-            (if bottom
+            (if (and bottom (>= new-point omnigent-ui--request-start))
                 (with-selected-window window
                   (recenter -1))
               (set-window-start window new-start t))))))))
