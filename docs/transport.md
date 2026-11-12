@@ -5,7 +5,8 @@ implemented. Connection setup and request outcome handling remain incomplete. Th
 transport implementation is [omnigent-transport.el](../omnigent-transport.el). The
 existing interactive entry points are in [omnigent.el](../omnigent.el).
 [reconnection.md](reconnection.md) proposes the complete client-outage recovery flow,
-including stale-connection detection, subscription readiness, and snapshot retries.
+including stale-connection detection, the subscription gap, and manual recovery after
+snapshot failure. Automatic snapshot retries are deferred.
 
 Transport owns the input and output protocols and their implementation: server
 connections, requests, response parsing, SSE, and WebSocket frames. It exposes client
@@ -157,7 +158,9 @@ The following transport functions are implemented in `omnigent-transport.el`:
 - `omnigent-transport-refresh-session-stream` requests another snapshot without
   restarting SSE. Call it after the previous snapshot completes. It invokes the
   connection callback before loading, so the conversation buffers live events during the
-  refresh.
+  refresh. The proposed recovery flow enforces one active snapshot operation per handle
+  and coalesces refresh requests received during a read. It does not automatically retry
+  a failed snapshot.
 - `omnigent-transport-start-session-updates`,
   `omnigent-transport-set-session-updates-watch`, and
   `omnigent-transport-stop-session-updates` manage the session-updates WebSocket.

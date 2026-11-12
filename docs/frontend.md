@@ -42,7 +42,12 @@ the current session's title bold without replacing its state face.
 Show failed actions with the action, session title, and available status and
 diagnostics. Follow the [API callback
 design](api-callbacks.md#validation-and-error-presentation) for one-shot
-request-error presentation. Do not mark sessions that lack live updates. Keep open sessions visible by merging
+request-error presentation. Do not mark sessions that lack live updates. Do not add
+stale-state visual indicators in v1. Disconnected or recovering conversations are
+read-only. A failed snapshot leaves its conversation invalid and read-only; report the
+error and ask the user to copy drafts before closing and reopening it to try again. See
+[reconnection.md](reconnection.md) for the recovery lifecycle. Keep open sessions
+visible by merging
 the fetched list with watched sessions. The list
 is a view of server data, not its source. A Transient menu for advanced creation
 options is deferred.

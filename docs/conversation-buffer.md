@@ -81,7 +81,10 @@ representation. Reconcile elicitation requests and resolutions by elicitation ID
 Use the official web frontend as a reference for snapshot and stream reconciliation. Do
 not copy a FIFO fallback that can remove an unrelated pending message when replaying an
 event already represented in the snapshot. If the stream or snapshot fails, report the
-error; do not silently present an empty transcript as complete.
+error; do not silently present an empty transcript as complete. Follow
+[reconnection.md](reconnection.md) for read-only recovery state and snapshot-failure
+invalidation. A failed snapshot stops recovery until the user closes and reopens the
+conversation; it does not trigger an automatic read retry.
 
 A snapshot refresh preserves fold state and point by item ID, and preserves composer
 text and elicitation drafts. Reopening a killed buffer restores only server state, not
@@ -141,7 +144,9 @@ snapshot refreshes. Fold presentation belongs to [frontend.md](frontend.md).
 ## Composer and sending
 
 The composer is enabled unless the conversation is read-only, such as after a session is
-removed. Session status alone does not block typing. Send and interrupt requests follow
+removed, while disconnected or recovering, or after a snapshot failure invalidates the
+buffer. Read-only recovery state also disables send, interrupt, and elicitation actions.
+Session status alone does not block typing. Send and interrupt requests follow
 the [API callback design](api-callbacks.md). Transport delivers outcomes; conversation
 callbacks own draft updates and outcome handling. Keep the draft until a successful
 POST. On failure or uncertain timeout, preserve it and report the outcome. Do not resend
@@ -180,8 +185,10 @@ a potentially accepted message automatically.
   recovered queue. A previously queued message can appear as committed history or be
   absent from the recovered state. Full recovery of earlier client state is not
   required. Preserve composer text across refreshes in an open buffer. If a snapshot
-  fails, keep the visible state and report that it may be stale. Reopening a buffer
-  restores only server state, not local drafts.
+  fails, retain the visible state and drafts as read-only, stop recovery, and report the
+  error. Ask the user to copy drafts before closing and reopening the conversation to
+  try again. Do not automatically retry the snapshot or apply further live events to the
+  invalid buffer. Reopening a buffer restores only server state, not local drafts.
 - **Uncertain sends**: keep the composer draft and show a persistent warning that the
   server may have accepted it. Do not automatically resend it. A failed or uncertain
   send must not appear as confirmed queued input.
