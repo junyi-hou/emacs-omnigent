@@ -216,9 +216,8 @@
           (with-current-buffer buffer
             (should
              (string-match-p
-              (format " | %s | %s | "
-                      omnigent-integration-harness
-                      omnigent-integration-model)
+              (format " | %s | "
+                      (regexp-quote omnigent-integration-model))
               header-line-format))
             (insert
              (omnigent-mock-configure-fixture
@@ -239,9 +238,8 @@
           (with-current-buffer buffer
             (should
              (string-match-p
-              (format " | %s | %s | "
-                      omnigent-integration-harness
-                      omnigent-integration-model)
+              (format " | %s | "
+                      (regexp-quote omnigent-integration-model))
               header-line-format))
             (should
              (= (alist-get

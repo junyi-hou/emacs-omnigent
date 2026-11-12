@@ -117,9 +117,10 @@ for tool headers, `omnigent-ui-reasoning` for reasoning, and `omnigent-ui-error`
 failed status and interrupt markers. Use plain text, not Markdown rendering, in v1. Do
 not add a plan panel in v1.
 
-Show the harness, model, reasoning effort, access mode, and context window usage in the
-conversation header. Show unknown values when the server does not report them. Update
-the header from session snapshots and stream events.
+Show the workspace folder name, role, model, reasoning effort, access mode, and context
+window usage in the conversation header. Do not show the harness or session name in the
+header. The buffer name shows the session name. Show unknown values when the server does
+not report them. Update the header from session snapshots and stream events.
 
 ## Elicitations
 

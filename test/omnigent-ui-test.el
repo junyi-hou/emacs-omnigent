@@ -62,20 +62,24 @@
 (ert-deftest omnigent-ui-conversation-header-tracks-session-data ()
   "Show snapshot settings and update them from partial stream events."
   (omnigent-ui-test--conversation
-    (should (string-prefix-p "Untitled | unknown" header-line-format))
-    (should (eq (get-text-property 0 'face header-line-format) 'diff-header))
+    (should (string-prefix-p "unknown | unknown" header-line-format))
+    (should
+     (eq (get-text-property 0 'face header-line-format) 'diff-header))
     (should
      (equal
       (mapcar
-       #'omnigent-ui--token-count '(10 1000 1001 1200 1000000 1050001))
+       #'omnigent-ui--token-count
+       '(10 1000 1001 1200 1000000 1050001))
       '("10" "1k" "1.1k" "1.2k" "1m" "1.1m")))
     (omnigent-conversation--snapshot
      200
      '((title . "Test session")
+       (workspace . "/srv/project/")
        (harness . "codex-native")
        (llm_model . "model-a")
        (reasoning_effort . "high")
-       (labels . ((omnigent.codex_native.approval_mode . "read-only")))
+       (labels
+        . ((omnigent.codex_native.approval_mode . "read-only")))
        (last_total_tokens . 100)
        (context_window . 1000)
        (items . [])
@@ -84,24 +88,31 @@
     (should
      (equal
       header-line-format
-      "Test session | codex-native | model-a | high | read-only | 100 / 1k (10%)"))
-    (omnigent-conversation--event "session.model" '((model . "model-b")))
+      "project | model-a | high | read-only | 100 / 1k (10%)"))
+    (omnigent-conversation--event
+     "session.model" '((model . "model-b")))
     (omnigent-conversation--event
      "session.reasoning_effort" '((reasoning_effort . "low")))
     (omnigent-conversation--event
      "session.codex_approval_mode" '((approval_mode . "full-access")))
-    (omnigent-conversation--event "session.usage" '((context_tokens . 250)))
+    (omnigent-conversation--event
+     "session.usage" '((context_tokens . 250)))
     (should
      (equal
       header-line-format
-      "Test session | codex-native | model-b | low | full-access | 250 / 1k (25%)"))
+      "project | model-b | low | full-access | 250 / 1k (25%)"))
     (omnigent-conversation--event
      "response.completed"
      '((response
         .
         ((model . "agent-name")
-         (usage . ((model . "model-c") (context_tokens . 300) (total_tokens . 900)))))))
-    (should (string-match-p "model-c.*300 / 1k (30%)" header-line-format))
+         (usage
+          .
+          ((model . "model-c")
+           (context_tokens . 300)
+           (total_tokens . 900)))))))
+    (should
+     (string-match-p "model-c.*300 / 1k (30%)" header-line-format))
     (omnigent-conversation--snapshot
      200
      '((last_total_tokens . 42)
@@ -117,7 +128,8 @@
        (pending_elicitations . [])))
     (should (string-match-p "unknown / 4.1k" header-line-format))
     (omnigent-conversation--event
-     "response.completed" '((response . ((usage . ((total_tokens . 512)))))))
+     "response.completed"
+     '((response . ((usage . ((total_tokens . 512)))))))
     (should (string-match-p "512 / 4.1k (12%)" header-line-format))))
 
 (ert-deftest omnigent-ui-prompt-busy-indicator ()
@@ -165,7 +177,7 @@
        (pending_inputs . [])
        (pending_elicitations . [])))
     (should buffer-read-only)
-    (should (string-prefix-p "Untitled [R] |" header-line-format))
+    (should (string-prefix-p "unknown [R] |" header-line-format))
     (should-error (insert "more") :type 'buffer-read-only)
     (should-error (omnigent-conversation-send) :type 'user-error)
     (should-error (omnigent-conversation-interrupt) :type 'user-error)
@@ -177,7 +189,7 @@
        (pending_inputs . [])
        (pending_elicitations . [])))
     (should-not buffer-read-only)
-    (should (string-prefix-p "Untitled [E] |" header-line-format))
+    (should (string-prefix-p "unknown [E] |" header-line-format))
     (should
      (equal
       (buffer-substring-no-properties
@@ -189,7 +201,7 @@
        (items . [])
        (pending_inputs . [])
        (pending_elicitations . [])))
-    (should (string-prefix-p "Untitled [M] |" header-line-format))))
+    (should (string-prefix-p "unknown [M] |" header-line-format))))
 
 (ert-deftest omnigent-ui-transcript-stream-preserves-composer-and-fold
     ()
