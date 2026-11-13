@@ -521,5 +521,16 @@ When EFFORT is nil, prompt with the current model's supported levels."
         (error
          nil)))))
 
+(defun omnigent-ui-workspace-visit-file ()
+  "Visit the changed file at point in its workspace."
+  (interactive)
+  (let ((id omnigent-ui--workspace-id)
+        (path
+         (get-text-property
+          (line-beginning-position) 'omnigent-ui-path)))
+    (unless (and id (stringp path))
+      (user-error "No changed file at point"))
+    (find-file (omnigent-ui--workspace-filename id path))))
+
 (provide 'omnigent)
 ;;; omnigent.el ends here

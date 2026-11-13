@@ -4,6 +4,36 @@
 (require 'cl-lib)
 (require 'omnigent-workspace)
 
+(ert-deftest omnigent-workspace-host-address-mapping ()
+  "Map host IDs to local or SSH workspace access."
+  (let ((omnigent-server-url "http://localhost:6767")
+        (omnigent-host-address-function (lambda (_id) "localhost")))
+    (should (eq (omnigent-workspace-host-mapping "host") 'local))
+    (let ((omnigent-server-url "http://server.example:6767"))
+      (should
+       (equal
+        (omnigent-workspace-host-mapping "host")
+        "/ssh:server.example:")))
+    (let ((omnigent-host-address-function
+           (lambda (id) (concat id ".example"))))
+      (should
+       (equal
+        (omnigent-workspace-host-mapping "runner")
+        "/ssh:runner.example:")))
+    (should-error (omnigent-workspace-host-mapping nil))))
+
+(ert-deftest omnigent-workspace-default-host-address ()
+  "Use the server host for local and remote default mappings."
+  (let ((omnigent-host-address-function
+         (default-value 'omnigent-host-address-function)))
+    (let ((omnigent-server-url "http://localhost:6767"))
+      (should (eq (omnigent-workspace-host-mapping "host") 'local)))
+    (let ((omnigent-server-url "http://server.example:6767"))
+      (should
+       (equal
+        (omnigent-workspace-host-mapping "host")
+        "/ssh:server.example:")))))
+
 (ert-deftest omnigent-workspace-diff-and-failures ()
   "Check diff generation, URL encoding, and request failures."
   (let (requests

@@ -10,6 +10,21 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'omnigent-transport)
+(require 'url-parse)
+
+(defun omnigent-workspace-host-mapping (host-id)
+  "Return the local marker or SSH prefix for HOST-ID."
+  (unless (stringp host-id)
+    (error "Workspace host ID is unavailable"))
+  (let ((address (funcall omnigent-host-address-function host-id)))
+    (unless (and (stringp address) (not (string-empty-p address)))
+      (error "Invalid workspace host address"))
+    (when (equal address "localhost")
+      (setq address
+            (url-host (url-generic-parse-url omnigent-server-url))))
+    (if (member address '("localhost" "127.0.0.1" "::1" "[::1]"))
+        'local
+      (format "/ssh:%s:" address))))
 
 (defun omnigent-workspace--path (session-id suffix)
   "Return the environment resource path for SESSION-ID and SUFFIX."

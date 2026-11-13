@@ -113,13 +113,11 @@ deleted file. Omnigent does not distinguish that failure from a new file.
 
 - [ ] Use a Markdown parser to render conversation messages.
 - [ ] Autocomplete (via capf) file (@) and slash commands
-- [ ] Change model/effort/permission mode
+- [ ] Change permission mode
 - [ ] Design client-to-server retry for requests with no confirmed response, including
       messages and elicitation responses the server may already have accepted.
 - [ ] Support workspace diffs for non-Git workspaces.
 - [ ] Integrate Magit for staging and committing workspace changes.
-- [ ] Design safe workspace file visiting for local and remote execution hosts,
-      including how to identify the host and avoid opening a file on the wrong host.
 - [ ] Design centralized authentication for remote servers, including token expiration.
 - [ ] Fetch sessions incrementally: load 20 first, then let the user fetch more.
 - [ ] Fetch older conversation items on demand.

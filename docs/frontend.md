@@ -182,8 +182,10 @@ each time a diff is opened. Show the diff in a separate buffer. Use
 available. If a diff request fails, do not report the failure; leave any
 existing diff buffer unchanged. Reuse the existing buffer for the same session
 and file, replacing its contents only after a successful fetch.  Likewise, reuse
-one combined-diff buffer per session. Keep a separate workspace buffer per
-session. After the new conversation opens successfully, or the user selects an
+one combined-diff buffer per session. Set the diff buffer's default directory to the
+mapped workspace root. Use `f` on a file row to visit the file through the same mapping.
+Keep a separate workspace buffer per session. After the new conversation opens
+successfully, or the user selects an
 existing conversation through Emacs buffer commands, replace the panel contents
 with the selected session's cached list, or clear it if there is no cached
 list. Keep the last selected session's workspace panel when another,

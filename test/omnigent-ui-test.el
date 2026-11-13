@@ -784,6 +784,43 @@
         (when (buffer-live-p buffer)
           (kill-buffer buffer))))))
 
+(ert-deftest omnigent-ui-workspace-file-and-diff-directory ()
+  "Use the mapped workspace root for file visits and diff buffers."
+  (save-window-excursion
+    (let ((omnigent-ui--workspace-cache
+           (make-hash-table :test 'equal))
+          (omnigent-sessions
+           '(((id . "mapping") (host_id . "runner"))))
+          (omnigent-host-address-function
+           (lambda (_id) "runner.example"))
+          visited
+          buffer)
+      (puthash
+       "mapping"
+       '((root . "/workspace"))
+       omnigent-ui--workspace-cache)
+      (unwind-protect
+          (progn
+            (with-temp-buffer
+              (setq omnigent-ui--workspace-id "mapping")
+              (insert
+               (propertize "file" 'omnigent-ui-path "src/file"))
+              (goto-char (point-min))
+              (cl-letf (((symbol-function 'find-file)
+                         (lambda (file &rest _) (setq visited file))))
+                (omnigent-ui-workspace-visit-file)))
+            (should
+             (equal
+              visited "/ssh:runner.example:/workspace/src/file"))
+            (omnigent-ui--diff-result
+             "mapping" "src/file" 200 "diff\n")
+            (setq buffer (current-buffer))
+            (should
+             (equal
+              default-directory "/ssh:runner.example:/workspace/")))
+        (when (buffer-live-p buffer)
+          (kill-buffer buffer))))))
+
 (ert-deftest omnigent-ui-session-list-opens-on-first-connection ()
   "Open the session list only after the first successful connection."
   (save-window-excursion

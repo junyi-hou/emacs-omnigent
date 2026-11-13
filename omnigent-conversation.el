@@ -15,6 +15,8 @@
 Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 (defvar-local omnigent-conversation-session-id nil
   "Session ID associated with the current conversation buffer.")
+(defvar-local omnigent-conversation-host-id nil
+  "Host ID from the latest successful session snapshot.")
 (defvar-local omnigent-conversation-agent-name nil
   "Agent display name from the latest successful session snapshot.")
 (defvar-local omnigent-conversation-header-data nil
@@ -596,6 +598,7 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
         (setq omnigent-conversation--permission-read-only
               (equal (alist-get 'permission_level body) 1))
         (setq
+         omnigent-conversation-host-id (alist-get 'host_id body)
          omnigent-conversation-agent-name (alist-get 'agent_name body)
          omnigent-conversation-header-data
          `((workspace . ,(alist-get 'workspace body))

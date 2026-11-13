@@ -392,6 +392,27 @@
           (forward-line -1))))))
 
 
+(defun omnigent-ui--workspace-filename (id path)
+  "Return the filename for PATH in workspace ID."
+  (let* ((buffer (omnigent-sessions-buffer id))
+         (host-id
+          (or (and (buffer-live-p buffer)
+                   (buffer-local-value
+                    'omnigent-conversation-host-id buffer))
+              (alist-get
+               'host_id
+               (cl-find
+                id
+                omnigent-sessions
+                :key
+                (lambda (row) (alist-get 'id row))
+                :test #'equal))))
+         (root
+          (alist-get
+           'root (gethash id omnigent-ui--workspace-cache))))
+    (omnigent-workspace-local-filename
+     root path (omnigent-workspace-host-mapping host-id))))
+
 (defun omnigent-ui--diff-result (id path status diff)
   "Display successful DIFF for ID and PATH, leaving old buffers on failure."
   (when (omnigent-transport-success-p status)
@@ -408,6 +429,10 @@
             (erase-buffer)
             (insert diff)
             (funcall omnigent-workspace-diff-mode)
+            (when (gethash id omnigent-ui--workspace-cache)
+              (setq default-directory
+                    (file-name-as-directory
+                     (omnigent-ui--workspace-filename id ""))))
             (setq
              omnigent-ui--workspace-id id
              buffer-read-only t)

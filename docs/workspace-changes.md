@@ -60,12 +60,12 @@ paths from the environment changes API. The session snapshot from `GET
 /v1/sessions/{id}` also has a `workspace` field, but it may be null. Do not assume that
 it always matches the environment root.
 
-A root path is meaningful on the runner's filesystem. Only construct a local Emacs
-filename when the runner's filesystem is known to be local. For a remote runner, a
-caller must provide a trusted TRAMP connection mapping. An Omnigent `host_id` alone is
-not an SSH address or a TRAMP connection. If no mapping is available, report that direct
-access is unavailable. The environment filesystem API can still read file contents
-independently of direct access.
+A root path is meaningful on the runner's filesystem. The user configures
+`omnigent-host-address-function` to map each `host_id` to its address. The default
+returns the host in `omnigent-server-url`. A return value of `localhost` also means
+the server host. The client uses local filenames for a local address and SSH TRAMP
+filenames for a remote address.
+The user must provide the correct mapping when a runner is on another host.
 
 ## Client API
 
