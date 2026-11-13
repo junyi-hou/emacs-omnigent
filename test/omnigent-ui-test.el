@@ -3,6 +3,44 @@
 (require 'ert)
 (require 'omnigent)
 
+(ert-deftest omnigent-ui-session-age-uses-short-time-units ()
+  "Show session ages in minutes, hours, days, and weeks."
+  (let* ((updated-at (encode-time 0 0 0 1 1 2025 t))
+         (now (time-add updated-at (seconds-to-time (* 14 86400))))
+         (timestamp
+          (lambda (time)
+            (format-time-string "%Y-%m-%dT%H:%M:%SZ" time t))))
+    (cl-letf (((symbol-function 'current-time) (lambda () now)))
+      (should
+       (equal
+        (omnigent-ui--session-age
+         (funcall timestamp updated-at))
+        "2w"))
+      (should
+       (equal
+        (omnigent-ui--session-age
+         (funcall timestamp
+                  (time-subtract now (seconds-to-time (* 3 86400)))))
+        "3d"))
+      (should
+       (equal
+        (omnigent-ui--session-age
+         (funcall timestamp
+                  (time-subtract now (seconds-to-time (* 2 3600)))))
+        "2hr"))
+      (should
+       (equal
+        (omnigent-ui--session-age
+         (funcall timestamp (time-subtract now (seconds-to-time 60))))
+        "1m"))
+      (should
+       (equal
+        (omnigent-ui--session-age
+         (funcall timestamp
+                  (time-subtract now (seconds-to-time (* 4 604800)))))
+        "4w+"))
+      (should (equal (omnigent-ui--session-age "invalid") "n/a")))))
+
 (ert-deftest omnigent-ui-session-render-preserves-selection ()
   "Render statuses and attention while preserving the selected session."
   (let ((omnigent-sessions
@@ -14,7 +52,11 @@
            ((id . "b")
             (title . "Second")
             (status . "idle")
-            (updated_at . "2025-01-02"))))
+            (updated_at . "2025-01-02"))
+           ((id . "archived")
+            (title . "Archived")
+            (archived . t)
+            (updated_at . "2025-01-03"))))
         (omnigent-sessions-truncated t))
     (unwind-protect
         (with-current-buffer (get-buffer-create "*omnigent-sessions*")
@@ -34,6 +76,24 @@
             'omnigent-ui-session-running))
           (omnigent-ui-sessions-render)
           (should (equal (omnigent-ui--session-id-at-point) "a"))
+          (should
+           (equal
+            (mapcar
+             (lambda (session)
+               (get-text-property
+                (save-excursion
+                  (goto-char (point-min))
+                  (search-forward (alist-get 'title session))
+                  (line-beginning-position))
+                'omnigent-ui-session-id))
+             omnigent-sessions)
+            '("a" "b" "archived")))
+          (should
+           (save-excursion
+             (goto-char (point-min))
+             (search-forward "w")
+             (eq
+              (get-text-property (match-beginning 0) 'display) nil)))
           (should
            (save-excursion
              (goto-char (point-min))

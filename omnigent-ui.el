@@ -59,6 +59,33 @@
   (get-text-property
    (line-beginning-position) 'omnigent-ui-session-id))
 
+(defun omnigent-ui--session-age (updated-at)
+  "Return a short age label for UPDATED-AT."
+  (when updated-at
+    (condition-case nil
+        (let* ((time
+                (if (numberp updated-at)
+                    (seconds-to-time updated-at)
+                  (date-to-time updated-at)))
+               (seconds
+                (max 0
+                     (floor
+                      (float-time
+                       (time-subtract (current-time) time))))))
+          (cond
+           ((< seconds 3600)
+            (format "%dm" (max 1 (/ seconds 60))))
+           ((< seconds 86400)
+            (format "%dhr" (/ seconds 3600)))
+           ((< seconds 604800)
+            (format "%dd" (/ seconds 86400)))
+           (t
+            (if (>= seconds (* 4 604800))
+                "4w+"
+              (format "%dw" (/ seconds 604800))))))
+      (error
+       "n/a"))))
+
 (defun omnigent-ui-sessions-render ()
   "Render the session list and preserve point by session ID."
   (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
@@ -68,13 +95,19 @@
             (sessions
              (sort (copy-sequence omnigent-sessions)
                    (lambda (a b)
-                     (let ((left (alist-get 'updated_at a))
+                     (let ((left-archived
+                            (eq (alist-get 'archived a) t))
+                           (right-archived
+                            (eq (alist-get 'archived b) t))
+                           (left (alist-get 'updated_at a))
                            (right (alist-get 'updated_at b)))
-                       (if (and (numberp left) (numberp right))
-                           (> left right)
-                         (string>
-                          (format "%s" (or left ""))
-                          (format "%s" (or right "")))))))))
+                       (if (not (eq left-archived right-archived))
+                           (not left-archived)
+                         (if (and (numberp left) (numberp right))
+                             (> left right)
+                           (string>
+                            (format "%s" (or left ""))
+                            (format "%s" (or right ""))))))))))
         (erase-buffer)
         (when omnigent-sessions-truncated
           (insert
@@ -91,8 +124,20 @@
             (insert
              (if (and (stringp title) (not (string-empty-p title)))
                  (replace-regexp-in-string "[\n\r]" " " title)
-               "Untitled")
-             "\n")
+               "Untitled"))
+            (when-let* ((updated-at
+                         (omnigent-ui--session-age
+                          (alist-get 'updated_at session))))
+              (insert
+               (propertize " "
+                           'display
+                           `(space
+                             :align-to
+                             (- right
+                                ,(string-width
+                                  (format "%s" updated-at))))))
+              (insert (format "%s" updated-at)))
+            (insert "\n")
             (add-text-properties
              start (point)
              (list
