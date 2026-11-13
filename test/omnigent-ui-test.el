@@ -675,6 +675,12 @@
     ()
   "Indent both explicit and visual continuations without changing sent text."
   (omnigent-ui-test--conversation
+    (should
+     (= (+ (string-width
+            (overlay-get omnigent-ui--busy-overlay 'before-string))
+           (- omnigent-conversation--prompt-start
+              omnigent-ui--composer-label))
+        3))
     (insert "first\nsecond")
     (should
      (equal
@@ -688,12 +694,12 @@
      (equal
       (get-text-property
        (+ omnigent-conversation--prompt-start 6) 'line-prefix)
-      "  "))
+      "   "))
     (should
      (equal
       (get-text-property
        omnigent-conversation--prompt-start 'wrap-prefix)
-      "  "))))
+      "   "))))
 
 (ert-deftest
     omnigent-ui-workspace-refresh-coalesces-and-isolates-sessions
@@ -1296,12 +1302,13 @@
           (content . "thought"))])
        (pending_inputs . []) (pending_elicitations . [])))
     (goto-char (point-min))
-    (should (equal (get-text-property (point) 'line-prefix) "  "))
+    (should (equal (get-text-property (point) 'line-prefix) "   "))
     (search-forward "▶")
-    (should (equal (get-text-property (1- (point)) 'line-prefix) " "))
+    (should
+     (equal (get-text-property (1- (point)) 'line-prefix) "  "))
     (forward-line 1)
-    (should (equal (get-text-property (point) 'line-prefix) "  "))
-    (should (equal (get-text-property (point) 'wrap-prefix) "  "))))
+    (should (equal (get-text-property (point) 'line-prefix) "   "))
+    (should (equal (get-text-property (point) 'wrap-prefix) "   "))))
 
 (ert-deftest omnigent-ui-transcript-shortened-item-keeps-point ()
   "Keep point inside its transcript item when that item becomes shorter."

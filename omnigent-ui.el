@@ -690,11 +690,11 @@
             'rear-nonsticky
             t
             'line-prefix
-            "  "
+            "   "
             'wrap-prefix
-            "  "))
+            "   "))
           (when (and (< start (point)) (button-at start))
-            (put-text-property start (1+ start) 'line-prefix " "))))
+            (put-text-property start (1+ start) 'line-prefix "  "))))
       (move-overlay
        omnigent-ui--busy-overlay
        omnigent-ui--composer-label
@@ -755,7 +755,13 @@
           (add-text-properties
            begin (point)
            '(read-only
-             t rear-nonsticky t line-prefix "  " wrap-prefix "  "))))
+             t
+             rear-nonsticky
+             t
+             line-prefix
+             "   "
+             wrap-prefix
+             "   "))))
       (set-marker omnigent-ui--pending-start start)
       (set-marker omnigent-ui--request-start request-start)
       (goto-char position)
@@ -777,7 +783,7 @@
         (add-text-properties
          omnigent-conversation--prompt-start
          (point-max)
-         '(line-prefix "  " wrap-prefix "  "))
+         '(line-prefix "   " wrap-prefix "   "))
         (save-excursion
           (goto-char omnigent-conversation--prompt-start)
           (put-text-property
