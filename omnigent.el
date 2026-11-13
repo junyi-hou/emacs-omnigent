@@ -433,7 +433,11 @@ When EFFORT is nil, prompt with the current model's supported levels."
     (if-let* ((window (get-buffer-window buffer)))
       (delete-window window)
       (display-buffer-in-side-window
-       buffer '((side . left) (slot . -1))))))
+       buffer
+       (append
+        '((side . left) (slot . -1))
+        (when omnigent-side-window-width
+          `((window-width . ,omnigent-side-window-width))))))))
 
 (defun omnigent-ui-refresh ()
   "Refresh the full root session list."

@@ -929,6 +929,33 @@
             '(bold omnigent-ui-session-archived))))
       (kill-buffer "*omnigent-sessions*"))))
 
+(ert-deftest omnigent-ui-side-window-sizes ()
+  "Pass configured sizes to both side window displays."
+  (let ((omnigent-side-window-width 32)
+        (omnigent-workspace-window-height 0.3)
+        (omnigent-ui--selected-session "size-test")
+        (omnigent-ui--workspace-visible t)
+        (omnigent-ui--workspace-cache (make-hash-table :test 'equal))
+        calls)
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-buffer-in-side-window)
+                   (lambda (_buffer action) (push action calls)))
+                  ((symbol-function 'omnigent-ui--workspace-hide)
+                   #'ignore)
+                  ((symbol-function 'omnigent-ui-sessions-render)
+                   #'ignore))
+          (omnigent-ui-sessions)
+          (omnigent-ui--workspace-display)
+          (should (equal (alist-get 'window-width (car calls)) 32))
+          (should (equal (alist-get 'window-height (car calls)) 0.3))
+          (should (equal (alist-get 'window-width (cadr calls)) 32))
+          (should-not (assq 'window-height (cadr calls))))
+      (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
+        (kill-buffer buffer))
+      (when-let* ((buffer
+                   (get-buffer "*omnigent-workspace: size-test*")))
+        (kill-buffer buffer)))))
+
 (ert-deftest omnigent-ui-open-keeps-session-side-window ()
   "Open the selected conversation in the main window, leaving sessions visible."
   (save-window-excursion

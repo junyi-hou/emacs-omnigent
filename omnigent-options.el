@@ -50,7 +50,8 @@
     (define-key map (kbd "RET") #'omnigent-ui-workspace-diff)
     (define-key map (kbd "f") #'omnigent-ui-workspace-visit-file)
     (define-key map (kbd "g") #'omnigent-ui-workspace-refresh)
-    (define-key map (kbd "C-c C-g") #'omnigent-ui-workspace-magit-status)
+    (define-key
+     map (kbd "C-c C-g") #'omnigent-ui-workspace-magit-status)
     map)
   "Keymap for the workspace side view."
   :type 'keymap
@@ -75,6 +76,20 @@ Configure this function when a runner is on a different host."
 (defcustom omnigent-open-session-list-on-connect t
   "When non-nil, open the session list after connecting to a server."
   :type 'boolean
+  :group 'omnigent)
+
+(defcustom omnigent-side-window-width 0.25
+  "Initial width of the session and workspace side windows.
+An integer specifies columns; a float specifies a fraction of frame width.
+When nil, let Emacs choose the width."
+  :type '(choice (const :tag "Emacs default" nil) integer float)
+  :group 'omnigent)
+
+(defcustom omnigent-workspace-window-height 10
+  "Initial height of the workspace side window.
+An integer specifies lines; a float specifies a fraction of frame height.
+When nil, let Emacs choose the height."
+  :type '(choice (const :tag "Emacs default" nil) integer float)
   :group 'omnigent)
 
 (defcustom omnigent-title-update-turn-interval 10
