@@ -21,9 +21,9 @@
     (set-keymap-parent map text-mode-map)
     (define-key map (kbd "C-c C-c") #'omnigent-conversation-send)
     (define-key map (kbd "C-c C-k") #'omnigent-conversation-interrupt)
+    (define-key map (kbd "C-c C-r") #'omnigent-conversation-reconnect)
     (define-key map (kbd "C-c C-m") #'omnigent-conversation-set-model)
-    (define-key
-     map (kbd "C-c C-e") #'omnigent-conversation-set-effort)
+    (define-key map (kbd "C-c C-e") #'omnigent-conversation-set-effort)
     (define-key map (kbd "TAB") #'widget-forward)
     (define-key map (kbd "<backtab>") #'widget-backward)
     (define-key map (kbd "C-c C-a") #'omnigent-ui-archive)
@@ -53,8 +53,7 @@
     (define-key map (kbd "RET") #'omnigent-ui-workspace-diff)
     (define-key map (kbd "f") #'omnigent-ui-workspace-visit-file)
     (define-key map (kbd "g") #'omnigent-ui-workspace-refresh)
-    (define-key
-     map (kbd "C-c C-g") #'omnigent-ui-workspace-magit-status)
+    (define-key map (kbd "C-c C-g") #'omnigent-ui-workspace-magit-status)
     map)
   "Keymap for the workspace side view."
   :type 'keymap
@@ -66,8 +65,7 @@
   :group 'omnigent)
 
 (defcustom omnigent-host-address-function
-  (lambda (_host-id)
-    (url-host (url-generic-parse-url omnigent-server-url)))
+  (lambda (_host-id) (url-host (url-generic-parse-url omnigent-server-url)))
   "Function that returns the address for an Omnigent host ID.
 The function takes one host ID string and returns an address string.
 The address `localhost' means the host in `omnigent-server-url'.
@@ -88,7 +86,7 @@ When nil, let Emacs choose the width."
   :type '(choice (const :tag "Emacs default" nil) integer float)
   :group 'omnigent)
 
-(defcustom omnigent-workspace-window-height 10
+(defcustom omnigent-workspace-window-height 15
   "Initial height of the workspace side window.
 An integer specifies lines; a float specifies a fraction of frame height.
 When nil, let Emacs choose the height."
