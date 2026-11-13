@@ -117,7 +117,6 @@ deleted file. Omnigent does not distinguish that failure from a new file.
 - [ ] Design client-to-server retry for requests with no confirmed response, including
       messages and elicitation responses the server may already have accepted.
 - [ ] Support workspace diffs for non-Git workspaces.
-- [ ] Integrate Magit for staging and committing workspace changes.
 - [ ] Design centralized authentication for remote servers, including token expiration.
 - [ ] Fetch sessions incrementally: load 20 first, then let the user fetch more.
 - [ ] Fetch older conversation items on demand.

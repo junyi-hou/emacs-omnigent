@@ -429,6 +429,10 @@
             (erase-buffer)
             (insert diff)
             (funcall omnigent-workspace-diff-mode)
+            (let ((map
+                   (copy-keymap omnigent-ui-workspace-diff-mode-map)))
+              (set-keymap-parent map (current-local-map))
+              (use-local-map map))
             (when (gethash id omnigent-ui--workspace-cache)
               (setq default-directory
                     (file-name-as-directory

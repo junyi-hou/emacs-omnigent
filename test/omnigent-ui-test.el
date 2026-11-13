@@ -817,7 +817,22 @@
             (setq buffer (current-buffer))
             (should
              (equal
-              default-directory "/ssh:runner.example:/workspace/")))
+              default-directory "/ssh:runner.example:/workspace/"))
+            (should
+             (eq
+              (key-binding (kbd "C-c C-g"))
+              #'omnigent-ui-workspace-magit-status))
+            (let (status-directory)
+              (cl-letf (((symbol-function 'require)
+                         (lambda (&rest _) t))
+                        ((symbol-function 'magit-status)
+                         (lambda (directory &rest _)
+                           (setq status-directory directory))))
+                (call-interactively
+                 #'omnigent-ui-workspace-magit-status))
+              (should
+               (equal
+                status-directory "/ssh:runner.example:/workspace/"))))
         (when (buffer-live-p buffer)
           (kill-buffer buffer))))))
 

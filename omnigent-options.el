@@ -50,6 +50,7 @@
     (define-key map (kbd "RET") #'omnigent-ui-workspace-diff)
     (define-key map (kbd "f") #'omnigent-ui-workspace-visit-file)
     (define-key map (kbd "g") #'omnigent-ui-workspace-refresh)
+    (define-key map (kbd "C-c C-g") #'omnigent-ui-workspace-magit-status)
     map)
   "Keymap for the workspace side view."
   :type 'keymap

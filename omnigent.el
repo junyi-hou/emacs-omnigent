@@ -532,5 +532,16 @@ When EFFORT is nil, prompt with the current model's supported levels."
       (user-error "No changed file at point"))
     (find-file (omnigent-ui--workspace-filename id path))))
 
+(defun omnigent-ui-workspace-magit-status ()
+  "Open Magit status for the workspace of the current diff buffer."
+  (interactive)
+  (unless omnigent-ui--workspace-id
+    (user-error "No workspace for this buffer"))
+  (unless (require 'magit nil t)
+    (user-error "Magit is not installed"))
+  (magit-status
+   (file-name-as-directory
+    (omnigent-ui--workspace-filename omnigent-ui--workspace-id ""))))
+
 (provide 'omnigent)
 ;;; omnigent.el ends here
