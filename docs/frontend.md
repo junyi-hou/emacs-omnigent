@@ -151,12 +151,13 @@ During submission, keep the request visible, disable its response actions, and s
 `Submitting...`. Remove it only after server confirmation or a resolved event. Request and draft state, validation,
 and server interactions belong to [elicitation.md](elicitation.md).
 
-The conversation implementation must keep separate boundaries for transcript, request
-blocks, pending messages, and composer. Place request blocks above pending messages.
-Stream insertion and transcript refresh must not overwrite request drafts or composer
-text. Incoming output must not move point from the composer or interrupt typing. Follow
-incoming output only when the window is already at the bottom; otherwise preserve the
-user's reading position.
+The conversation implementation must keep separate boundaries for transcript,
+request blocks, pending messages, and composer. Place request blocks above
+pending messages. Stream insertion and transcript refresh must not overwrite
+request drafts or composer text. Incoming output must not move point from the
+composer or interrupt typing. Follow incoming output with normal Emacs scrolling
+when needed to keep point visible. Restore the window's reading position after
+transcript updates without forced recentering.
 
 ## Workspace view
 

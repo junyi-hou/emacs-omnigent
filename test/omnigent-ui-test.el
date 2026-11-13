@@ -1183,7 +1183,7 @@
       (get-text-property (point) 'omnigent-ui-item-id) "first"))))
 
 (ert-deftest omnigent-ui-transcript-does-not-recenter-reading-point ()
-  "Do not recenter on transcript point when the window reaches the bottom."
+  "Preserve the view for transcript and composer point without forced recentering."
   (save-window-excursion
     (omnigent-ui-test--conversation
       (set-window-buffer (selected-window) (current-buffer))
@@ -1192,14 +1192,19 @@
        '((items . [((id . "first") (content . "text"))])
          (pending_inputs . [])
          (pending_elicitations . [])))
-      (goto-char (point-min))
-      (let ((recentered nil))
-        (cl-letf (((symbol-function 'window-end)
-                   (lambda (&rest _) (point-max)))
-                  ((symbol-function 'recenter)
-                   (lambda (&rest _) (setq recentered t))))
-          (omnigent-ui--transcript))
-        (should-not recentered)))))
+      (dolist (position
+               (list (point-min) omnigent-conversation--prompt-start))
+        (goto-char position)
+        (let ((recentered nil)
+              (start (window-start)))
+          (cl-letf (((symbol-function 'window-end)
+                     (lambda (&rest _) (point-max)))
+                    ((symbol-function 'recenter)
+                     (lambda (&rest _) (setq recentered t))))
+            (omnigent-ui--transcript))
+          (should-not recentered)
+          (should (= (point) position))
+          (should (= (window-start) start)))))))
 
 (ert-deftest omnigent-ui-composer-line-start-stays-in-input ()
   "Keep line-start motion and deletion inside the editable composer."

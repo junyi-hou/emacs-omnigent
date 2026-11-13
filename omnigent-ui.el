@@ -582,8 +582,7 @@
                (list
                 window
                 (omnigent-ui--location (window-start window))
-                (omnigent-ui--location (window-point window))
-                (>= (window-end window t) (point-max))))
+                (omnigent-ui--location (window-point window))))
              (get-buffer-window-list (current-buffer) nil t)))
            (inhibit-read-only t)
            (buffer-undo-list t)
@@ -615,14 +614,11 @@
             (put-text-property start (1+ start) 'line-prefix " "))))
       (goto-char (omnigent-ui--restore-location location))
       (dolist (entry windows)
-        (pcase-let ((`(,window ,start ,position ,bottom) entry))
+        (pcase-let ((`(,window ,start ,position) entry))
           (let ((new-start (omnigent-ui--restore-location start))
                 (new-point (omnigent-ui--restore-location position)))
             (set-window-point window new-point)
-            (if (and bottom (>= new-point omnigent-ui--request-start))
-                (with-selected-window window
-                  (recenter -1))
-              (set-window-start window new-start t))))))))
+            (set-window-start window new-start t)))))))
 
 (defun omnigent-ui--transcript-flush (buffer)
   "Render the pending transcript update in BUFFER."
