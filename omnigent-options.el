@@ -21,6 +21,9 @@
     (set-keymap-parent map text-mode-map)
     (define-key map (kbd "C-c C-c") #'omnigent-conversation-send)
     (define-key map (kbd "C-c C-k") #'omnigent-conversation-interrupt)
+    (define-key map (kbd "C-c C-m") #'omnigent-conversation-set-model)
+    (define-key
+     map (kbd "C-c C-e") #'omnigent-conversation-set-effort)
     (define-key map (kbd "TAB") #'widget-forward)
     (define-key map (kbd "<backtab>") #'widget-backward)
     (define-key map (kbd "C-c C-a") #'omnigent-ui-archive)
