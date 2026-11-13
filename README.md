@@ -88,14 +88,17 @@ Transcript text uses plain text, not Markdown rendering.
 Run unit tests and both native integration suites separately:
 
 ```sh
+make test-deps
 make unit-test
 make integration-test HARNESS=claude-native
 make integration-test HARNESS=codex-native
 ```
 
-Unit tests run offline. Integration tests need network access for dependency
-installation. `make test HARNESS=claude-native` runs unit tests and the selected
-integration suite together; the default harness is `claude-native`. See
+`make test-deps` installs Evil, WebSocket, `f`, `s`, and their dependencies in
+`.tools/test-elpa`. Evil is not a runtime dependency. After setup, unit tests
+run offline. Integration tests need network access for dependency installation.
+`make test HARNESS=claude-native` runs unit tests and the selected integration
+suite together; the default harness is `claude-native`. See
 [test/README.md](test/README.md) for details.
 
 The client can open at most 500 conversation buffers at once, because the server

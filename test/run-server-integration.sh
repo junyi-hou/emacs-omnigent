@@ -178,16 +178,8 @@ if [ "$i" -eq 100 ] || ! kill -0 "$host_pid" 2>/dev/null; then
   tail -n 80 "$tmp/host.log" >&2
   exit 1
 fi
-package_dir="$tmp/elpa"
+package_dir="$PWD/.tools/test-elpa"
 websocket_load_path=${OMNIGENT_WEBSOCKET_LOAD_PATH:-}
-if [ -z "$websocket_load_path" ]; then
-  OMNIGENT_TEST_PACKAGE_DIR="$package_dir" "$emacs_bin" -Q --batch \
-    --eval '(require (quote package))' \
-    --eval '(setq package-user-dir (getenv "OMNIGENT_TEST_PACKAGE_DIR") package-archives (quote (("gnu" . "https://elpa.gnu.org/packages/") ("melpa" . "https://melpa.org/packages/"))))' \
-    --eval '(package-refresh-contents)' \
-    --eval '(setq package-pinned-packages (quote ((websocket . "gnu"))) byte-compile-warnings nil bytecomp--inhibit-lexical-cookie-warning t)' \
-    --eval '(progn (package-install (quote f)) (package-install (quote s)) (package-install (quote websocket)))'
-fi
 # Runtime permission_mode controls are Claude-specific, not Codex controls.
 if [ "${OMNIGENT_TEST_HARNESS:-claude-native}" = codex-native ] && [ -z "${OMNIGENT_TEST_SELECTOR:-}" ]; then
   export OMNIGENT_TEST_SELECTOR='(not "^omnigent-mock-claude-")'

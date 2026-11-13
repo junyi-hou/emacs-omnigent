@@ -1160,6 +1160,74 @@
           (omnigent-ui--transcript))
         (should-not recentered)))))
 
+(ert-deftest omnigent-ui-composer-line-start-stays-in-input ()
+  "Keep line-start motion and deletion inside the editable composer."
+  (omnigent-ui-test--conversation
+    (insert "first\nsecond")
+    (goto-char (+ omnigent-conversation--prompt-start 2))
+    (beginning-of-line)
+    (should (= (point) omnigent-conversation--prompt-start))
+    (kill-line)
+    (should
+     (equal
+      (buffer-substring-no-properties
+       omnigent-conversation--prompt-start (point-max))
+      "\nsecond"))
+    (should
+     (equal
+      (buffer-substring-no-properties
+       omnigent-ui--composer-label
+       omnigent-conversation--prompt-start)
+      "> "))))
+
+(ert-deftest omnigent-ui-composer-evil-line-edits ()
+  "Keep the prompt protected while Evil changes or deletes composer lines."
+  (require 'evil)
+  (dolist (case
+           '(("first\nsecond" "dd" "second")
+             ("first" "dd" "")
+             ("" "dd" "")
+             ("first\nsecond" "2dd" "")
+             ("first\nsecond" "ccnew <escape>" "new\nsecond")
+             ("first" "ccnew <escape>" "new\n")
+             ("" "ccnew <escape>" "new\n")
+             ("first\nsecond\nthird" "2ccnew <escape>" "new\nthird")
+             ("first\nsecond" "Vd" "second")
+             ("first\nsecond" "Vcnew <escape>" "new\nsecond")
+             ("first\nsecond" "D" "\nsecond")
+             ("first\nsecond" "Cnew <escape>" "new\nsecond")))
+    (ert-info
+     ((format "Input and keys: %S" case))
+     (omnigent-ui-test--conversation
+       (save-window-excursion
+         (switch-to-buffer (current-buffer))
+         (omnigent-conversation--snapshot
+          200
+          '((items . [((id . "history") (content . "protected"))])
+            (pending_inputs . [])
+            (pending_elicitations . [])))
+         (insert (car case))
+         (goto-char omnigent-conversation--prompt-start)
+         (evil-local-mode 1)
+         (unwind-protect
+             (progn
+               (evil-normal-state)
+               (execute-kbd-macro (kbd (cadr case)))
+               (should
+                (equal
+                 (buffer-substring-no-properties
+                  omnigent-conversation--prompt-start (point-max))
+                 (nth 2 case)))
+               (should
+                (equal
+                 (buffer-substring-no-properties
+                  omnigent-ui--composer-label
+                  omnigent-conversation--prompt-start)
+                 "> "))
+               (goto-char (point-min))
+               (should-error (delete-char 1) :type 'text-read-only))
+           (evil-local-mode -1)))))))
+
 (ert-deftest omnigent-ui-rejected-edit-does-not-lock-composer ()
   "A rejected transcript edit must not install widget-only editing on the composer."
   (omnigent-ui-test--conversation

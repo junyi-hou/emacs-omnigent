@@ -21,6 +21,7 @@ jobs:
       - uses: purcell/setup-emacs@v7.0
         with:
           version: ${{ matrix.emacs }}
+      - run: make test-deps
       - run: make unit-test
       - run: make integration-test HARNESS=claude-native
       - run: make integration-test HARNESS=codex-native

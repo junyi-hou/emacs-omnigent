@@ -725,6 +725,20 @@
            'line-prefix
            nil))))))
 
+(defun omnigent-ui--evil-change (change beg end &rest args)
+  "Run Evil CHANGE from BEG to END with ARGS inside the composer bounds."
+  (if (and (derived-mode-p 'omnigent-conversation-mode)
+           omnigent-conversation--prompt-start
+           (<= omnigent-conversation--prompt-start beg))
+      (save-restriction
+        (narrow-to-region
+         omnigent-conversation--prompt-start (point-max))
+        (apply change beg end args))
+    (apply change beg end args)))
+
+(with-eval-after-load 'evil-commands
+  (advice-add 'evil-change :around #'omnigent-ui--evil-change))
+
 (defun omnigent-ui--conversation-event (name data)
   "Refresh workspace changes on invalidation or terminal session status DATA."
   (let ((finished
@@ -885,7 +899,8 @@
      omnigent-ui--request-start (copy-marker (point) t)
      omnigent-ui--pending-start (copy-marker (point) t)
      omnigent-ui--composer-label (copy-marker (point) t))
-    (insert (propertize "> " 'read-only t 'rear-nonsticky t))
+    (insert
+     (propertize "> " 'read-only t 'field 'prompt 'rear-nonsticky t))
     (set-marker omnigent-ui--request-start (point-min))
     (set-marker omnigent-ui--pending-start (point-min))
     (set-marker omnigent-ui--composer-label (point-min))

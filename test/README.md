@@ -31,20 +31,29 @@ and disable Claude auto-updates. It uses
 Run unit tests and both native integration suites separately:
 
 ```sh
+make test-deps
 make unit-test
 make integration-test HARNESS=claude-native
 make integration-test HARNESS=codex-native
 ```
+
+`make test-deps` installs Evil, WebSocket, `f`, `s`, and their dependencies in
+`.tools/test-elpa`, separate from user packages. Run it once before either
+suite. Both runners load this shared directory. The integration runner no longer
+installs Emacs packages. Unit tests then run offline and require Evil so the
+composer regression test cannot silently skip. CI runs setup before the unit
+suite. The package itself does not require Evil.
 
 `make test` runs unit tests and the selected integration suite
 together. `HARNESS` defaults to `claude-native`. The Makefile passes
 it to the integration runner through `OMNIGENT_TEST_HARNESS`. Unit
 tests do not depend on the selected harness.
 
-The runner needs network access for dependency installation, the
-upstream checkout, Emacs, Python 3, Node.js, tmux, curl, and the Emacs
-`websocket` package. Set `OMNIGENT_WEBSOCKET_LOAD_PATH` to an
-installed package directory to avoid the runner's package download.
+The runner needs network access for dependency installation, the upstream
+checkout, Emacs, Python 3, Node.js, tmux, curl, and the Emacs `websocket`
+package from `make test-deps`. Set `OMNIGENT_WEBSOCKET_LOAD_PATH` to an
+installed WebSocket package directory to override the shared directory for
+integration tests.
 
 To select integration tests, set `OMNIGENT_TEST_SELECTOR` to an ERT
 selector. For example, run the native model, effort, and permission

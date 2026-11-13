@@ -68,15 +68,19 @@ title (or `Untitled`) and the first characters of the session ID. The name is
 for display only; identify buffers by their buffer-local session ID.
 
 Use a mode derived from `text-mode`. Show a read-only transcript and an editable
-composer headed by `>`. Start input on the same line after `> `. Align explicit
-continuation lines and visually wrapped lines with the first input character. This
-indentation is display-only and is not sent as part of the message. `RET` inserts a
-newline; `C-c C-c` sends the message. Distinguish user, agent, tool, reasoning, and
-error text with faces. Show tool calls and reasoning in foldable blocks. Show streamed
-output before the pending-message area and composer. Show pending messages in queue
-order immediately above the composer, with `[queued] >` labels. Place new pending
-messages below older ones. Insert incoming agent output above all pending messages. Keep
-the target session clear in each buffer. Detailed rendering and buffer behavior are in
+composer headed by `>`. Start input on the same line after `> `.  Give the
+protected prompt a text field boundary so Evil line edits operate on input.
+Limit Evil change operations in the composer to the input bounds so line changes
+preserve adjacent input lines.  Align explicit continuation lines and visually
+wrapped lines with the first input character. This indentation is display-only
+and is not sent as part of the message. `RET` inserts a newline; `C-c C-c` sends
+the message. Distinguish user, agent, tool, reasoning, and error text with
+faces. Show tool calls and reasoning in foldable blocks. Show streamed output
+before the pending-message area and composer. Show pending messages in queue
+order immediately above the composer, with `[queued] >` labels. Place new
+pending messages below older ones. Insert incoming agent output above all
+pending messages. Keep the target session clear in each buffer. Detailed
+rendering and buffer behavior are in
 [conversation-buffer.md](conversation-buffer.md).
 
 ### Queued messages
