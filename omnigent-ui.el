@@ -792,7 +792,7 @@
                                  ((and (numberp used)
                                        (numberp window)
                                        (> window 0))
-                                  (format "%s / %s (%.0f%%)"
+                                  (format "%s / %s (%.0f%%%%)"
                                           (omnigent-ui--token-count
                                            used)
                                           (omnigent-ui--token-count

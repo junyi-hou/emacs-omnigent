@@ -92,7 +92,7 @@
     (should
      (equal
       header-line-format
-      "project | model-a | high | read-only | 100 / 1k (10%)"))
+      "project | model-a | high | read-only | 100 / 1k (10%%)"))
     (omnigent-conversation--event
      "session.model" '((model . "model-b")))
     (omnigent-conversation--event
@@ -104,7 +104,7 @@
     (should
      (equal
       header-line-format
-      "project | model-b | low | full-access | 250 / 1k (25%)"))
+      "project | model-b | low | full-access | 250 / 1k (25%%)"))
     (omnigent-conversation--event
      "response.completed"
      '((response
@@ -116,7 +116,7 @@
            (context_tokens . 300)
            (total_tokens . 900)))))))
     (should
-     (string-match-p "model-c.*300 / 1k (30%)" header-line-format))
+     (string-match-p "model-c.*300 / 1k (30%%)" header-line-format))
     (omnigent-conversation--snapshot
      200
      '((last_total_tokens . 42)
@@ -134,7 +134,7 @@
     (omnigent-conversation--event
      "response.completed"
      '((response . ((usage . ((total_tokens . 512)))))))
-    (should (string-match-p "512 / 4.1k (12%)" header-line-format))))
+    (should (string-match-p "512 / 4.1k (12%%)" header-line-format))))
 
 (ert-deftest omnigent-ui-message-label-faces ()
   "Highlight agent labels and distinguish them from user labels."
