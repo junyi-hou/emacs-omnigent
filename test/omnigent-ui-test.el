@@ -278,6 +278,42 @@
       (should-not (invisible-p (point)))
       (should-error (delete-char 1) :type 'text-read-only))))
 
+(ert-deftest omnigent-ui-fold-spacing-and-no-ellipsis ()
+  "Keep visible blank lines between items with either fold state."
+  (omnigent-ui-test--conversation
+    (omnigent-conversation--snapshot
+     200
+     '((items
+        .
+        [((id . "first")
+          (type . "reasoning")
+          (content . "first thought"))
+         ((id . "second")
+          (type . "reasoning")
+          (content . "second thought"))
+         ((id . "message") (role . "user") (content . "hello"))
+         ((id . "error") (type . "error") (text . "failed"))])
+       (pending_inputs . []) (pending_elicitations . [])))
+    (dolist (open '(nil t))
+      (puthash "first" open omnigent-ui--folds)
+      (puthash "second" open omnigent-ui--folds)
+      (omnigent-ui--transcript)
+      (let ((position (point-min))
+            visible)
+        (while (< position omnigent-ui--request-start)
+          (if (invisible-p position)
+              (should (eq (invisible-p position) t))
+            (push (char-after position) visible))
+          (setq position (1+ position)))
+        (should
+         (equal
+          (apply #'string (nreverse visible))
+          (concat
+           (if open
+               "▼ Thinking\nfirst thought\n\n▼ Thinking\nsecond thought\n\n"
+             "▶ Thinking\n\n▶ Thinking\n\n")
+           "You:\nhello\n\nError:\nfailed\n\n")))))))
+
 (ert-deftest omnigent-ui-tool-output-merges-and-bounds ()
   "Merge tool outputs into one fold and apply both deterministic size limits."
   (omnigent-ui-test--conversation

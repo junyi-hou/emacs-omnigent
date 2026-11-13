@@ -510,16 +510,15 @@
                         #'omnigent-ui--fold-button
                         'follow-link
                         t)
-    (insert "\n")
     (let ((start (point)))
-      (insert body "\n")
+      (insert "\n" body)
       (put-text-property
        start (point) 'invisible
        (unless open
          'omnigent-ui-fold))
       (when (eq face 'omnigent-ui-reasoning)
         (put-text-property start (point) 'face face)))
-    (insert "\n")))
+    (insert "\n\n")))
 
 (defun omnigent-ui--item (id item outputs)
   "Render transcript ITEM with ID and tool OUTPUTS indexed by call ID."
@@ -841,7 +840,7 @@
   (setq
    omnigent-ui--folds (make-hash-table :test 'equal)
    omnigent-ui--field-errors (make-hash-table :test 'equal))
-  (add-to-invisibility-spec '(omnigent-ui-fold . t))
+  (add-to-invisibility-spec 'omnigent-ui-fold)
   (let ((inhibit-read-only t))
     (goto-char (point-min))
     (setq
