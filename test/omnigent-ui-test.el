@@ -1715,5 +1715,62 @@
        (string-match-p "\\[queued\\] > queued" (buffer-string)))
       (should (string-suffix-p "draft" (buffer-string))))))
 
+(ert-deftest omnigent-ui-select-model-and-effort-from-session-catalog
+    ()
+  "Fetch choices asynchronously and patch the selected model or its effort."
+  (dolist (setting '(model effort))
+    (omnigent-ui-test--conversation
+      (let (loaded
+            prompted
+            request)
+        (cl-letf (((symbol-function 'omnigent-transport-get-session)
+                   (lambda (_id callback) (setq loaded callback)))
+                  ((symbol-function 'completing-read)
+                   (lambda (_prompt
+                            choices _predicate required &rest _)
+                     (should required)
+                     (should
+                      (equal
+                       choices
+                       (if (eq setting 'model)
+                           '("first" "second")
+                         '("low" "high"))))
+                     (setq prompted t)
+                     (if (eq setting 'model)
+                         "second"
+                       "high")))
+                  ((symbol-function 'omnigent-transport-request)
+                   (lambda (method path _callback body)
+                     (setq request (list method path body)))))
+          (call-interactively
+           (if (eq setting 'model)
+               #'omnigent-conversation-set-model
+             #'omnigent-conversation-set-effort))
+          (should loaded)
+          (should-not prompted)
+          (should-not request)
+          (funcall loaded
+                   200
+                   '((llm_model . "first")
+                     (model_options
+                      .
+                      [((id . "first")
+                        (supportedReasoningEfforts
+                         .
+                         [((reasoningEffort . "low"))
+                          ((reasoningEffort . "high"))]))
+                       ((id . "second")
+                        (supportedReasoningEfforts
+                         . [((reasoningEffort . "ultra"))]))])))
+          (should prompted)
+          (should
+           (equal
+            request
+            (list
+             "PATCH" "/v1/sessions/conv_test"
+             (if (eq setting 'model)
+                 '(("model_override" . "second"))
+               '(("reasoning_effort" . "high")))))))))))
+
 (provide 'omnigent-ui-test)
 ;;; omnigent-ui-test.el ends here

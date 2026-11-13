@@ -191,6 +191,13 @@ only formats text; the caller decides how to present it."
    "PATCH" (omnigent-transport--session-path session-id) callback
    `(("model_override" . ,model))))
 
+(defun omnigent-transport-set-session-effort
+    (session-id effort callback)
+  "Set SESSION-ID's reasoning EFFORT and call CALLBACK with status and body."
+  (omnigent-transport-request
+   "PATCH" (omnigent-transport--session-path session-id) callback
+   `(("reasoning_effort" . ,effort))))
+
 (defun omnigent-transport-list-sessions (callback)
   "List sessions and call CALLBACK with status and response body."
   (omnigent-transport-request

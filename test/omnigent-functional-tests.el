@@ -1191,7 +1191,7 @@ Return the recorded model request of the turn."
                            (lambda (status body)
                              (setq result (cons status body))
                              (funcall callback status body)))))
-               ((symbol-function 'read-string)
+               ((symbol-function 'completing-read)
                 (lambda (&rest _) model)))
       (with-current-buffer buffer
         (call-interactively #'omnigent-conversation-set-model))

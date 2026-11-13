@@ -305,23 +305,91 @@ Use `omnigent-conversation-open' to create a conversation buffer."
          (omnigent-conversation--notify-input-change))
        (signal (car err) (cdr err))))))
 
-(defun omnigent-conversation-set-model (model)
-  "Change the current session's MODEL asynchronously."
-  (interactive (list (read-string "Model: ")))
+(defun omnigent--conversation-select-setting (setting)
+  "Fetch choices for SETTING and prompt in the current conversation."
+  (let ((buffer (current-buffer))
+        (generation omnigent-transport--generation))
+    (message "Reading %s choices..." setting)
+    (omnigent-transport-get-session
+     omnigent-conversation-session-id
+     (lambda (status body)
+       (when (and (buffer-live-p buffer)
+                  (= generation omnigent-transport--generation))
+         (if (not (omnigent-transport-success-p status))
+             (message "%s"
+                      (omnigent-transport-error-message
+                       "Read session settings" status body))
+           (let ((choices
+                  (condition-case err
+                      (omnigent-conversation--setting-choices
+                       setting body)
+                    (error
+                     (message "%s" (error-message-string err))
+                     'invalid))))
+             (cond
+              ((eq choices 'invalid)
+               nil)
+              ((not choices)
+               (message
+                "No %s choices are available; refresh the session and try again"
+                setting))
+              (t
+               (with-current-buffer buffer
+                 (let ((choice
+                        (completing-read (if (eq setting 'model)
+                                             "Model: "
+                                           "Effort: ")
+                                         choices
+                                         nil t)))
+                   (unless (= generation
+                              omnigent-transport--generation)
+                     (user-error "Server changed during selection"))
+                   (if (eq setting 'model)
+                       (omnigent-conversation-set-model choice)
+                     (omnigent-conversation-set-effort
+                      choice)))))))))))))
+
+(defun omnigent-conversation-set-model (&optional model)
+  "Change the current session's MODEL asynchronously.
+When MODEL is nil, fetch the session catalog and prompt with completion."
+  (interactive)
   (unless (derived-mode-p 'omnigent-conversation-mode)
     (user-error "This is not an Omnigent conversation"))
   (when buffer-read-only
     (user-error "This session is read-only"))
-  (when (string-blank-p model)
+  (when (and model (string-blank-p model))
     (user-error "The model is empty"))
-  (omnigent-transport-set-session-model
-   omnigent-conversation-session-id model
-   (lambda (status body)
-     (if (omnigent-transport-success-p status)
-         (message "Model change requested: %s" model)
-       (message "%s"
-                (omnigent-transport-error-message
-                 "Change model" status body))))))
+  (if (null model)
+      (omnigent--conversation-select-setting 'model)
+    (omnigent-transport-set-session-model
+     omnigent-conversation-session-id model
+     (lambda (status body)
+       (if (omnigent-transport-success-p status)
+           (message "Model change requested: %s" model)
+         (message "%s"
+                  (omnigent-transport-error-message
+                   "Change model" status body)))))))
+
+(defun omnigent-conversation-set-effort (&optional effort)
+  "Change the current session's reasoning EFFORT asynchronously.
+When EFFORT is nil, prompt with the current model's supported levels."
+  (interactive)
+  (unless (derived-mode-p 'omnigent-conversation-mode)
+    (user-error "This is not an Omnigent conversation"))
+  (when buffer-read-only
+    (user-error "This session is read-only"))
+  (when (and effort (string-blank-p effort))
+    (user-error "The effort is empty"))
+  (if (null effort)
+      (omnigent--conversation-select-setting 'effort)
+    (omnigent-transport-set-session-effort
+     omnigent-conversation-session-id effort
+     (lambda (status body)
+       (if (omnigent-transport-success-p status)
+           (message "Effort change requested: %s" effort)
+         (message "%s"
+                  (omnigent-transport-error-message
+                   "Change effort" status body)))))))
 
 (defun omnigent-conversation-interrupt ()
   "Interrupt the current session asynchronously."

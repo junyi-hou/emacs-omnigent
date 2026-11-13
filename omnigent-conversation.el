@@ -48,6 +48,47 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 (defvar-local omnigent-conversation--title-prompt-count 0)
 (defvar-local omnigent-conversation--title-generation-pending nil)
 
+(defun omnigent-conversation--setting-choices (setting session)
+  "Return completion choices for SETTING from SESSION's model catalog."
+  (let ((models (alist-get 'model_options session)))
+    (unless (and (vectorp models)
+                 (cl-every
+                  (lambda (model)
+                    (and (stringp (alist-get 'id model))
+                         (or (null (alist-get 'model model))
+                             (stringp (alist-get 'model model)))))
+                  models))
+      (error "Invalid session model catalog"))
+    (if (eq setting 'model)
+        (mapcar
+         (lambda (model)
+           (or (alist-get 'model model) (alist-get 'id model)))
+         models)
+      (let* ((current
+              (or (alist-get 'model_override session)
+                  (alist-get 'llm_model session)))
+             (model
+              (cl-find-if
+               (lambda (row)
+                 (and (stringp current)
+                      (member
+                       current
+                       (list
+                        (alist-get 'id row) (alist-get 'model row)))))
+               models))
+             (efforts (alist-get 'supportedReasoningEfforts model)))
+        (unless (and model
+                     (vectorp efforts)
+                     (cl-every
+                      (lambda (effort)
+                        (stringp (alist-get 'reasoningEffort effort)))
+                      efforts))
+          (error
+           "Effort choices are unavailable for the current model"))
+        (mapcar
+         (lambda (effort) (alist-get 'reasoningEffort effort))
+         efforts)))))
+
 (defun omnigent-conversation--title-generation-result
     (buffer session-id count status body)
   "Handle title generation for BUFFER and SESSION-ID after COUNT prompts."
