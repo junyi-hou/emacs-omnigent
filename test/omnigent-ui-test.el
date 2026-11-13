@@ -178,6 +178,12 @@
           (omnigent-conversation--event
            "response.created" '((response . ((id . "response")))))
           (should (timerp omnigent-ui--busy-timer))
+          (omnigent-conversation--event
+           "response.output_text.delta" '((delta . "streaming")))
+          (omnigent-ui--transcript-render)
+          (should
+           (= (overlay-start omnigent-ui--busy-overlay)
+              (marker-position omnigent-ui--composer-label)))
           (should
            (equal
             (overlay-get

@@ -612,6 +612,10 @@
             "  "))
           (when (and (< start (point)) (button-at start))
             (put-text-property start (1+ start) 'line-prefix " "))))
+      (move-overlay
+       omnigent-ui--busy-overlay
+       omnigent-ui--composer-label
+       omnigent-ui--composer-label)
       (goto-char (omnigent-ui--restore-location location))
       (dolist (entry windows)
         (pcase-let ((`(,window ,start ,position) entry))
