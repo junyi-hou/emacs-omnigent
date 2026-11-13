@@ -654,6 +654,9 @@
                       'omnigent-ui-prompt)
           text "\n\n"))))))
 
+(defvar-local omnigent-ui--history-positioned nil
+  "Non-nil after the first nonempty transcript receives its window position.")
+
 (defun omnigent-ui--transcript-render ()
   "Refresh only transcript text, preserving composer, forms, folds and reading."
   (when (and omnigent-ui--request-start (not omnigent-ui--rendering))
@@ -705,7 +708,14 @@
           (let ((new-start (omnigent-ui--restore-location start))
                 (new-point (omnigent-ui--restore-location position)))
             (set-window-point window new-point)
-            (set-window-start window new-start t)))))))
+            (set-window-start window new-start t))))
+      (when (and omnigent-conversation--order
+                 (not omnigent-ui--history-positioned))
+        (setq omnigent-ui--history-positioned t)
+        (dolist (window
+                 (get-buffer-window-list (current-buffer) nil t))
+          (with-selected-window window
+            (recenter -3)))))))
 
 (defun omnigent-ui--transcript-flush (buffer)
   "Render the pending transcript update in BUFFER."

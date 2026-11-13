@@ -1289,6 +1289,24 @@
              (previous-single-property-change
               (point) 'omnigent-ui-item-id)))))))
 
+(ert-deftest omnigent-ui-initial-history-shows-context ()
+  "Show recent history above the composer when a session first loads."
+  (save-window-excursion
+    (omnigent-ui-test--conversation
+      (switch-to-buffer (current-buffer))
+      (omnigent-conversation--snapshot
+       200
+       `((items
+          .
+          [((id . "history")
+            (content
+             .
+             ,(mapconcat #'number-to-string (number-sequence 1 100)
+                         "\n")))])
+         (pending_inputs . []) (pending_elicitations . [])))
+      (should (< (window-start) omnigent-ui--composer-label))
+      (should omnigent-ui--history-positioned))))
+
 (ert-deftest omnigent-ui-history-reserves-prompt-columns ()
   "Align history text and fold indicators with the composer."
   (omnigent-ui-test--conversation
