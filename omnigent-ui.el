@@ -812,8 +812,8 @@
                (file-name-nondirectory
                 (directory-file-name workspace)))))
     (setq header-line-format
-          (propertize (format "%s%s | %s | %s | %s | %s"
-                              (if (and folder
+          (propertize (format " %s%s | %s | %s | %s | %s"
+                              (if (and folder (not (string-empty-p folder)))
                                        (not (string-empty-p folder)))
                                   folder
                                 (if (equal workspace "/")
@@ -859,7 +859,7 @@
                                            window)))
                                  (t
                                   "unknown"))))
-                      'face 'diff-header))
+                      'face 'diff-header 'line-spacing 3))
     (force-mode-line-update)))
 
 (defvar-local omnigent-ui--busy-overlay nil)
