@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'comint)
 (require 'omnigent-conversation)
 (require 'omnigent-workspace)
 (require 'omnigent-options)
@@ -377,6 +378,9 @@
 (defface omnigent-ui-agent '((t :inherit highlight :weight bold))
   "Face for agent message labels."
   :group 'omnigent-ui)
+(defface omnigent-ui-prompt '((t :inherit comint-highlight-prompt))
+  "Face for conversation prompts and message labels."
+  :group 'omnigent-ui)
 (defface omnigent-ui-tool '((t :inherit font-lock-builtin-face))
   "Face for tool fold headers."
   :group 'omnigent-ui)
@@ -565,10 +569,7 @@
                                :test #'equal))
                              "Agent")
                          ":\n"))
-                      'face
-                      (if user
-                          'omnigent-ui-user
-                        'omnigent-ui-agent))
+                      'face 'omnigent-ui-prompt)
           text "\n\n"))))))
 
 (defun omnigent-ui--transcript-render ()
@@ -878,7 +879,15 @@
      omnigent-ui--pending-start (copy-marker (point) t)
      omnigent-ui--composer-label (copy-marker (point) t))
     (insert
-     (propertize "> " 'read-only t 'field 'prompt 'rear-nonsticky t))
+     (propertize "> "
+                 'face
+                 'omnigent-ui-prompt
+                 'read-only
+                 t
+                 'field
+                 'prompt
+                 'rear-nonsticky
+                 t))
     (set-marker omnigent-ui--request-start (point-min))
     (set-marker omnigent-ui--pending-start (point-min))
     (set-marker omnigent-ui--composer-label (point-min))

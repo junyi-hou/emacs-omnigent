@@ -137,7 +137,7 @@
     (should (string-match-p "512 / 4.1k (12%%)" header-line-format))))
 
 (ert-deftest omnigent-ui-message-label-faces ()
-  "Highlight agent labels and distinguish them from user labels."
+  "Use the prompt face for user and agent labels."
   (omnigent-ui-test--conversation
     (let ((outputs (make-hash-table :test 'equal)))
       (let ((user-start (point-max)))
@@ -158,12 +158,11 @@
                (agent_name . "codex-native-ui")
                (content . "Hello"))
              outputs)
-            (should (eq user-face 'omnigent-ui-user))
+            (should (eq user-face 'omnigent-ui-prompt))
             (should
              (eq
               (get-text-property agent-start 'face)
-              'omnigent-ui-agent))
-            (should-not (eq user-face 'omnigent-ui-agent))))))))
+              'omnigent-ui-prompt))))))))
 
 (ert-deftest omnigent-ui-prompt-busy-indicator ()
   "Animate the prompt while a response is active and stop when it ends."
