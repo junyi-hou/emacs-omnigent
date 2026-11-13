@@ -112,12 +112,8 @@ deleted file. Omnigent does not distinguish that failure from a new file.
 ## TODO
 
 - [ ] Use a Markdown parser to render conversation messages.
-
-- [ ] Complete client reconnection after network loss or laptop sleep: detect stale
-      SSE/WebSocket connections, restore subscriptions, reload server state, and
-      retry failed snapshots without resending messages. See
-      [the reconnection design](docs/reconnection.md).
-- [ ] Design server-to-harness retry for a failed runner startup and its saved input.
+- [ ] Autocomplete (via capf) file (@) and slash commands
+- [ ] Change model/effort/permission mode
 - [ ] Design client-to-server retry for requests with no confirmed response, including
       messages and elicitation responses the server may already have accepted.
 - [ ] Support workspace diffs for non-Git workspaces.
@@ -125,28 +121,14 @@ deleted file. Omnigent does not distinguish that failure from a new file.
 - [ ] Design safe workspace file visiting for local and remote execution hosts,
       including how to identify the host and avoid opening a file on the wrong host.
 - [ ] Design centralized authentication for remote servers, including token expiration.
-- [ ] Support connections to multiple Omnigent servers.
-- [x] Show pending messages while the session is busy, track server consumption, and
-      restore server pending inputs from snapshots. See
-      [docs/conversation-buffer.md](docs/conversation-buffer.md).
-- [ ] Test cancellation during a model switch. Pending-state refresh is implemented.
-      Check session items and pending inputs after cancellation and refresh. The
-      upstream live test is
-      `tests/e2e_ui/chat/test_cancel_message_model_switch_live.py`; a controlled delay
-      can test the workflow without testing the real model-switch race. Interrupt is
-      session-wide, not selective cancellation.
 - [ ] Fetch sessions incrementally: load 20 first, then let the user fetch more.
 - [ ] Fetch older conversation items on demand.
-- [ ] Infer execution hosts and native workspace paths from TRAMP buffers.
-      Existing online hosts and their directories are already selectable through
-      the server. Design automatic remote-host setup and connectivity separately.
 - [ ] Advanced session-creation options in a Transient menu: sandbox,
       model override, reasoning effort, launch args, and
       fork options (harness switch, fork-from-response).
 - [ ] Child-session display and management.
 - [ ] Support side chat and its MCP tool allowlist.
 - [ ] Fork sessions, including fork options.
-- [ ] `delete_worktree` option on archive (removes the session worktree).
 
 ## Sources
 
