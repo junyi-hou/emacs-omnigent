@@ -514,12 +514,15 @@
                    "repo"))))
       (omnigent-sessions--read-workspace
        (lambda (target) (setq result target)))
-      (should (equal result '("two" . "~/repo")))
+      (should (equal result (cons "two" (expand-file-name "~/repo"))))
       (should (= (length prompts) 2))
       (should
        (equal
         (car requests)
-        "/v1/hosts/two/filesystem/~/repo?limit=1000")))))
+        (concat
+         "/v1/hosts/two/filesystem"
+         (expand-file-name "~/repo")
+         "?limit=1000"))))))
 
 (ert-deftest omnigent-sessions-workspace-requires-an-online-host ()
   "Report failed discovery or no online hosts without prompting."
@@ -629,7 +632,10 @@
       (should
        (equal
         (cadar requests)
-        "/v1/hosts/host/filesystem/~/repo?limit=1000"))
+        (concat
+         "/v1/hosts/host/filesystem"
+         (expand-file-name "~/repo")
+         "?limit=1000")))
       (funcall callback 200 '((data . [])))
       (should (equal (cadar requests) "/v1/agents"))
       (should (= prompts 1))
@@ -639,7 +645,9 @@
       (should (= prompts 2))
       (should (equal (caar requests) "POST"))
       (should
-       (equal (cdr (assoc "workspace" (caddar requests))) "~/repo"))
+       (equal
+        (cdr (assoc "workspace" (caddar requests)))
+        (expand-file-name "~/repo")))
       (should-not opened)
       (should (= refreshes 0))
       (funcall callback 201 '((id . "new")))

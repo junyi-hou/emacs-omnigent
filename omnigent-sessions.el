@@ -8,6 +8,7 @@
 
 (require 'cl-lib)
 (require 'omnigent-transport)
+(require 'omnigent-workspace)
 
 (defvar omnigent-sessions nil
   "List of root session alists from the server.")
@@ -257,19 +258,34 @@ AFTER and DIRECTORIES carry the cursor and entries across listing pages."
                 cursor directories))
            (funcall callback status (nreverse directories)))))))))
 
-(defun omnigent-sessions--native-workspace (input)
-  "Interpret INPUT on the execution host, never relative to Emacs's directory."
+(defun omnigent-sessions--native-workspace (input &optional host-id)
+  "Interpret INPUT on the execution host, never relative to Emacs's directory.
+When HOST-ID is non-nil, expand the path through its configured mapping."
   (when (or (string-empty-p input)
             (file-remote-p input)
             (string-match-p "\0" input))
     (user-error
      "Choose a directory path on the execution host, not a TRAMP path"))
-  (if (or (string-prefix-p "/" input)
-          (string-prefix-p "~" input)
-          (string-prefix-p "\\\\" input)
-          (string-match-p "\\`[[:alpha:]]:[/\\\\]" input))
-      input
-    (concat "~/" input)))
+  (if (and host-id
+           (not (string-prefix-p "\\\\" input))
+           (not (string-match-p "\\`[[:alpha:]]:[/\\\\]" input)))
+      (if (string-prefix-p "/" input)
+          (expand-file-name input "/")
+        (let* ((mapping (omnigent-workspace-host-mapping host-id))
+               (prefix
+                (if (eq mapping 'local)
+                    ""
+                  mapping)))
+          (file-local-name
+           (expand-file-name (concat prefix input)
+                             (expand-file-name
+                              (concat prefix "~/"))))))
+    (if (or (string-prefix-p "/" input)
+            (string-prefix-p "~" input)
+            (string-prefix-p "\\\\" input)
+            (string-match-p "\\`[[:alpha:]]:[/\\\\]" input))
+        input
+      (concat "~/" input))))
 
 (defun omnigent-sessions--read-workspace (callback &optional session)
   "Select a host and workspace asynchronously, then call CALLBACK with their cons.
@@ -353,8 +369,7 @@ Continue through CALLBACK after validating the path on GENERATION's server."
                         (when-let*
                             ((window (active-minibuffer-window)))
                           (window-buffer window))))
-                   (when (eq
-                          (gethash parent cache 'missing) 'missing)
+                   (when (eq (gethash parent cache 'missing) 'missing)
                      (puthash parent 'pending cache)
                      (omnigent-sessions--workspace-directories
                       host-id
@@ -388,8 +403,7 @@ Continue through CALLBACK after validating the path on GENERATION's server."
                                       ""))
                                   (run-hooks 'post-command-hook)
                                   (redisplay)))))))))
-                   (let ((entries
-                          (gethash parent cache)))
+                   (let ((entries (gethash parent cache)))
                      (complete-with-action
                       action
                       (cons
@@ -408,7 +422,8 @@ Continue through CALLBACK after validating the path on GENERATION's server."
              nil
              nil
              default
-             t)))
+             t)
+            host-id))
         (setq active nil))
       (unless (= generation omnigent-transport--generation)
         (user-error "Server changed during workspace selection"))
