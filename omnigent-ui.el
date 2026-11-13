@@ -569,7 +569,10 @@
                                :test #'equal))
                              "Agent")
                          ":\n"))
-                      'face 'omnigent-ui-prompt)
+                      'face
+                      'omnigent-ui-prompt
+                      'font-lock-face
+                      'omnigent-ui-prompt)
           text "\n\n"))))))
 
 (defun omnigent-ui--transcript-render ()
@@ -881,6 +884,8 @@
     (insert
      (propertize "> "
                  'face
+                 'omnigent-ui-prompt
+                 'font-lock-face
                  'omnigent-ui-prompt
                  'read-only
                  t
