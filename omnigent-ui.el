@@ -677,6 +677,10 @@
       (set-marker omnigent-ui--pending-start start)
       (set-marker omnigent-ui--request-start request-start)
       (goto-char position)
+      (move-overlay
+       omnigent-ui--busy-overlay
+       omnigent-ui--composer-label
+       omnigent-ui--composer-label)
       (set-marker position nil))))
 
 (defun omnigent-ui--composer-indent (&rest _ignored)

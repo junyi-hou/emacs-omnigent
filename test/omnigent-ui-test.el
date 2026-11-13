@@ -1139,6 +1139,33 @@
     (omnigent-ui-test--consume "first" "first" "1")
     (should (= (length omnigent-conversation--pending-inputs) 1))))
 
+(ert-deftest omnigent-ui-new-transcript-items-stay-above-queued-inputs
+    ()
+  "Keep new transcript items above queued input."
+  (omnigent-ui-test--conversation
+    (omnigent-conversation--event
+     "response.created" '((response . ((id . "active")))))
+    (cl-letf (((symbol-function
+                'omnigent-transport-post-session-event)
+               (lambda (_id _event callback)
+                 (funcall callback
+                          202
+                          '((queued . t) (pending_id . "p"))))))
+      (insert "queued")
+      (omnigent-conversation-send))
+    (omnigent-conversation--event
+     "response.elicitation_request"
+     '((elicitation_id . "q") (params . ((message . "Question")))))
+    (omnigent-conversation--event
+     "response.output_text.delta" '((delta . "current message")))
+    (should
+     (= (overlay-start omnigent-ui--busy-overlay)
+        (marker-position omnigent-ui--composer-label)))
+    (should (overlay-get omnigent-ui--busy-overlay 'before-string))
+    (should
+     (< (string-match "Agent:\ncurrent message" (buffer-string))
+        (string-match "\\[queued\\] > queued" (buffer-string))))))
+
 (ert-deftest omnigent-ui-consumption-before-post-response ()
   "Do not recreate consumed input when its POST acknowledgement arrives late."
   (dolist (pending-id '(nil "pending"))
