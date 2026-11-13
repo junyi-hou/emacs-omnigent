@@ -392,11 +392,10 @@
 ;;; Conversation presentation
 
 (defface omnigent-ui-user
-  '((t :inherit font-lock-keyword-face :weight bold))
+  '((t :inherit font-lock-constant-face :weight bold))
   "Face for user message labels."
   :group 'omnigent-ui)
-(defface omnigent-ui-agent
-  '((t :inherit font-lock-function-name-face :weight bold))
+(defface omnigent-ui-agent '((t :inherit highlight :weight bold))
   "Face for agent message labels."
   :group 'omnigent-ui)
 (defface omnigent-ui-tool '((t :inherit font-lock-builtin-face))
