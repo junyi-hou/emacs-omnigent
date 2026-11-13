@@ -45,57 +45,6 @@
             nil
             t))
 
-(defvar-local omnigent--title-turn-count 0)
-(defvar-local omnigent--title-generation-pending nil)
-
-(defun omnigent--title-generation-result
-    (buffer session-id count status body)
-  "Handle title generation for BUFFER and SESSION-ID after COUNT prompts."
-  (when (buffer-live-p buffer)
-    (with-current-buffer buffer
-      (setq omnigent--title-generation-pending nil)
-      (if (omnigent-transport-success-p status)
-          (progn
-            (setq omnigent--title-turn-count
-                  (max 0 (- omnigent--title-turn-count count)))
-            (omnigent-sessions-refresh))
-        (message "%s"
-                 (omnigent-transport-error-message
-                  "Generate session title" status body))))))
-
-(defun omnigent--conversation-title-update-event (name data)
-  "Count user prompts from event NAME and DATA, then update the title."
-  (when (equal name "session.input.consumed")
-    (let* ((payload (alist-get 'data data))
-           (content (alist-get 'data payload))
-           (text (string-trim (omnigent-conversation--text content))))
-      (when
-          (and
-           (equal (alist-get 'type payload) "message")
-           (equal (alist-get 'role content) "user")
-           (not (eq (alist-get 'is_meta content) t))
-           (not
-            (string-match-p
-             "\\`\\(?:\\[System: \\|\\[Request interrupted by user\\|<task-notification>\\|<teammate-message\\|<agent-message\\)"
-             text)))
-        (cl-incf omnigent--title-turn-count)))
-    (when (and (> omnigent-title-update-turn-interval 0)
-               (>= omnigent--title-turn-count
-                   omnigent-title-update-turn-interval)
-               (not omnigent--title-generation-pending))
-      (let ((buffer (current-buffer))
-            (session-id omnigent-conversation-session-id)
-            (count omnigent-title-update-turn-interval))
-        (setq omnigent--title-generation-pending t)
-        (omnigent-transport-generate-session-title
-         session-id
-         (format
-          "Focus the title on the most recent %d turns of this conversation."
-          count)
-         (lambda (status body)
-           (omnigent--title-generation-result
-            buffer session-id count status body)))))))
-
 (defun omnigent--sessions-title-frame (frame)
   "Apply session titles from update FRAME to open conversation buffers."
   (when (member (alist-get 'type frame) '("snapshot" "changed"))
@@ -110,9 +59,6 @@
 (add-hook
  'omnigent-conversation-mode-hook
  #'omnigent--conversation-title-watch)
-(add-hook
- 'omnigent-conversation-event-hook
- #'omnigent--conversation-title-update-event)
 (add-hook
  'omnigent-sessions-frame-hook #'omnigent--sessions-title-frame)
 
