@@ -492,16 +492,27 @@ Continue through CALLBACK after validating the path on GENERATION's server."
       (message
        "Session created; conversation view is not available yet")))))
 
-(defun omnigent-sessions-action (id type callback)
-  "Send event TYPE for session ID and invoke CALLBACK with the result.
+(defun omnigent-sessions-toggle-archive (id callback)
+  "Toggle ID's current server archive state and invoke CALLBACK with the result.
 CALLBACK receives the HTTP status and response body.  Refresh the session list
-after the request completes."
-  (omnigent-transport-post-session-event
-   id `(("type" . ,type))
+after the update completes."
+  (omnigent-transport-get-session
+   id
    (lambda (status body)
-     (unwind-protect
-         (omnigent-sessions-refresh)
-       (funcall callback status body)))))
+     (cond
+      ((not (omnigent-transport-success-p status))
+       (funcall callback status body))
+      ((not
+        (and (listp body)
+             (memq (alist-get 'archived body) '(t :json-false))))
+       (funcall callback nil "Invalid session archive state"))
+      (t
+       (omnigent-transport-set-session-archived
+        id (not (eq (alist-get 'archived body) t))
+        (lambda (update-status update-body)
+          (unwind-protect
+              (omnigent-sessions-refresh)
+            (funcall callback update-status update-body)))))))))
 
 (defun omnigent-sessions-delete (id callback)
   "Delete session ID and invoke CALLBACK with the result.

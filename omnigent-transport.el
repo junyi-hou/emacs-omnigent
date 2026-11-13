@@ -200,6 +200,18 @@ only formats text; the caller decides how to present it."
     (max 1 (min 1000 omnigent-transport-session-limit)))
    callback))
 
+(defun omnigent-transport-set-session-archived
+    (session-id archived callback)
+  "Set SESSION-ID's ARCHIVED state and call CALLBACK with status and body."
+  (omnigent-transport-request
+   "PATCH"
+   (omnigent-transport--session-path session-id)
+   callback
+   `(("archived" .
+      ,(if archived
+           t
+         :json-false)))))
+
 (defun omnigent-transport-delete-session (session-id callback)
   "Delete SESSION-ID and call CALLBACK with status and response body."
   (omnigent-transport-request

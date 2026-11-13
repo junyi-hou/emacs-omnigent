@@ -326,20 +326,20 @@ Use `omnigent-conversation-open' to create a conversation buffer."
   (let ((omnigent-transport-session-limit 1000))
     (omnigent-sessions-refresh)))
 
-(defun omnigent-ui-stop ()
-  "Stop the selected session without deleting its history."
+(defun omnigent-ui-archive ()
+  "Toggle the selected session's archived state without deleting its history."
   (interactive)
   (pcase-let ((`(,id . ,title) (omnigent-ui--action-target)))
-    (omnigent-sessions-action
-     id "stop_session"
-     (apply-partially #'omnigent-ui--action-result "Stop" title))))
+    (omnigent-sessions-toggle-archive
+     id
+     (apply-partially #'omnigent-ui--action-result
+                      "Toggle archive" title))))
 
 (defun omnigent-ui-delete ()
   "Delete the selected session after confirmation."
   (interactive)
   (pcase-let ((`(,id . ,title) (omnigent-ui--action-target)))
-    (when (yes-or-no-p
-           (format "Permanently delete session %s? " title))
+    (when (y-or-n-p (format "Permanently delete session %s? " title))
       (omnigent-sessions-delete
        id
        (apply-partially #'omnigent-ui--action-result

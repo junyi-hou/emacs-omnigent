@@ -298,49 +298,88 @@
       (should-error (omnigent-sessions-create) :type 'user-error)
       (should-not posted))))
 
-(ert-deftest omnigent-sessions-actions-and-delete-forward-results ()
-  "Refresh before forwarding successful or failed action and delete results."
-  (dolist (operation '(action delete))
-    (dolist (status '(202 204 500 (:error (connection-failed))))
+(ert-deftest
+    omnigent-sessions-toggle-archive-and-delete-forward-results
+    ()
+  "Refresh before forwarding successful or failed archive and delete results."
+  (dolist (operation '(archive delete))
+    (dolist (status '(200 202 204 500 (:error (connection-failed))))
       (let ((refreshes 0)
             request
             callback
             received
             (body '((result . "server result"))))
-        (cl-letf (((symbol-function
-                    'omnigent-transport-post-session-event)
-                   (lambda (id event cb)
-                     (setq
-                      request (list id event)
-                      callback cb)))
-                  ((symbol-function
-                    'omnigent-transport-delete-session)
-                   (lambda (id cb)
-                     (setq
-                      request (list id)
-                      callback cb)))
+        (cl-letf (((symbol-function 'omnigent-transport-request)
+                   (lambda (method path cb &optional data)
+                     (if (equal method "GET")
+                         (funcall cb 200 '((archived . :json-false)))
+                       (setq
+                        request (list method path data)
+                        callback cb))))
                   ((symbol-function 'omnigent-sessions-refresh)
                    (lambda () (cl-incf refreshes))))
           (let ((on-result
                  (lambda (result-status result-body)
                    (should (= refreshes 1))
                    (setq received (list result-status result-body)))))
-            (if (eq operation 'action)
-                (omnigent-sessions-action
-                 "session" "interrupt" on-result)
+            (if (eq operation 'archive)
+                (omnigent-sessions-toggle-archive "session" on-result)
               (omnigent-sessions-delete "session" on-result)))
           (should
            (equal
             request
-            (if (eq operation 'action)
-                '("session" (("type" . "interrupt")))
-              '("session"))))
+            (if (eq operation 'archive)
+                '("PATCH" "/v1/sessions/session" (("archived" . t)))
+              '("DELETE" "/v1/sessions/session" nil))))
           (should (= refreshes 0))
           (should-not received)
           (funcall callback status body)
           (should (= refreshes 1))
           (should (equal (car received) status))
           (should (eq (cadr received) body)))))))
+
+(ert-deftest omnigent-sessions-toggle-archive-uses-server-state ()
+  "Toggle both archive states and reject failed or malformed session reads."
+  (dolist (state '(t :json-false))
+    (let (payload
+          result)
+      (cl-letf (((symbol-function 'omnigent-transport-request)
+                 (lambda (method _path callback &optional data)
+                   (if (equal method "GET")
+                       (funcall callback 200 `((archived . ,state)))
+                     (setq payload (json-encode data))
+                     (funcall callback 200 data))))
+                ((symbol-function 'omnigent-sessions-refresh)
+                 #'ignore))
+        (omnigent-sessions-toggle-archive
+         "session" (lambda (status _body) (setq result status)))
+        (should (= result 200))
+        (should
+         (equal
+          payload
+          (if (eq state t)
+              "{\"archived\":false}"
+            "{\"archived\":true}"))))))
+  (dolist (response
+           '((403 . ((detail . "Denied")))
+             (200 . ((id . "session")))))
+    (let (result)
+      (cl-letf (((symbol-function 'omnigent-transport-get-session)
+                 (lambda (_id callback)
+                   (funcall callback (car response) (cdr response))))
+                ((symbol-function
+                  'omnigent-transport-set-session-archived)
+                 (lambda (&rest _)
+                   (ert-fail "Unexpected archive update"))))
+        (omnigent-sessions-toggle-archive
+         "session"
+         (lambda (status body) (setq result (list status body))))
+        (should
+         (equal
+          result
+          (if (= (car response) 403)
+              (list 403 (cdr response))
+            '(nil "Invalid session archive state"))))))))
 
 (ert-deftest omnigent-sessions-workspace-completes-host-directories ()
   "Complete directories through the server, including pagination and nested paths."
@@ -730,12 +769,16 @@
     ()
   "Deliver the original mutation result even when the follow-up refresh signals."
   (dolist (operation
-           '(omnigent-sessions-action omnigent-sessions-delete))
+           '(omnigent-sessions-toggle-archive
+             omnigent-sessions-delete))
     (let (callback
           received)
       (cl-letf (((symbol-function
-                  'omnigent-transport-post-session-event)
-                 (lambda (_id _event cb) (setq callback cb)))
+                  'omnigent-transport-set-session-archived)
+                 (lambda (_id _archived cb) (setq callback cb)))
+                ((symbol-function 'omnigent-transport-get-session)
+                 (lambda (_id cb)
+                   (funcall cb 200 '((archived . :json-false)))))
                 ((symbol-function 'omnigent-transport-delete-session)
                  (lambda (_id cb) (setq callback cb)))
                 ((symbol-function 'omnigent-sessions-refresh)
@@ -743,9 +786,7 @@
         (let ((on-result
                (lambda (status body)
                  (setq received (list status body)))))
-          (if (eq operation 'omnigent-sessions-action)
-              (funcall operation "id" "interrupt" on-result)
-            (funcall operation "id" on-result)))
+          (funcall operation "id" on-result))
         (should
          (equal
           (should-error

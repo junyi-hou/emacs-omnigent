@@ -199,6 +199,46 @@
             " ")))
       (omnigent-ui--busy-stop))))
 
+(ert-deftest omnigent-ui-session-archive-and-delete-commands ()
+  "Archive the selected session and require confirmation for permanent deletion."
+  (dolist (conversation '(nil t))
+    (with-temp-buffer
+      (if conversation
+          (setq
+           major-mode 'omnigent-conversation-mode
+           omnigent-conversation-session-id "target")
+        (setq major-mode 'omnigent-ui-sessions-mode)
+        (insert
+         (propertize "Target\n" 'omnigent-ui-session-id "target"))
+        (goto-char (point-min)))
+      (let ((omnigent-sessions
+             '(((id . "target") (title . "Target"))))
+            (omnigent-sessions--buffers nil)
+            archived
+            deleted
+            confirmation)
+        (cl-letf (((symbol-function 'omnigent-sessions-toggle-archive)
+                   (lambda (id callback)
+                     (setq archived id)
+                     (funcall callback 200 '((archived . t)))))
+                  ((symbol-function 'omnigent-sessions-delete)
+                   (lambda (id callback)
+                     (setq deleted id)
+                     (funcall callback 204 nil)))
+                  ((symbol-function 'y-or-n-p)
+                   (lambda (prompt)
+                     (should
+                      (string-match-p
+                       "Permanently delete session Target" prompt))
+                     confirmation)))
+          (omnigent-ui-archive)
+          (should (equal archived "target"))
+          (omnigent-ui-delete)
+          (should-not deleted)
+          (setq confirmation t)
+          (omnigent-ui-delete)
+          (should (equal deleted "target")))))))
+
 (ert-deftest omnigent-ui-conversation-user-permission ()
   "Freeze read-only sessions and restore editing when permission increases."
   (omnigent-ui-test--conversation
@@ -214,7 +254,8 @@
     (should-error (insert "more") :type 'buffer-read-only)
     (should-error (omnigent-conversation-send) :type 'user-error)
     (should-error (omnigent-conversation-interrupt) :type 'user-error)
-    (should-error (omnigent-ui-stop) :type 'user-error)
+    (should-error (omnigent-ui-archive) :type 'user-error)
+    (should-error (omnigent-ui-delete) :type 'user-error)
     (omnigent-conversation--snapshot
      200
      '((permission_level . 2)

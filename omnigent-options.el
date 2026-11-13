@@ -21,7 +21,8 @@
     (define-key map (kbd "C-c C-k") #'omnigent-conversation-interrupt)
     (define-key map (kbd "TAB") #'widget-forward)
     (define-key map (kbd "<backtab>") #'widget-backward)
-    (define-key map (kbd "C-c C-s") #'omnigent-ui-stop)
+    (define-key map (kbd "C-c C-a") #'omnigent-ui-archive)
+    (define-key map (kbd "C-c C-d") #'omnigent-ui-delete)
     map)
   "Keymap for `omnigent-conversation-mode'."
   :type 'keymap
@@ -33,7 +34,7 @@
     (define-key map (kbd "RET") #'omnigent-ui-sessions-open)
     (define-key map (kbd "g") #'omnigent-ui-refresh)
     (define-key map (kbd "c") #'omnigent-sessions-create)
-    (define-key map (kbd "s") #'omnigent-ui-stop)
+    (define-key map (kbd "a") #'omnigent-ui-archive)
     (define-key map (kbd "d") #'omnigent-ui-delete)
     (define-key map (kbd "C-c C-n") #'omnigent-sessions-create)
     map)

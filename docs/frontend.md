@@ -35,7 +35,10 @@ and keep the existing rows, which may be stale. If the server reports a truncate
 list, show a non-selectable warning line. `RET` opens the selected
 session's conversation buffer in the main window and keeps the session side window
 visible. Move point to the conversation buffer. Follow Treemacs or Neotree conventions for other
-bindings where applicable.
+bindings where applicable. Use `a` to toggle archive and `d` to delete the
+session at point. Archiving preserves history. Ask for confirmation before
+permanent deletion with `y-or-n-p`. The conversation commands use `C-c C-a` to
+toggle archive and `C-c C-d` for Delete.
 
 Use the session state face on the whole line, with a separate attention face on
 `!`. Provide faces for running, waiting, idle, failed, and archived sessions. Use

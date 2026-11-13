@@ -22,17 +22,18 @@ the WebSocket subscription has its own transport contract.
 | Browse host directories | `GET /v1/hosts/{host_id}/filesystem` or `/filesystem/{path}` | `omnigent-transport-request` |
 | Create session | `POST /v1/sessions` with `agent_id`, `host_id`, `workspace`, and optional `title` | `omnigent-transport-request` |
 | Interrupt | `POST /v1/sessions/{id}/events`, type `interrupt` | `omnigent-transport-post-session-event` |
-| Stop | Same endpoint, type `stop_session` | `omnigent-transport-post-session-event` |
-| Delete | `DELETE /v1/sessions/{id}` | New helper |
+| Toggle archive | `GET /v1/sessions/{id}`, then `PATCH` with the opposite `archived` boolean | `omnigent-sessions-toggle-archive` |
+| Delete | `DELETE /v1/sessions/{id}` | `omnigent-transport-delete-session` |
 | List updates | `WS /v1/sessions/updates` | `omnigent-transport-start-session-updates`, `omnigent-transport-set-session-updates-watch`, `omnigent-transport-stop-session-updates` |
 
-Stop belongs to session management and takes a session ID. It does not require an open
-conversation buffer. Stop is owner-only; it terminates the live process without deleting
-history. Stop is non-sticky: a later message normally relaunches the session on its
-online host.
+Toggle Archive reads the current server state and archives or unarchives the
+session. Both operations preserve history. Keep archived sessions in the list
+with their archived face. The server controls agent cleanup. Archive does not
+request worktree deletion. Session management does not expose a Stop command;
+use Interrupt to cancel the current turn.
 
-Delete permanently removes the conversation; request confirmation before deleting it. Do
-not use deletion as a close operation.
+Delete permanently removes the conversation; request confirmation with
+`y-or-n-p` before deleting it. Do not use deletion as a close operation.
 
 ### Execution host and workspace
 
@@ -131,7 +132,7 @@ WebSocket.
 
 ## Deferred
 
-Forking, child sessions, archiving and unarchiving, cursor pagination beyond 1,000,
+Forking, child sessions, cursor pagination beyond 1,000,
 search, custom ordering, automatic remote-host setup, TRAMP-to-host inference,
 managed sandbox creation, advanced creation options, and `delete_worktree` are
 post-v1. Selecting an existing online remote host is supported. V1 still lists

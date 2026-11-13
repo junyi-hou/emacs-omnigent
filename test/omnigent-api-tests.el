@@ -247,12 +247,27 @@
       :test #'equal))))
 
 (ert-deftest omnigent-api-session-get-and-delete ()
-  "Get and delete a session."
+  "Get, archive, unarchive, and permanently delete a session."
   (let* ((id (omnigent-integration-create-session))
          (path (omnigent-transport--session-path id))
          (response (omnigent-mock-test-request "GET" path)))
     (should (= (car response) 200))
     (should (equal (alist-get 'id (cdr response)) id))
+    (let ((archived
+           (omnigent-mock-test-request
+            "PATCH" path '(("archived" . t)))))
+      (should (= (car archived) 200)))
+    (setq response (omnigent-mock-test-request "GET" path))
+    (should (= (car response) 200))
+    (should (eq (alist-get 'archived (cdr response)) t))
+    (should
+     (= (car
+         (omnigent-mock-test-request
+          "PATCH" path '(("archived" . :json-false))))
+        200))
+    (setq response (omnigent-mock-test-request "GET" path))
+    (should (= (car response) 200))
+    (should (eq (alist-get 'archived (cdr response)) :json-false))
     (should
      (memq
       (car (omnigent-mock-test-request "DELETE" path)) '(200 204)))
