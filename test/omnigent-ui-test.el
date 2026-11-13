@@ -844,6 +844,7 @@
      "response.in_progress" '((response . ((id . "turn")))))
     (omnigent-conversation--event
      "response.reasoning_text.delta" '((delta . "think")))
+    (omnigent-ui--transcript-flush (current-buffer))
     (omnigent-ui--fold-button (button-at (point-min)))
     (omnigent-conversation--event
      "response.output_item.done"
@@ -853,6 +854,7 @@
          (type . "reasoning")
          (content . "thinking")
          (response_id . "turn")))))
+    (omnigent-ui--transcript-flush (current-buffer))
     (should (gethash "final" omnigent-ui--folds))
     (goto-char (point-min))
     (forward-line 1)
@@ -1194,6 +1196,7 @@
      '((elicitation_id . "q") (params . ((message . "Question")))))
     (omnigent-conversation--event
      "response.output_text.delta" '((delta . "current message")))
+    (omnigent-ui--transcript-flush (current-buffer))
     (should
      (= (overlay-start omnigent-ui--busy-overlay)
         (marker-position omnigent-ui--composer-label)))

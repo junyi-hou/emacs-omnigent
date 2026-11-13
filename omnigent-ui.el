@@ -591,7 +591,7 @@
                         'omnigent-ui-agent))
           text "\n\n"))))))
 
-(defun omnigent-ui--transcript ()
+(defun omnigent-ui--transcript-render ()
   "Refresh only transcript text, preserving composer, forms, folds and reading."
   (when (and omnigent-ui--request-start (not omnigent-ui--rendering))
     (let* ((omnigent-ui--rendering t)
@@ -643,6 +643,26 @@
                 (with-selected-window window
                   (recenter -1))
               (set-window-start window new-start t))))))))
+
+(defun omnigent-ui--transcript-flush (buffer)
+  "Render the pending transcript update in BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq omnigent-ui--transcript-timer nil)
+      (omnigent-ui--transcript-render))))
+
+(defun omnigent-ui--transcript ()
+  "Batch transcript updates while a response streams, then render them."
+  (if (and omnigent-conversation--response-id
+           (not omnigent-conversation--invalid))
+      (unless (timerp omnigent-ui--transcript-timer)
+        (setq omnigent-ui--transcript-timer
+              (run-at-time 0.05 nil #'omnigent-ui--transcript-flush
+                           (current-buffer))))
+    (when (timerp omnigent-ui--transcript-timer)
+      (cancel-timer omnigent-ui--transcript-timer)
+      (setq omnigent-ui--transcript-timer nil))
+    (omnigent-ui--transcript-render)))
 
 (defun omnigent-ui--pending-inputs ()
   "Render submitted input between request forms and the editable composer."
@@ -792,6 +812,7 @@
 (defvar-local omnigent-ui--busy-overlay nil)
 (defvar-local omnigent-ui--busy-timer nil)
 (defvar-local omnigent-ui--busy-frame 0)
+(defvar-local omnigent-ui--transcript-timer nil)
 
 (defun omnigent-ui--busy-tick (buffer)
   "Advance the busy indicator in BUFFER."
@@ -802,18 +823,20 @@
         (cancel-timer omnigent-ui--busy-timer)
         (setq omnigent-ui--busy-timer nil))
       (when (overlayp omnigent-ui--busy-overlay)
-        (move-overlay
-         omnigent-ui--busy-overlay
-         omnigent-ui--composer-label
-         omnigent-ui--composer-label)
-        (overlay-put
-         omnigent-ui--busy-overlay 'before-string
-         (if (and omnigent-conversation--response-id
-                  (not omnigent-conversation--invalid))
-             (prog1 (aref
-                     ["|" "/" "-" "\\"] (% omnigent-ui--busy-frame 4))
-               (cl-incf omnigent-ui--busy-frame))
-           " "))))))
+        (let ((frame
+               (if (and omnigent-conversation--response-id
+                        (not omnigent-conversation--invalid))
+                   (prog1 (aref
+                           ["|" "/" "-" "\\"]
+                           (% omnigent-ui--busy-frame 4))
+                     (cl-incf omnigent-ui--busy-frame))
+                 " ")))
+          (unless (equal
+                   (overlay-get
+                    omnigent-ui--busy-overlay 'before-string)
+                   frame)
+            (overlay-put
+             omnigent-ui--busy-overlay 'before-string frame)))))))
 
 (defun omnigent-ui--busy-update ()
   "Start or stop the prompt animation for the active response."
@@ -833,7 +856,10 @@
   "Stop the prompt animation when the conversation closes."
   (when omnigent-ui--busy-timer
     (cancel-timer omnigent-ui--busy-timer)
-    (setq omnigent-ui--busy-timer nil)))
+    (setq omnigent-ui--busy-timer nil))
+  (when (timerp omnigent-ui--transcript-timer)
+    (cancel-timer omnigent-ui--transcript-timer)
+    (setq omnigent-ui--transcript-timer nil)))
 
 (defun omnigent-ui-conversation-setup ()
   "Initialize transcript, request and composer boundaries for this session."
