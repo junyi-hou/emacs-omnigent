@@ -62,6 +62,12 @@
   :type 'boolean
   :group 'omnigent)
 
+(defcustom omnigent-title-update-turn-interval 10
+  "Number of consumed user prompts between generated title updates.
+Set this to 0 to disable title updates."
+  :type 'integer
+  :group 'omnigent)
+
 (defcustom omnigent-workspace-diff-mode #'diff-mode
   "Function called in the workspace diff buffer after inserting the diff.
 The function takes no arguments."

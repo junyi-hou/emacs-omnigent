@@ -212,6 +212,15 @@ only formats text; the caller decides how to present it."
            t
          :json-false)))))
 
+(defun omnigent-transport-generate-session-title
+    (session-id instructions callback)
+  "Request a generated title for SESSION-ID with INSTRUCTIONS.
+Call CALLBACK with the result."
+  (omnigent-transport-request
+   "PATCH" (omnigent-transport--session-path session-id) callback
+   `(("generate_title" . t)
+     ("session_title_instructions" . ,instructions))))
+
 (defun omnigent-transport-delete-session (session-id callback)
   "Delete SESSION-ID and call CALLBACK with status and response body."
   (omnigent-transport-request

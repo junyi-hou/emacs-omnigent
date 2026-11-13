@@ -3,6 +3,24 @@
 (require 'ert)
 (require 'omnigent-transport)
 
+(ert-deftest omnigent-transport-generate-session-title-patches-session
+    ()
+  "Request generated title metadata through the session PATCH endpoint."
+  (let (request)
+    (cl-letf (((symbol-function 'omnigent-transport-request)
+               (lambda (&rest args) (setq request args))))
+      (omnigent-transport-generate-session-title
+       "session" "Focus on recent turns." #'ignore))
+    (should
+     (equal
+      request
+      (list
+       "PATCH" "/v1/sessions/session" #'ignore
+       '(("generate_title" . t)
+         ("session_title_instructions"
+          .
+          "Focus on recent turns.")))))))
+
 (ert-deftest omnigent-transport-success-codes ()
   "Accept only integer HTTP success codes, including both range endpoints."
   (dolist (status '(200 202 204 299))
