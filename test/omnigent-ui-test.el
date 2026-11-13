@@ -860,6 +860,88 @@
     (forward-line 1)
     (should-not (invisible-p (point)))))
 
+(ert-deftest omnigent-ui-workspace-reopens-on-conversation-selection
+    ()
+  "Reopen a closed workspace when selecting another conversation with changes."
+  (omnigent-ui-test--conversation
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (let ((omnigent-ui--selected-session "other")
+            (omnigent-ui--workspace-visible nil)
+            (omnigent-ui--workspace-closed t)
+            (omnigent-ui--changing-windows nil)
+            (data
+             '((changes
+                . (((path . "changed") (status . "modified")))))))
+        (unwind-protect
+            (cl-letf (((symbol-function 'omnigent-workspace-list)
+                       (lambda (_id callback)
+                         (funcall callback 200 data))))
+              (omnigent-ui--selection)
+              (should
+               (get-buffer-window
+                (omnigent-ui--workspace-buffer "conv_test")))
+              (should-not
+               (window-parameter (selected-window) 'window-side))
+              (omnigent-ui--workspace-hide)
+              (setq omnigent-ui--workspace-closed t)
+              (omnigent-ui--selection)
+              (should-not omnigent-ui--workspace-visible))
+          (omnigent-ui--workspace-hide)
+          (when-let* ((buffer
+                       (get-buffer
+                        "*omnigent-workspace: conv_test*")))
+            (kill-buffer buffer)))))))
+
+(ert-deftest omnigent-ui-workspace-reopens-after-turn ()
+  "Reopen on terminal status only when the selected session has changed files."
+  (omnigent-ui-test--conversation
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (let ((omnigent-ui--selected-session "conv_test")
+            (omnigent-ui--workspace-visible nil)
+            (omnigent-ui--workspace-closed t)
+            (omnigent-ui--changing-windows nil)
+            (data
+             '((changes
+                . (((path . "changed") (status . "modified")))))))
+        (unwind-protect
+            (cl-letf (((symbol-function 'omnigent-workspace-list)
+                       (lambda (_id callback)
+                         (funcall callback 200 data))))
+              (omnigent-ui--conversation-event
+               "session.changed_files.invalidated" nil)
+              (should-not omnigent-ui--workspace-visible)
+              (omnigent-ui--conversation-event
+               "response.completed" nil)
+              (should-not omnigent-ui--workspace-visible)
+              (omnigent-ui--conversation-event
+               "session.status" '((status . "idle")))
+              (should
+               (get-buffer-window
+                (omnigent-ui--workspace-buffer "conv_test")))
+              (should-not
+               (window-parameter (selected-window) 'window-side))
+              (omnigent-ui--workspace-hide)
+              (setq
+               omnigent-ui--workspace-closed t
+               data '((changes . nil)))
+              (omnigent-ui--conversation-event
+               "session.status" '((status . "idle")))
+              (should-not omnigent-ui--workspace-visible)
+              (setq
+               omnigent-ui--workspace-closed t
+               omnigent-ui--selected-session "other")
+              (omnigent-ui--conversation-event
+               "session.status" '((status . "idle")))
+              (should omnigent-ui--workspace-closed)
+              (should-not omnigent-ui--workspace-visible))
+          (omnigent-ui--workspace-hide)
+          (when-let* ((buffer
+                       (get-buffer
+                        "*omnigent-workspace: conv_test*")))
+            (kill-buffer buffer)))))))
+
 (ert-deftest omnigent-ui-workspace-window-lifecycle ()
   "Stack side views, switch caches, close empty results and honor manual closure."
   (save-window-excursion

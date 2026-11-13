@@ -153,36 +153,43 @@ user's reading position.
 
 ## Workspace view
 
-Show workspace changes for the selected conversation in a left side window below the
-session list. Let Emacs choose the initial height split and allow normal window
-resizing. Open the workspace panel automatically on server connection when the current
-session has changed files. Users can close it and open it again with a command. After
-the user closes it, do not reopen it automatically on later updates. List changed files
-as flat, workspace-relative paths. Prefix each path with `A`, `D`, or `M` for the
-server's created, deleted, or modified status. Sort files alphabetically by
-workspace-relative path, regardless of status. Add a selectable `[unified diff]` row
-above the files; `RET` on that row displays the combined diff. `RET` on a file displays
-its diff using Emacs window selection rules and the user's `display-buffer`
-configuration; do not force the main window. Fetch fresh data each time a diff is
-opened. Show the diff in a separate buffer. Use `omnigent-workspace-diff-mode`
-to select its mode function; the default is `diff-mode`. If the requested
-file has no diff, report that no diff is available. If a diff request fails, do not
-report the failure; leave any existing diff buffer unchanged. Reuse the existing buffer
-for the same session and file, replacing its contents only after a successful fetch.
-Likewise, reuse one combined-diff buffer per session. Keep a separate workspace buffer
-per session. After the new conversation opens successfully, or the user selects an
-existing conversation through Emacs buffer commands, replace the panel contents with the
-selected session's cached list, or clear it if there is no cached list. Keep the last
-selected session's workspace panel when another, non-conversation buffer is displayed.
-When multiple conversations are visible, use the most recently selected conversation
-window. Fetch the change list when a session is selected and when its stream reports
-`session.changed_files.invalidated`. A late response updates only its own session's
-buffer, not the selected session's panel. Use `g` for manual refresh. Preserve point by
-file path on refresh; if the file is gone, move point to the nearest remaining row. A
-failed fetch is a no-op: keep the panel's previous contents and visibility, which may be
-stale. Do not report the failure in v1. A successful empty list closes the panel, and
-the session list expands to use the available side-window height. The remaining UI
-details are open for discussion. Data collection and API semantics belong to
+Show workspace changes for the selected conversation in a left side window below
+the session list. Let Emacs choose the initial height split and allow normal
+window resizing. Open the workspace panel automatically on server connection
+when the current session has changed files. Users can close it and open it again
+with a command. After the user closes it, keep it closed on ordinary
+updates. Reopen it when the user selects a different conversation with changed
+files, or when the selected session's turn ends with changed files. Fetch
+changes on terminal `session.status` events (`idle` or `failed`); input-delivery
+`response.completed` events can precede the native turn's end.  List changed
+files as flat, workspace-relative paths. Prefix each path with `A`, `D`, or `M`
+for the server's created, deleted, or modified status. Sort files alphabetically
+by workspace-relative path, regardless of status. Add a selectable `[unified
+diff]` row above the files; `RET` on that row displays the combined diff. `RET`
+on a file displays its diff using Emacs window selection rules and the user's
+`display-buffer` configuration; do not force the main window. Fetch fresh data
+each time a diff is opened. Show the diff in a separate buffer. Use
+`omnigent-workspace-diff-mode` to select its mode function; the default is
+`diff-mode`. If the requested file has no diff, report that no diff is
+available. If a diff request fails, do not report the failure; leave any
+existing diff buffer unchanged. Reuse the existing buffer for the same session
+and file, replacing its contents only after a successful fetch.  Likewise, reuse
+one combined-diff buffer per session. Keep a separate workspace buffer per
+session. After the new conversation opens successfully, or the user selects an
+existing conversation through Emacs buffer commands, replace the panel contents
+with the selected session's cached list, or clear it if there is no cached
+list. Keep the last selected session's workspace panel when another,
+non-conversation buffer is displayed.  When multiple conversations are visible,
+use the most recently selected conversation window. Fetch the change list when a
+session is selected and when its stream reports
+`session.changed_files.invalidated`. A late response updates only its own
+session's buffer, not the selected session's panel. Use `g` for manual
+refresh. Preserve point by file path on refresh; if the file is gone, move point
+to the nearest remaining row. A failed fetch is a no-op: keep the panel's
+previous contents and visibility, which may be stale. Do not report the failure
+in v1. A successful empty list closes the panel, and the session list expands to
+use the available side-window height. The remaining UI details are open for
+discussion. Data collection and API semantics belong to
 [workspace-changes.md](workspace-changes.md).
 
 ## Nongoals

@@ -201,8 +201,10 @@
                   (equal
                    omnigent-conversation-session-id
                    omnigent-ui--selected-session)))
-        (setq omnigent-ui--selected-session
-              omnigent-conversation-session-id)
+        (setq
+         omnigent-ui--selected-session
+         omnigent-conversation-session-id
+         omnigent-ui--workspace-closed nil)
         (omnigent-ui-sessions-render)
         (omnigent-ui--workspace-display)
         (omnigent-ui-workspace-refresh)))))
@@ -723,10 +725,20 @@
            'line-prefix
            nil))))))
 
-(defun omnigent-ui--conversation-event (name _data)
-  "Refresh selected workspace changes on stream invalidation NAME."
-  (when (equal name "session.changed_files.invalidated")
-    (omnigent-ui-workspace-refresh omnigent-conversation-session-id)))
+(defun omnigent-ui--conversation-event (name data)
+  "Refresh workspace changes on invalidation or terminal session status DATA."
+  (let ((finished
+         (and (equal name "session.status")
+              (member (alist-get 'status data) '("idle" "failed")))))
+    (when (and finished
+               (equal
+                omnigent-conversation-session-id
+                omnigent-ui--selected-session))
+      (setq omnigent-ui--workspace-closed nil))
+    (when (or finished
+              (equal name "session.changed_files.invalidated"))
+      (omnigent-ui-workspace-refresh
+       omnigent-conversation-session-id))))
 
 (defun omnigent-ui--token-count (count)
   "Format token COUNT with at most one decimal, rounded up."
