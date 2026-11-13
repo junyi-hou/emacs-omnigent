@@ -3,6 +3,50 @@
 (require 'cl-lib)
 (require 'omnigent)
 
+(ert-deftest omnigent-conversation-title-tracks-stream-updates ()
+  "Rename an open conversation when its title changes."
+  (let ((omnigent-sessions--buffers nil)
+        (omnigent-sessions
+         '(((id . "session-title") (title . "Before"))))
+        event)
+    (cl-letf (((symbol-function
+                'omnigent-transport-start-session-stream)
+               (lambda (_id on-event &rest _callbacks)
+                 (setq event on-event)
+                 'stream))
+              ((symbol-function
+                'omnigent-transport-stop-session-stream)
+               #'ignore))
+      (unwind-protect
+          (progn
+            (omnigent-conversation-open "session-title" "Before")
+            (let ((buffer (current-buffer)))
+              (unwind-protect
+                  (progn
+                    (omnigent-conversation--snapshot
+                     200
+                     '((items . [])
+                       (pending_inputs . [])
+                       (pending_elicitations . [])))
+                    (funcall event
+                             "session.title"
+                             '((title . "After")))
+                    (should
+                     (equal
+                      (buffer-name buffer)
+                      "*omnigent: After [session-t]*"))
+                    (omnigent-sessions--frame
+                     '((type . "changed")
+                       (items
+                        .
+                        [((id . "session-title")
+                          (title . "From update"))])))
+                    (should
+                     (equal
+                      (buffer-name buffer)
+                      "*omnigent: From update [session-t]*")))
+                (kill-buffer buffer))))))))
+
 (ert-deftest omnigent-conversation-snapshot-stream-and-draft ()
   "Reconcile snapshot and stream items while keeping the editable composer."
   (let (event

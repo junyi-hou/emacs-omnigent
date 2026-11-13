@@ -15,6 +15,52 @@
 
 (add-hook 'omnigent-sessions-open-hook #'omnigent-ui-created)
 
+(defun omnigent--conversation-title (title)
+  "Rename the current conversation buffer to TITLE."
+  (when (and omnigent-conversation-session-id
+             (or (null title) (stringp title)))
+    (rename-buffer (format "*omnigent: %s [%s]*"
+                           (if (or (null title)
+                                   (string-empty-p title))
+                               "Untitled"
+                             title)
+                           (substring
+                            omnigent-conversation-session-id
+                            0
+                            (min 9
+                                 (length
+                                  omnigent-conversation-session-id))))
+                   t)))
+
+(defun omnigent--conversation-title-event (name data)
+  "Apply title from conversation SSE event NAME and DATA."
+  (when (equal name "session.title")
+    (omnigent--conversation-title (alist-get 'title data))))
+
+(defun omnigent--conversation-title-watch ()
+  "Watch title events in the current conversation buffer."
+  (add-hook 'omnigent-conversation-event-hook
+            #'omnigent--conversation-title-event
+            nil
+            t))
+
+(defun omnigent--sessions-title-frame (frame)
+  "Apply session titles from update FRAME to open conversation buffers."
+  (when (member (alist-get 'type frame) '("snapshot" "changed"))
+    (dolist (session (append (alist-get 'items frame) nil))
+      (when-let* ((buffer
+                   (omnigent-sessions-buffer
+                    (alist-get 'id session))))
+        (with-current-buffer buffer
+          (omnigent--conversation-title
+           (alist-get 'title session)))))))
+
+(add-hook
+ 'omnigent-conversation-mode-hook
+ #'omnigent--conversation-title-watch)
+(add-hook
+ 'omnigent-sessions-frame-hook #'omnigent--sessions-title-frame)
+
 (defvar omnigent-start-process nil
   "CLI process that is starting the local Omnigent server.")
 
