@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'url-parse)
+
 (defgroup omnigent nil
   "Interact with Omnigent servers."
   :group 'applications)
@@ -55,6 +57,17 @@
 (defcustom omnigent-executable "omnigent"
   "Omnigent CLI executable used to start the local server."
   :type 'file
+  :group 'omnigent)
+
+(defcustom omnigent-host-address-function
+  (lambda (_host-id)
+    (url-host (url-generic-parse-url omnigent-server-url)))
+  "Function that returns the address for an Omnigent host ID.
+The function takes one host ID string and returns an address string.
+The address `localhost' means the host in `omnigent-server-url'.
+The default returns the host in `omnigent-server-url'.
+Configure this function when a runner is on a different host."
+  :type 'function
   :group 'omnigent)
 
 (defcustom omnigent-open-session-list-on-connect t
