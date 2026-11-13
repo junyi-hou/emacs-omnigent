@@ -13,6 +13,44 @@
   "Transport settings for Omnigent."
   :group 'applications)
 
+(defcustom omnigent-conversation-mode-map
+  (let ((map (make-sparse-keymap)))
+    (require 'text-mode)
+    (set-keymap-parent map text-mode-map)
+    (define-key map (kbd "C-c C-c") #'omnigent-conversation-send)
+    (define-key map (kbd "C-c C-k") #'omnigent-conversation-interrupt)
+    (define-key map (kbd "TAB") #'widget-forward)
+    (define-key map (kbd "<backtab>") #'widget-backward)
+    (define-key map (kbd "C-c C-s") #'omnigent-ui-stop)
+    map)
+  "Keymap for `omnigent-conversation-mode'."
+  :type 'keymap
+  :group 'omnigent)
+
+(defcustom omnigent-ui-sessions-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map special-mode-map)
+    (define-key map (kbd "RET") #'omnigent-ui-sessions-open)
+    (define-key map (kbd "g") #'omnigent-ui-refresh)
+    (define-key map (kbd "c") #'omnigent-sessions-create)
+    (define-key map (kbd "s") #'omnigent-ui-stop)
+    (define-key map (kbd "d") #'omnigent-ui-delete)
+    (define-key map (kbd "C-c C-n") #'omnigent-sessions-create)
+    map)
+  "Keymap for `omnigent-ui-sessions-mode'."
+  :type 'keymap
+  :group 'omnigent)
+
+(defcustom omnigent-ui-workspace-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map special-mode-map)
+    (define-key map (kbd "RET") #'omnigent-ui-workspace-diff)
+    (define-key map (kbd "g") #'omnigent-ui-workspace-refresh)
+    map)
+  "Keymap for the workspace side view."
+  :type 'keymap
+  :group 'omnigent)
+
 (defcustom omnigent-executable "omnigent"
   "Omnigent CLI executable used to start the local server."
   :type 'file

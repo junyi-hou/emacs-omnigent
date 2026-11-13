@@ -554,15 +554,6 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
     (omnigent-transport-stop-session-stream
      omnigent-conversation--stream)))
 
-(defvar omnigent-conversation-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map text-mode-map)
-    (define-key map (kbd "C-c C-c") #'omnigent-conversation-send)
-    (define-key map (kbd "C-c C-k") #'omnigent-conversation-interrupt)
-    map)
-  "Keymap for `omnigent-conversation-mode'.")
-
-
 (defun omnigent-conversation--notify-input-change ()
   "Notify conversation observers without interrupting input submission."
   (save-current-buffer

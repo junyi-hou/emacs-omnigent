@@ -119,19 +119,6 @@
             (goto-char (point-min))))))))
 
 
-(defvar omnigent-ui-sessions-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map special-mode-map)
-    (define-key map (kbd "RET") #'omnigent-ui-sessions-open)
-    (define-key map (kbd "g") #'omnigent-ui-refresh)
-    (define-key map (kbd "c") #'omnigent-sessions-create)
-    (define-key map (kbd "s") #'omnigent-ui-stop)
-    (define-key map (kbd "d") #'omnigent-ui-delete)
-    (define-key map (kbd "C-c C-n") #'omnigent-sessions-create)
-    map)
-  "Keymap for `omnigent-ui-sessions-mode'.")
-
-
 ;;; Connection and selection
 
 (defvar omnigent-ui--idle-timer nil)
@@ -256,15 +243,6 @@
         (omnigent-ui--workspace-hide)))))
 
 ;;; Workspace side windows
-
-(defvar omnigent-ui-workspace-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map special-mode-map)
-    (define-key map (kbd "RET") #'omnigent-ui-workspace-diff)
-    (define-key map (kbd "g") #'omnigent-ui-workspace-refresh)
-    map)
-  "Keymap for the workspace side view.")
-
 
 (defun omnigent-ui--workspace-buffer (id)
   "Return the separate workspace buffer for session ID."
@@ -936,11 +914,6 @@
   (add-hook 'after-change-functions #'omnigent-ui--composer-indent
             nil
             t)
-  (let ((map (copy-keymap omnigent-conversation-mode-map)))
-    (define-key map (kbd "TAB") #'widget-forward)
-    (define-key map (kbd "<backtab>") #'widget-backward)
-    (define-key map (kbd "C-c C-s") #'omnigent-ui-stop)
-    (use-local-map map))
   (omnigent-ui--transcript)
   (omnigent-ui--requests)
   (omnigent-ui--pending-inputs)
