@@ -19,8 +19,7 @@
 (defvar omnigent-ui--selected-session nil)
 (defvar-local omnigent-ui--widgets nil)
 
-(defface omnigent-ui-session-running
-  '((t :inherit font-lock-keyword-face))
+(defface omnigent-ui-session-running '((t :inherit warning))
   "Face for running sessions."
   :group 'omnigent-ui)
 (defface omnigent-ui-session-waiting

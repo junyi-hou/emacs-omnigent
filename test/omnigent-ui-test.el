@@ -28,6 +28,10 @@
            (eq
             (get-text-property (point) 'face)
             'omnigent-ui-session-attention))
+          (should
+           (eq
+            (get-text-property (+ (point) 2) 'face)
+            'omnigent-ui-session-running))
           (omnigent-ui-sessions-render)
           (should (equal (omnigent-ui--session-id-at-point) "a"))
           (should
