@@ -112,8 +112,8 @@ deleted file. Omnigent does not distinguish that failure from a new file.
 ## TODO
 
 - [ ] Use a Markdown parser to render conversation messages.
-- [ ] Autocomplete (via capf) file (@) and slash commands
-- [ ] Change permission mode
+- [ ] Autocomplete (via capf) file (@) and slash commands.
+- [ ] Support managed sandbox (issue 1) and external runner (start within emacs).
 - [ ] Design client-to-server retry for requests with no confirmed response, including
       messages and elicitation responses the server may already have accepted.
 - [ ] Support workspace diffs for non-Git workspaces.
@@ -123,8 +123,7 @@ deleted file. Omnigent does not distinguish that failure from a new file.
 - [ ] Advanced session-creation options in a Transient menu: sandbox,
       model override, reasoning effort, launch args, and
       fork options (harness switch, fork-from-response).
-- [ ] Child-session display and management.
-- [ ] Support side chat and its MCP tool allowlist.
+- [ ] Support side chat.
 - [ ] Fork sessions, including fork options.
 
 ## Sources
