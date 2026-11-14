@@ -664,18 +664,22 @@ Use `omnigent-conversation-open' to create a conversation buffer."
               (t
                (with-current-buffer buffer
                  (let ((choice
-                        (completing-read (if (eq setting 'model)
-                                             "Model: "
-                                           "Effort: ")
-                                         choices
-                                         nil t)))
-                   (unless (= generation
-                              omnigent-transport--generation)
-                     (user-error "Server changed during selection"))
-                   (if (eq setting 'model)
-                       (omnigent-conversation-set-model choice)
-                     (omnigent-conversation-set-effort
-                      choice)))))))))))))
+                        (condition-case nil
+                            (completing-read (if (eq setting 'model)
+                                                 "Model: "
+                                               "Effort: ")
+                                             choices
+                                             nil t)
+                          (quit
+                           nil))))
+                   (when choice
+                     (unless (= generation
+                                omnigent-transport--generation)
+                       (user-error "Server changed during selection"))
+                     (if (eq setting 'model)
+                         (omnigent-conversation-set-model choice)
+                       (omnigent-conversation-set-effort
+                        choice))))))))))))))
 
 (defun omnigent-conversation-set-model (&optional model)
   "Change the current session's MODEL asynchronously.
