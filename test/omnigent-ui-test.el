@@ -384,6 +384,18 @@
       (should-not (invisible-p (point)))
       (should-error (delete-char 1) :type 'text-read-only))))
 
+(ert-deftest omnigent-ui-fold-face-survives-fontification ()
+  "Keep the fold marker face when fontification removes its explicit face."
+  (with-temp-buffer
+    (let ((omnigent-ui--folds (make-hash-table :test 'equal)))
+      (omnigent-ui--fold "fold" "Heading" "Body" 'omnigent-ui-tool))
+    (remove-text-properties (point-min) (point-max) '(face nil))
+    (should
+     (eq
+      (get-char-property (point-min) 'face) 'omnigent-ui-fold-marker))
+    (should-not
+     (face-attribute 'omnigent-ui-fold-marker :underline nil t))))
+
 (ert-deftest omnigent-ui-fold-spacing-and-no-ellipsis ()
   "Keep visible blank lines between items with either fold state."
   (omnigent-ui-test--conversation

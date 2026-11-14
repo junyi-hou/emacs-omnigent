@@ -460,8 +460,25 @@
 (defface omnigent-ui-prompt '((t :inherit comint-highlight-prompt))
   "Face for conversation prompts and message labels."
   :group 'omnigent-ui)
+(defface omnigent-ui-fold-marker
+  '((t :inherit font-lock-builtin-face :underline nil))
+  "Face for fold buttons without underlining."
+  :group 'omnigent-ui)
+
+(define-button-type 'omnigent-ui-fold
+  'face
+  'omnigent-ui-fold-marker
+  'mouse-face
+  'omnigent-ui-fold-marker)
+
 (defface omnigent-ui-tool '((t :inherit font-lock-builtin-face))
   "Face for tool fold headers."
+  :group 'omnigent-ui)
+(defface omnigent-ui-tool-running '((t :foreground "goldenrod"))
+  "Face for running command status."
+  :group 'omnigent-ui)
+(defface omnigent-ui-tool-done '((t :foreground "forest green"))
+  "Face for finished command status."
   :group 'omnigent-ui)
 (defface omnigent-ui-reasoning '((t :inherit shadow))
   "Face for reasoning blocks."
@@ -557,22 +574,30 @@
      id (not (gethash id omnigent-ui--folds)) omnigent-ui--folds)
     (omnigent-ui--transcript)))
 
-(defun omnigent-ui--fold (id heading body face)
-  "Insert a fold for ID with HEADING, BODY, and FACE."
-  (let ((open (gethash id omnigent-ui--folds)))
-    (insert-text-button (concat
-                         (if open
-                             "▼ "
-                           "▶ ")
-                         heading)
+(defun omnigent-ui--fold (id heading body face &optional status-face)
+  "Insert a fold for ID with HEADING, BODY, FACE, and optional STATUS-FACE."
+  (let ((open (gethash id omnigent-ui--folds))
+        (start (point)))
+    (insert-text-button (if open
+                            "▼"
+                          "▶")
+                        'type
+                        'omnigent-ui-fold
                         'face
-                        face
+                        'omnigent-ui-fold-marker
+                        'font-lock-face
+                        'omnigent-ui-fold-marker
+                        'mouse-face
+                        'omnigent-ui-fold-marker
                         'omnigent-ui-fold-id
                         id
                         'action
                         #'omnigent-ui--fold-button
                         'follow-link
                         t)
+    (insert " " heading)
+    (when status-face
+      (add-face-text-property (+ start 2) (+ start 3) status-face))
     (let ((start (point)))
       (insert "\n" body)
       (put-text-property
@@ -582,6 +607,141 @@
       (when (eq face 'omnigent-ui-reasoning)
         (put-text-property start (point) 'face face)))
     (insert "\n\n")))
+
+(defun omnigent-ui--tool-render (id item outputs command)
+  "Render tool ITEM and OUTPUTS for ID with optional COMMAND heading."
+  (let* ((output (gethash (alist-get 'call_id item) outputs))
+         (args (omnigent-ui--string (alist-get 'arguments item)))
+         (status
+          (cond
+           ((or (eq (alist-get 'is_error output) t)
+                (alist-get 'error output)
+                (equal (alist-get 'status item) "failed"))
+            "failed")
+           (output
+            "done")
+           (t
+            "running")))
+         (name (or (alist-get 'name item) "Tool")))
+    (omnigent-ui--fold id
+                       (if command
+                           (concat
+                            (pcase status
+                              ("running" "\uf252 ")
+                              ("failed" "\uf2d3 ")
+                              (_ "\uf14a "))
+                            (truncate-string-to-width
+                             (replace-regexp-in-string
+                              "\n" " " command)
+                             80 nil nil "…"))
+                         (format "%s %s — %s"
+                                 name
+                                 (truncate-string-to-width
+                                  (replace-regexp-in-string
+                                   "\n" " " args)
+                                  80 nil nil "…")
+                                 status))
+                       (concat
+                        "Arguments:\n" args "\n\nOutput:\n"
+                        (omnigent-ui--bounded-output
+                         (omnigent-ui--string
+                          (or (alist-get 'output output)
+                              (alist-get 'content output)
+                              ""))))
+                       (if (equal status "failed")
+                           'omnigent-ui-error
+                         'omnigent-ui-tool)
+                       (when command
+                         (cond
+                          ((equal status "running")
+                           'omnigent-ui-tool-running)
+                          ((equal status "failed")
+                           'omnigent-ui-error)
+                          (t
+                           'omnigent-ui-tool-done))))))
+
+(defun omnigent-ui--tool-arguments (item)
+  "Parse the JSON arguments of tool ITEM."
+  (condition-case nil
+      (json-parse-string (omnigent-ui--string
+                          (alist-get 'arguments item))
+                         :object-type 'alist)
+    (error
+     nil)))
+
+(defun omnigent-ui--tool-shell-p (item)
+  "Return non-nil when ITEM is a shell call."
+  (equal (alist-get 'name item) "shell"))
+
+(defun omnigent-ui--tool-patch-p (item)
+  "Return non-nil when ITEM is a patch call."
+  (equal (alist-get 'name item) "apply_patch"))
+
+(defun omnigent-ui--tool-turn-diff-p (item)
+  "Return non-nil when ITEM is a turn diff."
+  (equal (alist-get 'name item) "turn_diff"))
+
+(defun omnigent-ui--tool-any-p (_item)
+  "Match any tool ITEM."
+  t)
+
+(defun omnigent-ui--tool-shell (id item outputs)
+  "Render shell ITEM and OUTPUTS for ID."
+  (let ((command
+         (alist-get 'command (omnigent-ui--tool-arguments item))))
+    (when (stringp command)
+      (setq command
+            (condition-case nil
+                (let ((parts (split-string-and-unquote command)))
+                  (if (and (= (length parts) 3)
+                           (string-match-p
+                            "\\`/bin/[^/]+sh\\'" (car parts))
+                           (equal (cadr parts) "-lc"))
+                      (nth 2 parts)
+                    command))
+              (error
+               command))))
+    (omnigent-ui--tool-render id item outputs command)))
+
+(defun omnigent-ui--tool-patch (id item outputs)
+  "Render patch ITEM and OUTPUTS for ID."
+  (let ((paths
+         (delq
+          nil
+          (mapcar
+           (lambda (change) (alist-get 'path change))
+           (append
+            (alist-get
+             'changes (omnigent-ui--tool-arguments item))
+            nil)))))
+    (omnigent-ui--tool-render
+     id item outputs
+     (when paths
+       (concat "edit " (mapconcat #'identity paths ", "))))))
+
+(defun omnigent-ui--tool-turn-diff (_id _item _outputs)
+  "Hide the turn diff for _ID, _ITEM, and _OUTPUTS."
+  nil)
+
+(defun omnigent-ui--tool-default (id item outputs)
+  "Render tool ITEM and OUTPUTS for ID with the default heading."
+  (omnigent-ui--tool-render id item outputs nil))
+
+(defconst omnigent-ui--tool-handlers
+  '((omnigent-ui--tool-turn-diff-p . omnigent-ui--tool-turn-diff)
+    (omnigent-ui--tool-shell-p . omnigent-ui--tool-shell)
+    (omnigent-ui--tool-patch-p . omnigent-ui--tool-patch)
+    (omnigent-ui--tool-any-p . omnigent-ui--tool-default))
+  "Predicates and renderers for tool calls, in dispatch order.")
+
+(defun omnigent-ui--tool-dispatch (id item outputs)
+  "Render tool ITEM with ID and OUTPUTS using the first matching handler."
+  (let ((handler
+         (cl-find-if
+          (lambda (entry)
+            (funcall (car entry) item))
+          omnigent-ui--tool-handlers)))
+    (funcall (cdr handler) id item outputs)))
 
 (defun omnigent-ui--item (id item outputs)
   "Render transcript ITEM with ID and tool OUTPUTS indexed by call ID."
@@ -595,39 +755,7 @@
       ("function_call_output" nil)
       ("reasoning"
        (omnigent-ui--fold id "Thinking" text 'omnigent-ui-reasoning))
-      ("function_call"
-       (let* ((output (gethash (alist-get 'call_id item) outputs))
-              (args (omnigent-ui--string (alist-get 'arguments item)))
-              (status
-               (cond
-                ((or (eq (alist-get 'is_error output) t)
-                     (alist-get 'error output)
-                     (equal (alist-get 'status item) "failed"))
-                 "failed")
-                (output
-                 "done")
-                (t
-                 "running")))
-              (name (or (alist-get 'name item) "Tool")))
-         (omnigent-ui--fold
-          id
-          (format "%s %s — %s"
-                  name
-                  (truncate-string-to-width
-                   (replace-regexp-in-string
-                    "\n" " " args)
-                   80 nil nil "…")
-                  status)
-          (concat
-           "Arguments:\n" args "\n\nOutput:\n"
-           (omnigent-ui--bounded-output
-            (omnigent-ui--string
-             (or (alist-get 'output output)
-                 (alist-get 'content output)
-                 ""))))
-          (if (equal status "failed")
-              'omnigent-ui-error
-            'omnigent-ui-tool))))
+      ("function_call" (omnigent-ui--tool-dispatch id item outputs))
       ("error" (insert
         (propertize "Error:\n" 'face 'omnigent-ui-error) text "\n\n"))
       (_
