@@ -1388,5 +1388,80 @@
        (gethash "a" omnigent-conversation--items))
       "final"))))
 
+(ert-deftest omnigent-conversation-slash-skill-submission ()
+  "Discover and submit a skill with the existing pending message flow."
+  (with-temp-buffer
+    (setq
+     omnigent-conversation-session-id "session"
+     omnigent-conversation--prompt-start (copy-marker (point-min))
+     omnigent-conversation--items (make-hash-table :test 'equal))
+    (insert "/review this")
+    (let (catalog
+          event
+          callback)
+      (cl-letf (((symbol-function 'omnigent-transport-request)
+                 (lambda (_method path cb &rest _)
+                   (setq catalog cb)
+                   (should
+                    (equal path "/v1/skills?session_id=session"))))
+                ((symbol-function
+                  'omnigent-transport-post-session-event)
+                 (lambda (_id payload cb)
+                   (setq
+                    event payload
+                    callback cb))))
+        (omnigent-conversation-send)
+        (funcall catalog
+                 200
+                 '((skills . [((name . "review"))]) (warnings . [])))
+        (should
+         (equal
+          (alist-get "type" event nil nil #'equal) "slash_command"))
+        (should
+         (equal
+          (alist-get "arguments"
+                     (alist-get "data" event nil nil #'equal)
+                     nil nil #'equal)
+          "this"))
+        (funcall callback
+                 202
+                 '((queued . t) (item_id . "skill-item")))
+        (should (equal (buffer-string) ""))
+        (should
+         (equal
+          (omnigent-conversation--text
+           (gethash "skill-item" omnigent-conversation--items))
+          "/review this"))))))
+
+(ert-deftest omnigent-conversation-slash-commands-use-local-actions ()
+  "Use local setting and control actions without sending user messages."
+  (with-temp-buffer
+    (setq
+     omnigent-conversation-session-id "session"
+     omnigent-conversation--prompt-start (copy-marker (point-min)))
+    (let (value
+          event
+          callback)
+      (cl-letf (((symbol-function 'omnigent-conversation-set-model)
+                 (lambda (&optional model) (setq value model)))
+                ((symbol-function
+                  'omnigent-transport-post-session-event)
+                 (lambda (_id data cb)
+                   (setq
+                    event data
+                    callback cb))))
+        (insert "/model sample")
+        (omnigent-conversation-send)
+        (should (equal value "sample"))
+        (should (equal (buffer-string) ""))
+        (insert "/compact extra")
+        (should-error (omnigent-conversation-send) :type 'user-error)
+        (erase-buffer)
+        (insert "/compact")
+        (omnigent-conversation-send)
+        (should (equal event '(("type" . "compact"))))
+        (funcall callback 200 nil)
+        (should (equal (buffer-string) ""))))))
+
 (provide 'omnigent-conversation-test)
 ;;; omnigent-conversation-test.el ends here

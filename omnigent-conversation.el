@@ -113,6 +113,16 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
         (data (alist-get 'data item)))
     (when (listp data)
       (setq item (append item data)))
+    (when (and (equal (alist-get 'type item) "slash_command")
+               (equal (alist-get 'kind item) "skill"))
+      (setf
+       (alist-get 'role item) "user"
+       (alist-get 'content item)
+       (concat
+        "/" (or (alist-get 'name item) "")
+        (if (string-empty-p (or (alist-get 'arguments item) ""))
+            ""
+          (concat " " (alist-get 'arguments item))))))
     (when id
       (unless (gethash id omnigent-conversation--items)
         (when (>= (hash-table-count omnigent-conversation--items)

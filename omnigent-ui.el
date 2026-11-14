@@ -753,6 +753,7 @@
       (remhash previous omnigent-ui--folds))
     (pcase type
       ("function_call_output" nil)
+      ((guard (eq (alist-get 'is_meta item) t)) nil)
       ("reasoning"
        (omnigent-ui--fold id "Thinking" text 'omnigent-ui-reasoning))
       ("function_call" (omnigent-ui--tool-dispatch id item outputs))

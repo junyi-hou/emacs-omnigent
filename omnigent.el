@@ -38,10 +38,32 @@
   (when (equal name "session.title")
     (omnigent--conversation-title (alist-get 'title data))))
 
+(defun omnigent--conversation-superseded-event (name data)
+  "Open the new conversation from SSE event NAME and DATA."
+  (when (and (equal name "session.superseded")
+             (equal
+              (alist-get 'conversation_id data)
+              omnigent-conversation-session-id)
+             (stringp (alist-get 'target_conversation_id data)))
+    (let ((window (get-buffer-window (current-buffer) t)))
+      (when (window-live-p window)
+        (with-selected-window window
+          (let ((display-buffer-overriding-action
+                 '(display-buffer-same-window)))
+            (omnigent-conversation-open
+             (alist-get 'target_conversation_id data))))))))
+
 (defun omnigent--conversation-title-watch ()
   "Watch title events in the current conversation buffer."
   (add-hook 'omnigent-conversation-event-hook
             #'omnigent--conversation-title-event
+            nil
+            t))
+
+(defun omnigent--conversation-superseded-watch ()
+  "Watch session supersession in the current conversation buffer."
+  (add-hook 'omnigent-conversation-event-hook
+            #'omnigent--conversation-superseded-event
             nil
             t))
 
@@ -59,6 +81,9 @@
 (add-hook
  'omnigent-conversation-mode-hook
  #'omnigent--conversation-title-watch)
+(add-hook
+ 'omnigent-conversation-mode-hook
+ #'omnigent--conversation-superseded-watch)
 (add-hook
  'omnigent-sessions-frame-hook #'omnigent--sessions-title-frame)
 
@@ -340,25 +365,23 @@ Use `omnigent-conversation-open' to create a conversation buffer."
   (omnigent-conversation--begin-snapshot)
   (omnigent--conversation-connect))
 
-(defun omnigent-conversation-send ()
-  "Send the composer text to the current session."
-  (interactive)
-  (when buffer-read-only
-    (user-error "This session is read-only"))
-  (when omnigent-conversation--sending
-    (user-error "A message is being sent"))
-  (let* ((text
-          (buffer-substring-no-properties
-           omnigent-conversation--prompt-start (point-max)))
-         (entry
-          (copy-tree
-           `((state . submitting)
-             (content . ,text)
-             (pending_id . nil)
-             (consumed-pending-ids . nil))))
-         (buffer (current-buffer)))
-    (when (string-blank-p text)
-      (user-error "The message is empty"))
+(defun omnigent--composer-clear (text)
+  "Clear TEXT from the composer if it has not changed."
+  (when (equal
+         text
+         (buffer-substring-no-properties
+          omnigent-conversation--prompt-start (point-max)))
+    (delete-region omnigent-conversation--prompt-start (point-max))))
+
+(defun omnigent--conversation-submit (text event)
+  "Submit TEXT using session EVENT and the normal pending message flow."
+  (let ((entry
+         (copy-tree
+          `((state . submitting)
+            (content . ,text)
+            (pending_id . nil)
+            (consumed-pending-ids . nil))))
+        (buffer (current-buffer)))
     (setq
      omnigent-conversation--sending entry
      omnigent-conversation--pending-inputs (append omnigent-conversation--pending-inputs (list entry)))
@@ -366,20 +389,249 @@ Use `omnigent-conversation-open' to create a conversation buffer."
     (condition-case err
         (omnigent-transport-post-session-event
          omnigent-conversation-session-id
-         `(("type" . "message")
-           ("data" .
-            (("role" . "user")
-             ("content"
-              .
-              [(("type" . "input_text") ("text" . ,text))]))))
+         event
          (apply-partially #'omnigent-conversation--sent buffer entry))
       ((error quit)
-       (when omnigent-conversation--sending
-         (setq
-          omnigent-conversation--sending nil
-          omnigent-conversation--pending-inputs (delq entry omnigent-conversation--pending-inputs))
-         (omnigent-conversation--notify-input-change))
+       (setq
+        omnigent-conversation--sending nil
+        omnigent-conversation--pending-inputs (delq entry omnigent-conversation--pending-inputs))
+       (omnigent-conversation--notify-input-change)
        (signal (car err) (cdr err))))))
+
+(defun omnigent--conversation-message (text)
+  "Submit TEXT as a user message."
+  (omnigent--conversation-submit
+   text
+   `(("type" . "message")
+     ("data" .
+      (("role" . "user")
+       ("content" . [(("type" . "input_text") ("text" . ,text))]))))))
+
+(defun omnigent--conversation-skills-result
+    (buffer text name args status body)
+  "Dispatch TEXT with NAME and ARGS using skill catalog STATUS and BODY in BUFFER."
+  (when (and (buffer-live-p buffer)
+             (not
+              (buffer-local-value
+               'omnigent-conversation--invalid buffer)))
+    (with-current-buffer buffer
+      (setq omnigent-conversation--sending nil)
+      (cond
+       ((not (omnigent-transport-success-p status))
+        (message "%s"
+                 (omnigent-transport-error-message
+                  "Read skills" status body)))
+       ((not
+         (and (vectorp (alist-get 'skills body))
+              (vectorp (alist-get 'warnings body))
+              (cl-every
+               (lambda (skill)
+                 (stringp (alist-get 'name skill)))
+               (alist-get 'skills body))))
+        (message "Invalid skill catalog"))
+       ((> (length (alist-get 'warnings body)) 0)
+        (message "Skill discovery incomplete: %s"
+                 (mapconcat
+                  #'identity (append (alist-get 'warnings body) nil)
+                  "; ")))
+       ((cl-find
+         name
+         (alist-get 'skills body)
+         :key (lambda (skill) (alist-get 'name skill))
+         :test #'equal)
+        (omnigent--conversation-submit
+         text
+         `(("type" . "slash_command")
+           ("data" .
+            (("kind" . "skill")
+             ("name" . ,name)
+             ("arguments" . ,args))))))
+       (t
+        (omnigent--conversation-message text))))))
+
+(defun omnigent--conversation-control-result
+    (buffer text action status body)
+  "Handle ACTION for TEXT in BUFFER with response STATUS and BODY."
+  (when (and (buffer-live-p buffer)
+             (not
+              (buffer-local-value
+               'omnigent-conversation--invalid buffer)))
+    (with-current-buffer buffer
+      (setq omnigent-conversation--sending nil)
+      (if (and (omnigent-transport-success-p status)
+               (not (eq (alist-get 'denied body) t)))
+          (omnigent--composer-clear text)
+        (message "%s"
+                 (omnigent-transport-error-message
+                  action status body))))))
+
+(defun omnigent--conversation-control (type text)
+  "Send control event TYPE for composer TEXT."
+  (setq omnigent-conversation--sending t)
+  (condition-case err
+      (omnigent-transport-post-session-event
+       omnigent-conversation-session-id `(("type" . ,type))
+       (apply-partially #'omnigent--conversation-control-result
+                        (current-buffer) text type))
+    ((error quit)
+     (setq omnigent-conversation--sending nil)
+     (signal (car err) (cdr err)))))
+
+(defun omnigent-conversation-clear ()
+  "Clear the current session and follow the new session."
+  (interactive)
+  (when buffer-read-only
+    (user-error "This session is read-only"))
+  (when omnigent-conversation--sending
+    (user-error "A message is being sent"))
+  (omnigent--conversation-control
+   "clear"
+   (buffer-substring-no-properties
+    omnigent-conversation--prompt-start (point-max))))
+
+(defun omnigent--conversation-reset-setting (setting)
+  "Reset session SETTING to its default value."
+  (funcall (if (eq setting 'model)
+               #'omnigent-transport-set-session-model
+             #'omnigent-transport-set-session-effort)
+           omnigent-conversation-session-id nil
+           (lambda (status body)
+             (if (omnigent-transport-success-p status)
+                 (message "%s reset requested" setting)
+               (message "%s"
+                        (omnigent-transport-error-message
+                         "Reset setting" status body))))))
+
+(defun omnigent--conversation-command-name (text)
+  "Return the slash command name at the start of TEXT, if present."
+  (when (string-match
+         (rx string-start "/" (group (+ (not (any " \t\n"))))) text)
+    (match-string 1 text)))
+
+(defun omnigent--conversation-command-arguments (text)
+  "Return the arguments of slash command TEXT."
+  (omnigent--conversation-command-name text)
+  (string-trim (substring text (match-end 0))))
+
+(defun omnigent--conversation-validate-command
+    (text &optional no-arguments)
+  "Validate command TEXT, rejecting arguments when NO-ARGUMENTS is non-nil."
+  (when (string-match-p "\n" text)
+    (user-error "Slash command must be on one line"))
+  (when (and no-arguments
+             (not
+              (string-empty-p
+               (omnigent--conversation-command-arguments text))))
+    (user-error "/%s does not accept arguments"
+                (omnigent--conversation-command-name text))))
+
+(defun omnigent--conversation-model-command (text)
+  "Apply the model command in TEXT."
+  (omnigent--conversation-validate-command text)
+  (let ((args (omnigent--conversation-command-arguments text)))
+    (omnigent--composer-clear text)
+    (if (member (downcase args) '("default" "off" "reset"))
+        (omnigent--conversation-reset-setting 'model)
+      (omnigent-conversation-set-model
+       (unless (string-empty-p args)
+         args)))))
+
+(defun omnigent--conversation-effort-command (text)
+  "Apply the effort command in TEXT."
+  (omnigent--conversation-validate-command text)
+  (let ((args (omnigent--conversation-command-arguments text)))
+    (omnigent--composer-clear text)
+    (if (equal (downcase args) "default")
+        (omnigent--conversation-reset-setting 'effort)
+      (omnigent-conversation-set-effort
+       (unless (string-empty-p args)
+         args)))))
+
+(defun omnigent--conversation-new-command (text)
+  "Start session creation for command TEXT."
+  (omnigent--conversation-validate-command text t)
+  (omnigent--composer-clear text)
+  (call-interactively #'omnigent-sessions-create))
+
+(defun omnigent--conversation-clear-command (text)
+  "Clear the session for command TEXT."
+  (omnigent--conversation-validate-command text t)
+  (omnigent-conversation-clear))
+
+(defun omnigent--conversation-compact-command (text)
+  "Compact the session for command TEXT."
+  (omnigent--conversation-validate-command text t)
+  (omnigent--conversation-control "compact" text))
+
+(defun omnigent--conversation-unsupported-command (text)
+  "Report that the command in TEXT is not supported."
+  (omnigent--conversation-validate-command text)
+  (message "/%s is not supported"
+           (omnigent--conversation-command-name text)))
+
+(defun omnigent--conversation-skill-command (text)
+  "Fetch the skill catalog before dispatching slash command TEXT."
+  (let ((name (omnigent--conversation-command-name text))
+        (args (omnigent--conversation-command-arguments text)))
+    (setq omnigent-conversation--sending t)
+    (condition-case err
+        (omnigent-transport-request
+         "GET"
+         (concat
+          "/v1/skills?session_id="
+          (url-hexify-string omnigent-conversation-session-id))
+         (apply-partially #'omnigent--conversation-skills-result
+                          (current-buffer) text name args))
+      ((error quit)
+       (setq omnigent-conversation--sending nil)
+       (signal (car err) (cdr err))))))
+
+(defconst omnigent--conversation-message-handlers
+  `(("model" . ,#'omnigent--conversation-model-command)
+    ("effort" . ,#'omnigent--conversation-effort-command)
+    ("new" . ,#'omnigent--conversation-new-command)
+    ("clear" . ,#'omnigent--conversation-clear-command)
+    ("compact" . ,#'omnigent--conversation-compact-command)
+    ("context" . ,#'omnigent--conversation-unsupported-command)
+    ("mcp" . ,#'omnigent--conversation-unsupported-command)
+    ("permissions" . ,#'omnigent--conversation-unsupported-command)
+    ("btw" . ,#'omnigent--conversation-unsupported-command)
+    ("side" . ,#'omnigent--conversation-unsupported-command)
+    ("help" . ,#'omnigent--conversation-unsupported-command)
+    (slash . ,#'omnigent--conversation-skill-command)
+    (t . ,#'omnigent--conversation-message))
+  "Command names and handlers for conversation input, in dispatch order.")
+
+(defun omnigent--conversation-dispatch (text)
+  "Dispatch composer TEXT to the first matching input handler."
+  (let* ((name (omnigent--conversation-command-name text))
+         (handler
+          (cl-find-if
+           (lambda (entry)
+             (let ((predicate (car entry)))
+               (cond
+                ((stringp predicate)
+                 (equal predicate name))
+                ((eq predicate 'slash)
+                 name)
+                (t
+                 (eq predicate t)))))
+           omnigent--conversation-message-handlers)))
+    (funcall (cdr handler) text)))
+
+(defun omnigent-conversation-send ()
+  "Send the composer text to the current session."
+  (interactive)
+  (when buffer-read-only
+    (user-error "This session is read-only"))
+  (when omnigent-conversation--sending
+    (user-error "A message is being sent"))
+  (let ((text
+         (buffer-substring-no-properties
+          omnigent-conversation--prompt-start (point-max))))
+    (when (string-blank-p text)
+      (user-error "The message is empty"))
+    (omnigent--conversation-dispatch text)))
 
 (defun omnigent--conversation-select-setting (setting)
   "Fetch choices for SETTING and prompt in the current conversation."
