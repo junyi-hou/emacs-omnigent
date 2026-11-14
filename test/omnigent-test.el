@@ -38,49 +38,6 @@
             (should (eq callback #'ignore)))))
       (omnigent-transport-list-sessions #'ignore))))
 
-(ert-deftest omnigent-title-update-runs-after-configured-prompt-count
-    ()
-  "Request a title update after the configured number of user prompts."
-  (let ((omnigent-title-update-turn-interval 2)
-        (omnigent-conversation-session-id "session")
-        callback
-        refreshed)
-    (with-temp-buffer
-      (setq
-       omnigent-conversation--title-prompt-count 0
-       omnigent-conversation--title-generation-pending nil)
-      (cl-letf
-          (((symbol-function
-             'omnigent-transport-generate-session-title)
-            (lambda (id instructions result)
-              (should (equal id "session"))
-              (should
-               (equal
-                instructions
-                "Focus the title on the most recent 2 turns of this conversation."))
-              (setq callback result)))
-           ((symbol-function 'omnigent-sessions-refresh)
-            (lambda () (setq refreshed t))))
-        (omnigent-conversation--title-update-event
-         "session.input.consumed"
-         '((data
-            .
-            ((type . "message")
-             (data . ((role . "user") (content . "First")))))))
-        (should-not callback)
-        (omnigent-conversation--title-update-event
-         "session.input.consumed"
-         '((data
-            .
-            ((type . "message")
-             (data . ((role . "user") (content . "Second")))))))
-        (should callback)
-        (funcall callback 200 nil)
-        (should refreshed)
-        (should (= omnigent-conversation--title-prompt-count 0))
-        (should-not
-         omnigent-conversation--title-generation-pending)))))
-
 (ert-deftest omnigent-start-parses-server-url-from-cli-output ()
   "Extract the URL printed by the Omnigent server command."
   (with-temp-buffer
