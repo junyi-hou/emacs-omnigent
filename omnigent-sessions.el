@@ -519,6 +519,27 @@ Continue through CALLBACK after validating the path on GENERATION's server."
       (message
        "Session created; conversation view is not available yet")))))
 
+(defun omnigent-sessions-fork (id options callback)
+  "Fork session ID with OPTIONS and call CALLBACK with status and body.
+OPTIONS is an alist of server fork options, or nil for the defaults."
+  (omnigent-transport-request
+   "POST"
+   (concat (omnigent-transport--session-path id) "/fork") callback
+   (or options (make-hash-table :test 'equal))))
+
+(defun omnigent-sessions-launch-fork
+    (id host workspace branch callback)
+  "Launch fork ID on HOST in WORKSPACE and call CALLBACK with status and body.
+When BRANCH is non-nil, create a worktree with that new branch."
+  (omnigent-transport-request
+   "POST"
+   (format "/v1/hosts/%s/runners" (url-hexify-string host))
+   callback
+   (append
+    `(("session_id" . ,id) ("workspace" . ,workspace))
+    (when branch
+      `(("git" . (("branch_name" . ,branch))))))))
+
 (defun omnigent-sessions-toggle-archive (id callback)
   "Toggle ID's current server archive state and invoke CALLBACK with the result.
 CALLBACK receives the HTTP status and response body.  Refresh the session list

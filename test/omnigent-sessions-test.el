@@ -2,6 +2,52 @@
 (require 'ert)
 (require 'omnigent)
 
+(ert-deftest omnigent-sessions-fork-and-launch ()
+  "Send fork options and launch a worktree on the source host."
+  (let (requests
+        opened)
+    (cl-letf (((symbol-function 'omnigent-transport-request)
+               (lambda (method path callback &optional data)
+                 (push (list method path data) requests)
+                 (funcall callback
+                          201
+                          '((id . "fork") (title . "Fork")))))
+              ((symbol-function 'omnigent-sessions-refresh) #'ignore)
+              ((symbol-function 'omnigent-ui-created)
+               (lambda (session) (setq opened session))))
+      (with-temp-buffer
+        (setq
+         major-mode 'omnigent-conversation-mode
+         omnigent-conversation-session-id "source"
+         omnigent-conversation-host-id "host"
+         omnigent-conversation-header-data '((workspace . "/repo")))
+        (cl-letf (((symbol-function 'read-string)
+                   (lambda (&rest _) "feature")))
+          (omnigent-conversation-fork t)))
+      (setq requests (nreverse requests))
+      (should (equal (cadar requests) "/v1/sessions/source/fork"))
+      (should (hash-table-p (nth 2 (car requests))))
+      (should (equal (cadr (cadr requests)) "/v1/hosts/host/runners"))
+      (should
+       (equal
+        (nth 2 (cadr requests))
+        '(("session_id" . "fork")
+          ("workspace" . "/repo")
+          ("git" ("branch_name" . "feature")))))
+      (should (equal (alist-get 'id opened) "fork")))))
+
+(ert-deftest omnigent-sessions-fork-launch-failure ()
+  "Report the created fork ID when runner launch fails."
+  (let (reported)
+    (cl-letf (((symbol-function 'omnigent-sessions-refresh) #'ignore)
+              ((symbol-function 'omnigent-sessions--error)
+               (lambda (action _status &optional _body)
+                 (setq reported action)))
+              ((symbol-function 'omnigent-ui-created)
+               (lambda (_session) (ert-fail "Opened failed fork"))))
+      (omnigent--fork-launched '((id . "fork")) 400 "failed")
+      (should (string-match-p "fork" reported)))))
+
 (ert-deftest omnigent-sessions-frames-and-watch-limit ()
   (let ((omnigent-sessions '(((id . "one") (title . "old"))))
         (omnigent-sessions--buffers nil)

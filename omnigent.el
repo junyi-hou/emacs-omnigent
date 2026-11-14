@@ -195,6 +195,65 @@ Report failures through `omnigent-sessions-error-hook'."
         (omnigent-sessions--read-workspace callback session)
       (omnigent-sessions--read-workspace callback))))
 
+(defun omnigent--fork-launched (session status body)
+  "Open fork SESSION after launch STATUS, or report failure BODY."
+  (unwind-protect
+      (omnigent-sessions-refresh)
+    (if (omnigent-transport-success-p status)
+        (omnigent-ui-created session)
+      (omnigent-sessions--error
+       (format "Fork %s created; runner launch failed"
+               (alist-get 'id session))
+       status body))))
+
+(defun omnigent--fork-created (host workspace branch status session)
+  "Launch SESSION on HOST in WORKSPACE with optional BRANCH after STATUS."
+  (cond
+   ((not (omnigent-transport-success-p status))
+    (omnigent-sessions--error "Fork session" status session))
+   ((not
+     (and (listp session)
+          (stringp (alist-get 'id session))
+          (not (string-empty-p (alist-get 'id session)))))
+    (omnigent-sessions--error
+     "Fork session" nil "Invalid fork response"))
+   (t
+    (message "Launching fork %s..." (alist-get 'id session))
+    (omnigent-sessions-launch-fork
+     (alist-get 'id session)
+     host
+     workspace
+     branch
+     (apply-partially #'omnigent--fork-launched session)))))
+
+;;;###autoload
+(defun omnigent-conversation-fork (worktree)
+  "Fork the current session on its host and workspace.
+With prefix argument WORKTREE, prompt for a new worktree branch."
+  (interactive "P")
+  (unless (derived-mode-p 'omnigent-conversation-mode)
+    (user-error "No Omnigent conversation in this buffer"))
+  (let ((host omnigent-conversation-host-id)
+        (workspace
+         (alist-get 'workspace omnigent-conversation-header-data))
+        branch)
+    (unless (and (stringp host)
+                 (not (string-empty-p host))
+                 (stringp workspace)
+                 (not (string-empty-p workspace)))
+      (user-error "The source session has no host or workspace"))
+    (when worktree
+      (setq branch (read-string "New worktree branch: "))
+      (when (string-empty-p branch)
+        (user-error "A worktree branch is required")))
+    (message "Forking session...")
+    (omnigent-sessions-fork
+     omnigent-conversation-session-id nil
+     (apply-partially #'omnigent--fork-created
+                      host
+                      workspace
+                      branch))))
+
 (define-derived-mode
  omnigent-conversation-mode
  text-mode

@@ -132,11 +132,20 @@ WebSocket.
 
 ## Deferred
 
-Forking, child sessions, cursor pagination beyond 1,000,
+Child sessions, cursor pagination beyond 1,000,
 search, custom ordering, automatic remote-host setup, TRAMP-to-host inference,
 managed sandbox creation, advanced creation options, and `delete_worktree` are
 post-v1. Selecting an existing online remote host is supported. V1 still lists
 archived sessions.
+
+## Forking
+
+From a conversation, `C-c C-f` forks the session with its existing agent and
+history. The client launches a new runner on the source host in the source
+workspace, then opens the fork. With a prefix argument, prompt for a new Git
+branch and ask the host to create a worktree for it. Report the fork ID if
+runner launch fails, because the fork already exists. The fork request accepts
+server options separately from runner launch so side chat can reuse it.
 
 ## References
 

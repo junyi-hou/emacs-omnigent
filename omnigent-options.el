@@ -22,6 +22,7 @@
     (define-key map (kbd "C-c C-c") #'omnigent-conversation-send)
     (define-key map (kbd "C-c C-k") #'omnigent-conversation-interrupt)
     (define-key map (kbd "C-c C-r") #'omnigent-conversation-reconnect)
+    (define-key map (kbd "C-c C-f") #'omnigent-conversation-fork)
     (define-key map (kbd "C-c C-m") #'omnigent-conversation-set-model)
     (define-key
      map (kbd "C-c C-e") #'omnigent-conversation-set-effort)
