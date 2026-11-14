@@ -38,7 +38,8 @@
             (should (eq callback #'ignore)))))
       (omnigent-transport-list-sessions #'ignore))))
 
-(ert-deftest omnigent-title-update-runs-after-configured-prompt-count ()
+(ert-deftest omnigent-title-update-runs-after-configured-prompt-count
+    ()
   "Request a title update after the configured number of user prompts."
   (let ((omnigent-title-update-turn-interval 2)
         (omnigent-conversation-session-id "session")

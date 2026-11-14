@@ -355,74 +355,86 @@ Continue through CALLBACK after validating the path on GENERATION's server."
           (setq
            workspace
            (omnigent-sessions--native-workspace
-            (completing-read
-             (format "Workspace on %s: " choice)
-             (lambda (input predicate action)
-               (unless (= generation omnigent-transport--generation)
-                 (user-error
-                  "Server changed during workspace selection"))
-               (if (eq action 'metadata)
-                   '(metadata (category . omnigent-workspace))
-                 (let ((parent
-                        (or (file-name-directory input) ""))
-                       (minibuffer
-                        (when-let*
-                            ((window (active-minibuffer-window)))
-                          (window-buffer window))))
-                   (when (eq (gethash parent cache 'missing) 'missing)
-                     (puthash parent 'pending cache)
-                     (omnigent-sessions--workspace-directories
-                      host-id
-                      (if (string-empty-p parent)
-                          ""
-                        (omnigent-sessions--native-workspace parent))
-                      (lambda (directory-status entries)
-                        (when active
-                          (if (not
-                               (omnigent-transport-success-p
-                                directory-status))
-                              (progn
-                                (remhash parent cache)
-                                (omnigent-sessions--error
-                                 "List directories" directory-status
-                                 entries))
-                            (puthash parent entries cache)
-                            (when-let*
-                                ((window (active-minibuffer-window))
-                                 ((eq
-                                   (window-buffer
-                                    window)
-                                   minibuffer)))
-                              (with-selected-window window
-                                (when
-                                    (equal
-                                     parent
-                                     (or
-                                      (file-name-directory
-                                       (minibuffer-contents-no-properties))
-                                      ""))
-                                  (run-hooks 'post-command-hook)
-                                  (redisplay)))))))))
-                   (let ((entries (gethash parent cache)))
-                     (complete-with-action
-                      action
-                      (cons
-                       (if (string-empty-p parent)
-                           "~/"
-                         parent)
-                       (unless (eq entries 'pending)
-                         (mapcar
-                          (lambda (entry)
-                            (concat
-                             parent (alist-get 'name entry) "/"))
-                          entries)))
-                      input predicate)))))
-             nil
-             nil
-             nil
-             nil
-             default
-             t)
+            (minibuffer-with-setup-hook
+                (lambda ()
+                  (let ((refresh
+                         (lambda (&rest _)
+                           (all-completions
+                            (minibuffer-contents-no-properties)
+                            minibuffer-completion-table
+                            minibuffer-completion-predicate))))
+                    (add-hook 'after-change-functions refresh nil t)
+                    (funcall refresh)))
+              (completing-read
+               (format "Workspace on %s: " choice)
+               (lambda (input predicate action)
+                 (unless (= generation omnigent-transport--generation)
+                   (user-error
+                    "Server changed during workspace selection"))
+                 (if (eq action 'metadata)
+                     '(metadata (category . omnigent-workspace))
+                   (let ((parent
+                          (or (file-name-directory input) ""))
+                         (minibuffer
+                          (when-let*
+                              ((window (active-minibuffer-window)))
+                            (window-buffer window))))
+                     (when
+                         (eq (gethash parent cache 'missing) 'missing)
+                       (puthash parent 'pending cache)
+                       (omnigent-sessions--workspace-directories
+                        host-id
+                        (if (string-empty-p parent)
+                            ""
+                          (omnigent-sessions--native-workspace
+                           parent))
+                        (lambda (directory-status entries)
+                          (when active
+                            (if (not
+                                 (omnigent-transport-success-p
+                                  directory-status))
+                                (progn
+                                  (remhash parent cache)
+                                  (omnigent-sessions--error
+                                   "List directories" directory-status
+                                   entries))
+                              (puthash parent entries cache)
+                              (when-let*
+                                  ((window (active-minibuffer-window))
+                                   ((eq
+                                     (window-buffer
+                                      window)
+                                     minibuffer)))
+                                (with-selected-window window
+                                  (when
+                                      (equal
+                                       parent
+                                       (or
+                                        (file-name-directory
+                                         (minibuffer-contents-no-properties))
+                                        ""))
+                                    (run-hooks 'post-command-hook)
+                                    (redisplay)))))))))
+                     (let ((entries (gethash parent cache)))
+                       (complete-with-action
+                        action
+                        (cons
+                         (if (string-empty-p parent)
+                             "~/"
+                           parent)
+                         (unless (eq entries 'pending)
+                           (mapcar
+                            (lambda (entry)
+                              (concat
+                               parent (alist-get 'name entry) "/"))
+                            entries)))
+                        input predicate)))))
+               nil
+               nil
+               nil
+               nil
+               default
+               t))
             host-id))
         (setq active nil))
       (unless (= generation omnigent-transport--generation)
