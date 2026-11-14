@@ -7,7 +7,7 @@ transport implementation is [omnigent-transport.el](../omnigent-transport.el). T
 existing interactive entry points are in [omnigent.el](../omnigent.el).
 [reconnection.md](reconnection.md) defines the client-outage recovery flow,
 including stale-connection detection, the subscription gap, and manual recovery after
-snapshot failure. Automatic snapshot retries are deferred.
+snapshot failure. Temporary snapshot failures retry automatically.
 
 Transport owns the input and output protocols and their implementation: server
 connections, requests, response parsing, SSE, and WebSocket frames. It exposes client

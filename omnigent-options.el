@@ -23,7 +23,8 @@
     (define-key map (kbd "C-c C-k") #'omnigent-conversation-interrupt)
     (define-key map (kbd "C-c C-r") #'omnigent-conversation-reconnect)
     (define-key map (kbd "C-c C-m") #'omnigent-conversation-set-model)
-    (define-key map (kbd "C-c C-e") #'omnigent-conversation-set-effort)
+    (define-key
+     map (kbd "C-c C-e") #'omnigent-conversation-set-effort)
     (define-key map (kbd "TAB") #'widget-forward)
     (define-key map (kbd "<backtab>") #'widget-backward)
     (define-key map (kbd "C-c C-a") #'omnigent-ui-archive)
@@ -53,7 +54,8 @@
     (define-key map (kbd "RET") #'omnigent-ui-workspace-diff)
     (define-key map (kbd "f") #'omnigent-ui-workspace-visit-file)
     (define-key map (kbd "g") #'omnigent-ui-workspace-refresh)
-    (define-key map (kbd "C-c C-g") #'omnigent-ui-workspace-magit-status)
+    (define-key
+     map (kbd "C-c C-g") #'omnigent-ui-workspace-magit-status)
     map)
   "Keymap for the workspace side view."
   :type 'keymap
@@ -65,7 +67,8 @@
   :group 'omnigent)
 
 (defcustom omnigent-host-address-function
-  (lambda (_host-id) (url-host (url-generic-parse-url omnigent-server-url)))
+  (lambda (_host-id)
+    (url-host (url-generic-parse-url omnigent-server-url)))
   "Function that returns the address for an Omnigent host ID.
 The function takes one host ID string and returns an address string.
 The address `localhost' means the host in `omnigent-server-url'.
@@ -137,6 +140,13 @@ This limit does not control live events buffered during recovery; see
 Omnigent 0.21.0 sends SSE heartbeats every 15 seconds and WebSocket
 heartbeats after 30 idle seconds.  Allow additional time for proxies."
   :type 'number
+  :group 'omnigent-transport)
+
+(defcustom omnigent-conversation-auto-recovery t
+  "When non-nil, retry temporary session snapshot failures automatically.
+When nil, use `omnigent-conversation-reconnect' to recover manually.
+This option does not disable normal stream reconnection."
+  :type 'boolean
   :group 'omnigent-transport)
 
 (defcustom omnigent-conversation-recovery-event-limit 10000

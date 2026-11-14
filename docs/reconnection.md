@@ -11,7 +11,7 @@ client outages, not execution-host outages or recovery of an agent process that 
 
 REST reads and writes follow the [API callback design](api-callbacks.md) for
 result delivery and invalidation. Composite snapshot reads have a bounded deadline.
-Automatic snapshot retries are deferred. SSE and WebSocket callbacks have separate
+Temporary snapshot failures retry automatically with capped backoff. SSE and WebSocket callbacks have separate
 subscription contracts.
 
 ## Goal and deployment
@@ -80,7 +80,8 @@ interactive loading of older history remains deferred.
    that may overlap the snapshot. Restore editing and actions only when the same stream
    attempt remains live and server permissions allow them.
 5. If any snapshot read or validation fails, invalidate the conversation as described
-   below. Do not retry the snapshot automatically.
+   below. Retry connection errors, timeouts, HTTP 408 and 429, and temporary server
+   errors (500, 502, 503, and 504). Preserve drafts during each retry.
 6. Report stream failures. Restore the WebSocket watch set and refresh the session list
    when its connection opens.
 
@@ -170,7 +171,7 @@ reopen the conversation to try again. Reopening an existing invalid buffer must 
 silently restart recovery. Closing it loses local drafts under the existing buffer
 lifecycle policy, so the error must tell the user to copy any drafts first.
 
-Automatic snapshot retries are deferred. Existing SSE and WebSocket connection retries
+Temporary snapshot failures retry automatically with capped backoff. Existing SSE and WebSocket connection retries
 remain in scope, but must not revive an invalidated conversation.
 
 ## Drafts and mutating requests
@@ -193,7 +194,8 @@ Reuse the existing transport handles, attempt counters, session hooks, and conve
 state. No separate recovery service or generic retry framework is required. Transport
 detects connection loss and reconnects streams. It serializes snapshot operations and
 forwards their results without automatically retrying failed reads. Conversation
-handling invalidates the buffer after a snapshot failure. Session management refreshes
+handling retries temporary snapshot failures and leaves other failures frozen until
+manual recovery. Session management refreshes
 its list and watch set. Conversation handling reconciles snapshots and preserves drafts.
 The frontend reports recovery failures without adding stale-state visual indicators.
 
@@ -214,7 +216,7 @@ data, or guarantee that an agent continues through a server outage.
   including committed A with pending B and duplicate consumption of A.
 - Fail or time out a snapshot read while SSE remains healthy, and return malformed
   required data. Check that each failure stops recovery, preserves the display and
-  drafts as read-only, reports an error, and requires the user to close and reopen.
+  drafts as read-only, reports an error, and allows manual recovery with `C-c C-r`.
   Deliver late callbacks and check that they cannot revive the invalid buffer.
 - Request another refresh during a snapshot read. Check that only one snapshot operation
   is active and that successful completion permits a coalesced refresh.
@@ -231,3 +233,7 @@ data, or guarantee that an agent continues through a server outage.
   that the client does not submit the message again.
 - Accumulate more items than the history limit. Check that recovery loads the bounded
   window without claiming older server history was deleted.
+
+The conversation command `omnigent-conversation-reconnect` (`C-c C-r`) restarts
+the session stream and loads a fresh snapshot without replacing the composer draft.
+Successful recovery restores editing when the stream is connected and permissions allow it.

@@ -32,6 +32,10 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 (defvar-local omnigent-conversation--pending-events nil)
 (defvar-local omnigent-conversation--loading nil)
 (defvar-local omnigent-conversation--invalid nil)
+(defvar-local omnigent-conversation--retry-timer nil
+  "Timer for retrying a failed session snapshot.")
+(defvar-local omnigent-conversation--retry-count 0
+  "Number of consecutive snapshot failures awaiting recovery.")
 (defvar-local omnigent-conversation--connected t)
 (defvar-local omnigent-conversation--pending-event-count 0)
 (defvar-local omnigent-conversation--pending-event-bytes 0)
@@ -527,10 +531,32 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
       (omnigent-sessions--frame
        `((type . "removed")
          (ids . ,(vector omnigent-conversation-session-id)))))
-    (message
-     "%s. Copy any drafts, then close and reopen this session to try again"
-     (omnigent-transport-error-message
-      "Omnigent snapshot failed" status body))))
+    (if (and omnigent-conversation-auto-recovery
+             (not
+              (member
+               body
+               '("Invalid session snapshot"
+                 "Snapshot event buffer overflow")))
+             (or (null status)
+                 (consp status)
+                 (memq status '(408 429 500 502 503 504))))
+        (let ((buffer (current-buffer)))
+          (cl-incf omnigent-conversation--retry-count)
+          (setq omnigent-conversation--retry-timer
+                (run-at-time
+                 (omnigent-transport--reconnect-delay
+                  omnigent-conversation--retry-count)
+                 nil
+                 (lambda ()
+                   (when (buffer-live-p buffer)
+                     (with-current-buffer buffer
+                       (omnigent-conversation-reconnect)))))))
+      (message
+       "%s. %s"
+       (omnigent-transport-error-message
+        "Omnigent snapshot failed" status body)
+       (substitute-command-keys
+        "Use \\[omnigent-conversation-reconnect] to reconnect this session")))))
 
 (defun omnigent-conversation--snapshot-valid-p (body)
   "Check required snapshot arrays and fields before replacing state with BODY."
@@ -590,6 +616,7 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
        body "Invalid session snapshot"))
     (if (not (omnigent-transport-success-p status))
         (omnigent-conversation--invalidate status body)
+      (setq omnigent-conversation--retry-count 0)
       (let ((events (nreverse omnigent-conversation--pending-events)))
         (setq
          omnigent-conversation--pending-events nil
@@ -657,6 +684,9 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 
 (defun omnigent-conversation--close ()
   "Stop the current buffer's session stream."
+  (when (timerp omnigent-conversation--retry-timer)
+    (cancel-timer omnigent-conversation--retry-timer))
+  (setq omnigent-conversation--retry-timer nil)
   (when omnigent-conversation--stream
     (omnigent-transport-stop-session-stream
      omnigent-conversation--stream)))

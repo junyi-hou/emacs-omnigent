@@ -215,30 +215,35 @@ Use `omnigent-conversation-open' to create a conversation buffer."
   omnigent-conversation--prompt-start (copy-marker (point-min))
   omnigent-conversation--prompt-end (copy-marker (point-max) t))
  (add-hook 'kill-buffer-hook #'omnigent-conversation--close nil t)
- (let ((buffer (current-buffer)))
-   (setq omnigent-conversation--stream
-         (omnigent-transport-start-session-stream
-          omnigent-conversation-session-id
-          (lambda (name data)
-            (when (buffer-live-p buffer)
-              (with-current-buffer buffer
-                (omnigent-conversation--event name data))))
-          (lambda (status body)
-            (when (buffer-live-p buffer)
-              (with-current-buffer buffer
-                (omnigent-conversation--snapshot status body))))
-          (lambda (err) (message "Omnigent stream: %s" err))
-          (lambda ()
-            (when (buffer-live-p buffer)
-              (with-current-buffer buffer
-                (omnigent-conversation--begin-snapshot))))
-          (lambda (state)
-            (when (buffer-live-p buffer)
-              (with-current-buffer buffer
-                (omnigent-conversation--connection-state state))))))
-   ;; A synchronous snapshot setup failure can arrive before the handle is assigned.
-   (when omnigent-conversation--invalid
-     (omnigent-conversation--close))))
+ (omnigent--conversation-connect))
+
+(defun omnigent--conversation-connect ()
+  "Start the current conversation stream without replacing its draft."
+  (let ((buffer (current-buffer)))
+    (setq omnigent-conversation--stream
+          (omnigent-transport-start-session-stream
+           omnigent-conversation-session-id
+           (lambda (name data)
+             (when (buffer-live-p buffer)
+               (with-current-buffer buffer
+                 (omnigent-conversation--event name data))))
+           (lambda (status body)
+             (when (buffer-live-p buffer)
+               (with-current-buffer buffer
+                 (omnigent-conversation--snapshot status body))))
+           (lambda (err) (message "Omnigent stream: %s" err))
+           (lambda ()
+             (when (buffer-live-p buffer)
+               (with-current-buffer buffer
+                 (omnigent-conversation--begin-snapshot))))
+           (lambda (state)
+             (when (buffer-live-p buffer)
+               (with-current-buffer buffer
+                 (omnigent-conversation--connection-state state))))))
+    ;; A synchronous snapshot setup failure can arrive before the handle is assigned.
+    (when omnigent-conversation--invalid
+      (omnigent-transport-stop-session-stream
+       omnigent-conversation--stream))))
 
 ;;;###autoload
 (defun omnigent-conversation-open (id &optional title)
@@ -263,6 +268,18 @@ Use `omnigent-conversation-open' to create a conversation buffer."
          (kill-buffer buffer)
          (signal (car err) (cdr err)))))
     (pop-to-buffer buffer)))
+
+(defun omnigent-conversation-reconnect ()
+  "Reconnect the current session and preserve its composer draft."
+  (interactive)
+  (unless omnigent-conversation-session-id
+    (user-error "No session in this buffer"))
+  (omnigent-conversation--close)
+  (setq
+   omnigent-conversation--invalid nil
+   omnigent-conversation--connected nil)
+  (omnigent-conversation--begin-snapshot)
+  (omnigent--conversation-connect))
 
 (defun omnigent-conversation-send ()
   "Send the composer text to the current session."

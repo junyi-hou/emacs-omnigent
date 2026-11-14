@@ -1250,6 +1250,28 @@
         (should buffer-read-only)
         (should (omnigent-stream-stopped stream))))))
 
+(ert-deftest omnigent-conversation-retries-transient-snapshot-failure
+    ()
+  "Retry temporary failures in place while preserving the composer draft."
+  (with-temp-buffer
+    (setq omnigent-conversation-session-id "retry")
+    (insert "draft")
+    (let (retry
+          connected)
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat callback &rest _)
+                   (setq retry callback)))
+                ((symbol-function 'omnigent--conversation-connect)
+                 (lambda () (setq connected t))))
+        (omnigent-conversation--invalidate 503 nil)
+        (should retry)
+        (should buffer-read-only)
+        (funcall retry)
+        (should connected)
+        (should-not omnigent-conversation--invalid)
+        (should omnigent-conversation--loading)
+        (should (equal (buffer-string) "draft"))))))
+
 (ert-deftest
     omnigent-conversation-recovery-failure-freezes-and-rejects-late-work
     ()
