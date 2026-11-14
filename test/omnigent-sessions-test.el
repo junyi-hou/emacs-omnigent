@@ -510,11 +510,8 @@
                (equal (try-completion "pro" table) "projects/"))
               (should (= (length requests) count)))
             (should
-             (equal
-              (all-completions "projects/" table)
-              '("projects/" "projects/src/")))
-            (should
-             (equal (all-completions "/" table) '("/" "/srv/")))
+             (equal (all-completions "projects/" table) '("" "src/")))
+            (should (equal (all-completions "/" table) '("" "srv/")))
             "/srv/project #1")))
       (omnigent-sessions--read-workspace
        (lambda (target) (setq result target)))
@@ -720,24 +717,52 @@
                (lambda () (selected-window)))
               ((symbol-function 'minibuffer-contents-no-properties)
                (lambda () "repo/"))
-              ((symbol-function 'run-hooks)
-               (lambda (&rest _) (cl-incf updates)))
+              ((symbol-function 'featurep)
+               (let ((original (symbol-function 'featurep)))
+                 (lambda (feature &optional subfeature)
+                   (if (eq feature 'vertico)
+                       t
+                     (funcall original feature subfeature)))))
+              ((symbol-function 'vertico--exhibit)
+               (lambda (&rest _)
+                 (should (eq (symbol-value 'vertico--input) t))
+                 (cl-incf updates)))
               ((symbol-function 'redisplay) #'ignore)
               ((symbol-function 'completing-read)
                (lambda (_prompt table &rest _)
+                 (all-completions "other/partial" table)
+                 (should (= requests 0))
                  (should
-                  (equal (all-completions "repo/" table) '("repo/")))
+                  (equal
+                   (completion-boundaries
+                    "repo/" table nil "")
+                   '(5 . 0)))
                  (should
-                  (equal (all-completions "repo/" table) '("repo/")))
+                  (equal
+                   (completion-boundaries
+                    "repo/partial" table nil "")
+                   '(5 . 0)))
+                 (should (= requests 0))
+                 (should
+                  (equal (all-completions "repo/" table) '("")))
+                 (should
+                  (equal (all-completions "repo/" table) '("")))
                  (should (= requests 1))
+                 (with-current-buffer (window-buffer
+                                       (selected-window))
+                   (set
+                    (make-local-variable 'vertico--input)
+                    '("repo/" . 5)))
                  (funcall directory-callback
                           200
                           '(((name . "src") (type . "directory"))))
                  (should (= updates 1))
+                 (with-current-buffer (window-buffer
+                                       (selected-window))
+                   (kill-local-variable 'vertico--input))
                  (should
                   (equal
-                   (all-completions "repo/" table)
-                   '("repo/" "repo/src/")))
+                   (all-completions "repo/" table) '("" "src/")))
                  (all-completions "other/" table)
                  (setq late-callback directory-callback)
                  "repo")))

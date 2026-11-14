@@ -10,6 +10,9 @@
 (require 'omnigent-transport)
 (require 'omnigent-workspace)
 
+(defvar vertico--input)
+(declare-function vertico--exhibit "vertico")
+
 (defvar omnigent-sessions nil
   "List of root session alists from the server.")
 (defvar omnigent-sessions-truncated nil
@@ -371,8 +374,17 @@ Continue through CALLBACK after validating the path on GENERATION's server."
                  (unless (= generation omnigent-transport--generation)
                    (user-error
                     "Server changed during workspace selection"))
-                 (if (eq action 'metadata)
-                     '(metadata (category . omnigent-workspace))
+                 (cond
+                  ((eq action 'metadata)
+                   '(metadata (category . omnigent-workspace)))
+                  ((eq
+                    (car-safe action) 'boundaries)
+                   `(boundaries
+                     .
+                     (,(length (or (file-name-directory input) ""))
+                      .
+                      0)))
+                  (t
                    (let ((parent
                           (or (file-name-directory input) ""))
                          (minibuffer
@@ -380,7 +392,10 @@ Continue through CALLBACK after validating the path on GENERATION's server."
                               ((window (active-minibuffer-window)))
                             (window-buffer window))))
                      (when
-                         (eq (gethash parent cache 'missing) 'missing)
+                         (and
+                          (string-suffix-p "/" input)
+                          (eq
+                           (gethash parent cache 'missing) 'missing))
                        (puthash parent 'pending cache)
                        (omnigent-sessions--workspace-directories
                         host-id
@@ -413,7 +428,13 @@ Continue through CALLBACK after validating the path on GENERATION's server."
                                         (file-name-directory
                                          (minibuffer-contents-no-properties))
                                         ""))
-                                    (run-hooks 'post-command-hook)
+                                    (if (and (featurep 'vertico)
+                                             (bound-and-true-p
+                                              vertico--input))
+                                        (progn
+                                          (setq vertico--input t)
+                                          (vertico--exhibit))
+                                      (run-hooks 'post-command-hook))
                                     (redisplay)))))))))
                      (let ((entries (gethash parent cache)))
                        (complete-with-action
@@ -421,14 +442,17 @@ Continue through CALLBACK after validating the path on GENERATION's server."
                         (cons
                          (if (string-empty-p parent)
                              "~/"
-                           parent)
+                           "")
                          (unless (eq entries 'pending)
                            (mapcar
-                            (lambda (entry)
-                              (concat
-                               parent (alist-get 'name entry) "/"))
+                            (lambda
+                              (entry)
+                              (concat (alist-get 'name entry) "/"))
                             entries)))
-                        input predicate)))))
+                        (if (string-empty-p parent)
+                            input
+                          (file-name-nondirectory input))
+                        predicate))))))
                nil
                nil
                nil
