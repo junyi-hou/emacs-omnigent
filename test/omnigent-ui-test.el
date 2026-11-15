@@ -126,7 +126,7 @@
 (ert-deftest omnigent-ui-conversation-header-tracks-session-data ()
   "Show snapshot settings and update them from partial stream events."
   (omnigent-ui-test--conversation
-    (should (string-prefix-p "unknown | unknown" header-line-format))
+    (should (string-prefix-p " unknown | unknown" header-line-format))
     (should
      (eq (get-text-property 0 'face header-line-format) 'diff-header))
     (should
@@ -152,7 +152,7 @@
     (should
      (equal
       header-line-format
-      "project | model-a | high | read-only | 100 / 1k (10%%)"))
+      " project | model-a | high | read-only | 100 / 1k (10%%)"))
     (omnigent-conversation--event
      "session.model" '((model . "model-b")))
     (omnigent-conversation--event
@@ -164,7 +164,7 @@
     (should
      (equal
       header-line-format
-      "project | model-b | low | full-access | 250 / 1k (25%%)"))
+      " project | model-b | low | full-access | 250 / 1k (25%%)"))
     (omnigent-conversation--event
      "response.completed"
      '((response
@@ -315,7 +315,7 @@
        (pending_inputs . [])
        (pending_elicitations . [])))
     (should buffer-read-only)
-    (should (string-prefix-p "unknown [R] |" header-line-format))
+    (should (string-prefix-p " unknown [R] |" header-line-format))
     (should-error (insert "more") :type 'buffer-read-only)
     (should-error (omnigent-conversation-send) :type 'user-error)
     (should-error (omnigent-conversation-interrupt) :type 'user-error)
@@ -328,7 +328,7 @@
        (pending_inputs . [])
        (pending_elicitations . [])))
     (should-not buffer-read-only)
-    (should (string-prefix-p "unknown [E] |" header-line-format))
+    (should (string-prefix-p " unknown [E] |" header-line-format))
     (should
      (equal
       (buffer-substring-no-properties
@@ -340,7 +340,7 @@
        (items . [])
        (pending_inputs . [])
        (pending_elicitations . [])))
-    (should (string-prefix-p "unknown [M] |" header-line-format))))
+    (should (string-prefix-p " unknown [M] |" header-line-format))))
 
 (ert-deftest omnigent-ui-transcript-stream-preserves-composer-and-fold
     ()
