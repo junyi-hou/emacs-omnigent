@@ -41,6 +41,27 @@
         "4w+"))
       (should (equal (omnigent-ui--session-age "invalid") "n/a")))))
 
+(ert-deftest
+    omnigent-ui-session-render-truncates-title-to-window-width
+    ()
+  "Keep a long session title on one line before its age label."
+  (let ((omnigent-sessions
+         '(((id . "a")
+            (title . "A very long session title")
+            (updated_at . "now"))))
+        (omnigent-sessions-truncated nil))
+    (unwind-protect
+        (with-current-buffer (get-buffer-create "*omnigent-sessions*")
+          (omnigent-ui-sessions-mode)
+          (cl-letf (((symbol-function 'frame-width)
+                     (lambda (&rest _) 16))
+                    ((symbol-function 'omnigent-ui--session-age)
+                     (lambda (_) "2d")))
+            (omnigent-ui-sessions-render))
+          (should (equal (buffer-string) "  A very lon… 2d\n")))
+      (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
+        (kill-buffer buffer)))))
+
 (ert-deftest omnigent-ui-session-render-preserves-selection ()
   "Render statuses and attention while preserving the selected session."
   (let ((omnigent-sessions

@@ -112,49 +112,63 @@
         (when omnigent-sessions-truncated
           (insert
            (propertize "Session list is truncated\n" 'face 'warning)))
-        (dolist (session sessions)
-          (let* ((start (point))
-                 (attention
-                  (alist-get 'pending_elicitations_count session))
-                 (title (alist-get 'title session)))
-            (insert
-             (if (and (numberp attention) (> attention 0))
-                 "! "
-               "  "))
-            (insert
-             (if (and (stringp title) (not (string-empty-p title)))
-                 (replace-regexp-in-string "[\n\r]" " " title)
-               "Untitled"))
-            (when-let* ((updated-at
-                         (omnigent-ui--session-age
-                          (alist-get 'updated_at session))))
+        (let ((line-width
+               (if-let* ((window (get-buffer-window buffer t)))
+                 (window-body-width window)
+                 (frame-width))))
+          (dolist (session sessions)
+            (let* ((start (point))
+                   (attention
+                    (alist-get 'pending_elicitations_count session))
+                   (title (alist-get 'title session))
+                   (updated-at
+                    (omnigent-ui--session-age
+                     (alist-get 'updated_at session)))
+                   (title
+                    (if (and (stringp title)
+                             (not (string-empty-p title)))
+                        (replace-regexp-in-string "[\n\r]" " " title)
+                      "Untitled")))
               (insert
-               (propertize " "
-                           'display
-                           `(space
-                             :align-to
-                             (- right
-                                ,(string-width
-                                  (format "%s" updated-at))))))
-              (insert (format "%s" updated-at)))
-            (insert "\n")
-            (add-text-properties
-             start (point)
-             (list
-              'omnigent-ui-session-id
-              (alist-get 'id session)
-              'face
-              (omnigent-ui--session-face session)))
-            (when (equal
-                   (alist-get 'id session)
-                   omnigent-ui--selected-session)
-              (add-face-text-property (+ start 2) (1- (point)) 'bold))
-            (when (and (numberp attention) (> attention 0))
-              (put-text-property
-               start
-               (1+ start)
-               'face
-               'omnigent-ui-session-attention))))
+               (if (and (numberp attention) (> attention 0))
+                   "! "
+                 "  "))
+              (insert
+               (truncate-string-to-width
+                title
+                (max 1
+                     (- line-width 2
+                        (if updated-at
+                            (+ 1 (string-width updated-at))
+                          0)))
+                nil nil "…"))
+              (when updated-at
+                (insert
+                 (propertize
+                  " "
+                  'display
+                  `(space
+                    :align-to (- right ,(string-width updated-at)))))
+                (insert updated-at))
+              (insert "\n")
+              (add-text-properties
+               start (point)
+               (list
+                'omnigent-ui-session-id
+                (alist-get 'id session)
+                'face
+                (omnigent-ui--session-face session)))
+              (when (equal
+                     (alist-get 'id session)
+                     omnigent-ui--selected-session)
+                (add-face-text-property
+                 (+ start 2) (1- (point)) 'bold))
+              (when (and (numberp attention) (> attention 0))
+                (put-text-property
+                 start
+                 (1+ start)
+                 'face
+                 'omnigent-ui-session-attention)))))
         (goto-char (point-min))
         (when id
           (while (and (not (eobp))
