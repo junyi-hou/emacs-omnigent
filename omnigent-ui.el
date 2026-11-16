@@ -792,6 +792,8 @@ Signal an error if point is not in a foldable block."
           omnigent-ui--tool-handlers)))
     (funcall (cdr handler) id item outputs)))
 
+(defvar omnigent-ui--last-message-label nil)
+
 (defun omnigent-ui--item (id item outputs)
   "Render transcript ITEM with ID and tool OUTPUTS indexed by call ID."
   (let ((type (alist-get 'type item))
@@ -809,28 +811,30 @@ Signal an error if point is not in a foldable block."
       ("error" (insert
         (propertize "Error:\n" 'face 'omnigent-ui-error) text "\n\n"))
       (_
-       (let ((user (equal (alist-get 'role item) "user")))
-         (insert
-          (propertize (if user
-                          "You:\n"
-                        (concat
-                         (or (alist-get 'agent_name item)
-                             omnigent-conversation-agent-name
-                             (alist-get
-                              'agent_name
-                              (cl-find
-                               omnigent-conversation-session-id
-                               omnigent-sessions
-                               :key
-                               (lambda (row) (alist-get 'id row))
-                               :test #'equal))
-                             "Agent")
-                         ":\n"))
-                      'face
-                      'omnigent-ui-prompt
-                      'font-lock-face
-                      'omnigent-ui-prompt)
-          text "\n\n"))))))
+       (let* ((user (equal (alist-get 'role item) "user"))
+              (label
+               (if user
+                   "You"
+                 (or (alist-get 'agent_name item)
+                     omnigent-conversation-agent-name
+                     (alist-get
+                      'agent_name
+                      (cl-find
+                       omnigent-conversation-session-id
+                       omnigent-sessions
+                       :key
+                       (lambda (row) (alist-get 'id row))
+                       :test #'equal))
+                     "Agent"))))
+         (unless (equal label omnigent-ui--last-message-label)
+           (insert
+            (propertize (concat label ":\n")
+                        'face
+                        'omnigent-ui-prompt
+                        'font-lock-face
+                        'omnigent-ui-prompt)))
+         (setq omnigent-ui--last-message-label label)
+         (insert text "\n\n"))))))
 
 (defvar-local omnigent-ui--history-positioned nil
   "Non-nil after the first nonempty transcript receives its window position.")
@@ -850,7 +854,8 @@ Signal an error if point is not in a foldable block."
              (get-buffer-window-list (current-buffer) nil t)))
            (inhibit-read-only t)
            (buffer-undo-list t)
-           (outputs (make-hash-table :test 'equal)))
+           (outputs (make-hash-table :test 'equal))
+           (omnigent-ui--last-message-label nil))
       (dolist (id omnigent-conversation--order)
         (let ((item (gethash id omnigent-conversation--items)))
           (when (equal (alist-get 'type item) "function_call_output")
