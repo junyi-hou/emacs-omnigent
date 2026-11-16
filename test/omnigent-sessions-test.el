@@ -142,6 +142,31 @@
        (equal (cdr (assoc "workspace" post-data)) "/srv/project"))
       (should (equal (alist-get 'id created) "new")))))
 
+(ert-deftest
+    omnigent-sessions-create-uses-conversation-context-unless-prefixed
+    ()
+  "Use conversation location context unless a prefix requests selection."
+  (let (target
+        selected)
+    (cl-letf (((symbol-function
+                'omnigent-sessions--workspace-selected)
+               (lambda (_generation value) (setq target value)))
+              ((symbol-function 'omnigent-sessions--read-workspace)
+               (lambda (_callback &optional _session)
+                 (setq selected t))))
+      (with-temp-buffer
+        (setq
+         major-mode 'omnigent-conversation-mode
+         omnigent-conversation-host-id "host-a"
+         omnigent-conversation-header-data '((workspace . "/repo")))
+        (omnigent-sessions-create)
+        (should (equal target '("host-a" . "/repo")))
+        (should-not selected)
+        (setq target nil)
+        (omnigent-sessions-create '(4))
+        (should-not target)
+        (should selected)))))
+
 (ert-deftest omnigent-sessions-refreshes-after-reconnect ()
   (let (opened
         (count 0)

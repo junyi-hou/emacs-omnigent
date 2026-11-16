@@ -53,10 +53,14 @@ a default execution host. Select the sole online host automatically; if several 
 online, prompt with their names and IDs. If none are online, report the problem.
 Do not assume that a host runs on the server machine or the Emacs machine.
 
-Always prompt for the workspace with a `find-file`-style `completing-read` table.
-Use the workspace of the session at point as the default when its host matches.
-Otherwise use no default. Query the selected
-host's filesystem through the server; do not inspect the Emacs filesystem. Empty input selects that default when available. Otherwise it cannot create a session. Completion initially lists the
+When the session at point has a host and workspace, use them for the new session.
+Otherwise, when the current buffer is a conversation with a host and workspace,
+use that context. With a prefix argument, always prompt for the host and workspace.
+If context is incomplete, use the full host and workspace selection flow.
+When selecting a workspace, use the session at point as its default only when its
+host matches. Query the selected host's filesystem through the server; do not
+inspect the Emacs filesystem. Empty input selects the default when available.
+Otherwise it cannot create a session. Completion initially lists the
 host's home directory. Relative input resolves under that home; absolute and
 host-relative tilde paths retain their meaning on the selected host.
 

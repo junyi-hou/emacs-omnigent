@@ -200,11 +200,12 @@ Run `omnigent-sessions-change-hook' on success, or the error hook on failure."
                       number revision))))
 
 ;;;###autoload
-(defun omnigent-sessions-create ()
-  "Create a session with asynchronously fetched host, workspace, and agent choices.
-Use the session at point as the workspace default when its host matches.
+(defun omnigent-sessions-create (&optional select-location)
+  "Create a session with asynchronously fetched agent choices.
+Use context at point or in the current conversation when available.
+With prefix argument SELECT-LOCATION, prompt for host and workspace.
 Report failures through `omnigent-sessions-error-hook'."
-  (interactive)
+  (interactive "P")
   (let* ((id (omnigent-ui--session-id-at-point))
          (session
           (and id
@@ -213,12 +214,30 @@ Report failures through `omnigent-sessions-error-hook'."
                 omnigent-sessions
                 :key (lambda (row) (alist-get 'id row))
                 :test #'equal)))
+         (host
+          (or (alist-get 'host_id session)
+              (and (derived-mode-p 'omnigent-conversation-mode)
+                   omnigent-conversation-host-id)))
+         (workspace
+          (or (alist-get 'workspace session)
+              (and (derived-mode-p 'omnigent-conversation-mode)
+                   (alist-get
+                    'workspace omnigent-conversation-header-data))))
+         (target
+          (and (not select-location)
+               (stringp host)
+               (not (string-empty-p host))
+               (stringp workspace)
+               (not (string-empty-p workspace))
+               (cons host workspace)))
          (callback
           (apply-partially #'omnigent-sessions--workspace-selected
                            omnigent-transport--generation)))
-    (if session
-        (omnigent-sessions--read-workspace callback session)
-      (omnigent-sessions--read-workspace callback))))
+    (if target
+        (funcall callback target)
+      (if session
+          (omnigent-sessions--read-workspace callback session)
+        (omnigent-sessions--read-workspace callback)))))
 
 (defun omnigent--fork-launched (session status body)
   "Open fork SESSION after launch STATUS, or report failure BODY."
