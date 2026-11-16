@@ -405,6 +405,26 @@
       (should-not (invisible-p (point)))
       (should-error (delete-char 1) :type 'text-read-only))))
 
+(ert-deftest omnigent-ui-fold-commands-use-block-at-point ()
+  "Open and close the fold that contains point."
+  (omnigent-ui-test--conversation
+    (omnigent-conversation--event
+     "response.output_item.added"
+     '((item
+        .
+        ((id . "r") (type . "reasoning") (content . "think")))))
+    (goto-char (point-min))
+    (forward-line 1)
+    (should (invisible-p (point)))
+    (omnigent-conversation-open-block)
+    (goto-char (point-min))
+    (forward-line 1)
+    (should-not (invisible-p (point)))
+    (omnigent-conversation-close-block)
+    (goto-char (point-min))
+    (forward-line 1)
+    (should (invisible-p (point)))))
+
 (ert-deftest omnigent-ui-fold-face-survives-fontification ()
   "Keep the fold marker face when fontification removes its explicit face."
   (with-temp-buffer

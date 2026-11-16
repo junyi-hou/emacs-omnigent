@@ -16,6 +16,18 @@
 
 (add-hook 'omnigent-sessions-open-hook #'omnigent-ui-created)
 
+;;;###autoload
+(defun omnigent-conversation-open-block ()
+  "Open the fold for the transcript block at point."
+  (interactive)
+  (omnigent-ui-fold-at-point t))
+
+;;;###autoload
+(defun omnigent-conversation-close-block ()
+  "Close the fold for the transcript block at point."
+  (interactive)
+  (omnigent-ui-fold-at-point nil))
+
 (defun omnigent--conversation-title (title)
   "Rename the current conversation buffer to TITLE."
   (when (and omnigent-conversation-session-id

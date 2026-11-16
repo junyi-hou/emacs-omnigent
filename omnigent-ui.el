@@ -588,6 +588,36 @@
      id (not (gethash id omnigent-ui--folds)) omnigent-ui--folds)
     (omnigent-ui--transcript)))
 
+(defun omnigent-ui-fold-at-point (open)
+  "Set the fold for the current transcript block to OPEN.
+Signal an error if point is not in a foldable block."
+  (let* ((item-id (get-text-property (point) 'omnigent-ui-item-id))
+         (start
+          (and item-id
+               (or (previous-single-property-change
+                    (point) 'omnigent-ui-item-id)
+                   (point-min))))
+         (end
+          (and start
+               (or (next-single-property-change
+                    start 'omnigent-ui-item-id)
+                   (point-max))))
+         button)
+    (when start
+      (let ((position start))
+        (while (and (< position end) (not button))
+          (when (and (button-at position)
+                     (equal
+                      item-id
+                      (button-get
+                       (button-at position) 'omnigent-ui-fold-id)))
+            (setq button (button-at position)))
+          (setq position (1+ position)))))
+    (unless button
+      (user-error "Point is not in a foldable transcript block"))
+    (unless (eq (and (gethash item-id omnigent-ui--folds) t) open)
+      (button-activate button))))
+
 (defun omnigent-ui--fold (id heading body face &optional status-face)
   "Insert a fold for ID with HEADING, BODY, FACE, and optional STATUS-FACE."
   (let ((open (gethash id omnigent-ui--folds))
