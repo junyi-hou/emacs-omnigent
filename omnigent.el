@@ -9,6 +9,7 @@
 
 (require 'subr-x)
 (require 'cl-lib)
+(require 'project)
 (require 'omnigent-options)
 (require 'omnigent-transport)
 (require 'omnigent-sessions)
@@ -332,6 +333,15 @@ Use `omnigent-conversation-open' to create a conversation buffer."
  (add-hook 'kill-buffer-hook #'omnigent-conversation--close nil t)
  (omnigent--conversation-connect))
 
+(define-key
+ omnigent-conversation-mode-map
+ (kbd "C-c @ C-c")
+ #'omnigent-conversation-close-block)
+(define-key
+ omnigent-conversation-mode-map
+ (kbd "C-c @ C-e")
+ #'omnigent-conversation-open-block)
+
 (defun omnigent--conversation-connect ()
   "Start the current conversation stream without replacing its draft."
   (let ((buffer (current-buffer)))
@@ -364,7 +374,12 @@ Use `omnigent-conversation-open' to create a conversation buffer."
 (defun omnigent-conversation-open (id &optional title)
   "Open the conversation for session ID, with optional TITLE."
   (interactive "sSession ID: ")
-  (let ((buffer (omnigent-sessions-buffer id)))
+  (let* ((project (project-current nil))
+         (directory
+          (if project
+              (project-root project)
+            default-directory))
+         (buffer (omnigent-sessions-buffer id)))
     (unless buffer
       (setq buffer
             (generate-new-buffer
@@ -376,6 +391,7 @@ Use `omnigent-conversation-open' to create a conversation buffer."
       (condition-case err
           (progn
             (with-current-buffer buffer
+              (setq default-directory directory)
               (let ((omnigent-conversation--session-id id))
                 (omnigent-conversation-mode)))
             (omnigent-sessions-register-buffer id buffer))
