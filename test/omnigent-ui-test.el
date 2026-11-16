@@ -485,6 +485,39 @@
       (should (string-match-p "301 lines omitted" bounded))
       (should (= (length (split-string bounded "\n")) 801)))))
 
+(ert-deftest omnigent-ui-tool-headings-cover-pi-harness ()
+  "Render concise headings for Pi tool names bash, read, and edit."
+  (omnigent-ui-test--conversation
+    (dolist (tool
+             '(("bash" . "{\"command\":\"ls -la\"}")
+               ("read" . "{\"path\":\"src/a.el\"}")
+               ("edit" . "{\"path\":\"src/a.el\"}")))
+      (omnigent-conversation--event
+       "response.output_item.done"
+       `((item
+          .
+          ((id . ,(concat "call-" (car tool)))
+           (type . "function_call")
+           (call_id . ,(concat "c-" (car tool)))
+           (name . ,(car tool))
+           (arguments . ,(cdr tool))))))
+      (omnigent-conversation--event
+       "response.output_item.done"
+       `((item
+          .
+          ((id
+            .
+            ,(concat "out-" (car tool)))
+           (type . "function_call_output")
+           (call_id
+            . ,(concat "c-" (car tool)))
+           (output . "done"))))))
+    (let ((text (buffer-string)))
+      (should (string-match-p "ls -la" text))
+      (should (string-match-p "edit src/a.el" text))
+      (should (string-match-p "read src/a.el" text))
+      (should (= 3 (how-many "▶ " (point-min) (point-max)))))))
+
 (ert-deftest omnigent-ui-inline-forms-survive-output-and-failure ()
   "Keep field edits and composer text while streaming and a resolve is pending."
   (omnigent-ui-test--conversation

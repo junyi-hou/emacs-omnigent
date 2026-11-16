@@ -685,11 +685,12 @@
 
 (defun omnigent-ui--tool-shell-p (item)
   "Return non-nil when ITEM is a shell call."
-  (equal (alist-get 'name item) "shell"))
+  (member (alist-get 'name item) '("shell" "bash")))
 
 (defun omnigent-ui--tool-patch-p (item)
-  "Return non-nil when ITEM is a patch call."
-  (equal (alist-get 'name item) "apply_patch"))
+  "Return non-nil when ITEM is a file patch or read call."
+  (member
+   (alist-get 'name item) '("apply_patch" "edit" "write" "read")))
 
 (defun omnigent-ui--tool-turn-diff-p (item)
   "Return non-nil when ITEM is a turn diff."
@@ -718,20 +719,24 @@
     (omnigent-ui--tool-render id item outputs command)))
 
 (defun omnigent-ui--tool-patch (id item outputs)
-  "Render patch ITEM and OUTPUTS for ID."
-  (let ((paths
-         (delq
-          nil
-          (mapcar
-           (lambda (change) (alist-get 'path change))
-           (append
-            (alist-get
-             'changes (omnigent-ui--tool-arguments item))
-            nil)))))
+  "Render patch or read ITEM and OUTPUTS for ID."
+  (let* ((arguments (omnigent-ui--tool-arguments item))
+         (paths
+          (or (delq
+               nil
+               (mapcar
+                (lambda (change) (alist-get 'path change))
+                (append (alist-get 'changes arguments) nil)))
+              (and (stringp (alist-get 'path arguments))
+                   (list (alist-get 'path arguments)))))
+         (verb
+          (if (equal (alist-get 'name item) "read")
+              "read"
+            "edit")))
     (omnigent-ui--tool-render
      id item outputs
      (when paths
-       (concat "edit " (mapconcat #'identity paths ", "))))))
+       (concat verb " " (mapconcat #'identity paths ", "))))))
 
 (defun omnigent-ui--tool-turn-diff (_id _item _outputs)
   "Hide the turn diff for _ID, _ITEM, and _OUTPUTS."
