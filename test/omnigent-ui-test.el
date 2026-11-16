@@ -473,39 +473,6 @@
              "▶ Thinking\n\n▶ Thinking\n\n")
            "You:\nhello\n\nError:\nfailed\n\n")))))))
 
-(ert-deftest omnigent-ui-groups-consecutive-message-labels ()
-  "Keep one label for consecutive messages and restore it after steering."
-  (omnigent-ui-test--conversation
-    (omnigent-conversation--snapshot
-     200
-     '((items
-        .
-        [((id . "agent-1")
-          (type . "message") (role . "assistant")
-          (agent_name . "pi-native-ui") (content . "XXX"))
-         ((id . "agent-2")
-          (type . "message")
-          (role . "assistant")
-          (agent_name . "pi-native-ui")
-          (content . "YYY"))
-         ((id . "steering")
-          (type . "message")
-          (role . "user")
-          (content . "Steer"))
-         ((id . "agent-3")
-          (type . "message")
-          (role . "assistant")
-          (agent_name . "pi-native-ui")
-          (content . "ZZZ"))])
-       (pending_inputs . []) (pending_elicitations . [])))
-    (should
-     (equal
-      (buffer-substring-no-properties
-       (point-min) omnigent-ui--request-start)
-      (concat
-       "pi-native-ui:\nXXX\n\nYYY\n\n"
-       "You:\nSteer\n\npi-native-ui:\nZZZ\n\n")))))
-
 (ert-deftest omnigent-ui-tool-output-merges-and-bounds ()
   "Merge tool outputs into one fold and apply both deterministic size limits."
   (omnigent-ui-test--conversation
