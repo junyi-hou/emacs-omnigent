@@ -13,6 +13,7 @@
 (require 'omnigent-options)
 (require 'omnigent-transport)
 (require 'omnigent-sessions)
+(require 'omnigent-workspace)
 (require 'omnigent-ui)
 
 (add-hook 'omnigent-sessions-open-hook #'omnigent-ui-created)
@@ -370,15 +371,34 @@ Use `omnigent-conversation-open' to create a conversation buffer."
       (omnigent-transport-stop-session-stream
        omnigent-conversation--stream))))
 
+(defun omnigent-conversation--default-directory (id)
+  "Return the local workspace directory for session ID.
+Use the current project root when the session workspace is unavailable."
+  (let* ((session
+          (cl-find
+           id
+           omnigent-sessions
+           :key (lambda (row) (alist-get 'id row))
+           :test #'equal))
+         (workspace (alist-get 'workspace session))
+         (host-id (alist-get 'host_id session)))
+    (if (and (stringp workspace)
+             (not (string-empty-p workspace))
+             (stringp host-id)
+             (not (string-empty-p host-id)))
+        (file-name-as-directory
+         (omnigent-workspace-local-filename
+          workspace "" (omnigent-workspace-host-mapping host-id)))
+      (let ((project (project-current nil)))
+        (if project
+            (project-root project)
+          default-directory)))))
+
 ;;;###autoload
 (defun omnigent-conversation-open (id &optional title)
   "Open the conversation for session ID, with optional TITLE."
   (interactive "sSession ID: ")
-  (let* ((project (project-current nil))
-         (directory
-          (if project
-              (project-root project)
-            default-directory))
+  (let* ((directory (omnigent-conversation--default-directory id))
          (buffer (omnigent-sessions-buffer id)))
     (unless buffer
       (setq buffer
@@ -398,6 +418,8 @@ Use `omnigent-conversation-open' to create a conversation buffer."
         (error
          (kill-buffer buffer)
          (signal (car err) (cdr err)))))
+    (with-current-buffer buffer
+      (setq default-directory (file-name-as-directory directory)))
     (pop-to-buffer buffer)))
 
 (defun omnigent-conversation-reconnect ()

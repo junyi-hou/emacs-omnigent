@@ -3,6 +3,22 @@
 (require 'cl-lib)
 (require 'omnigent)
 
+(defun omnigent-conversation-test--open-session (id workspace)
+  "Open session ID with mocked WORKSPACE and return its buffer."
+  (let ((omnigent-sessions
+         `(((id . ,id) (host_id . "host") (workspace . ,workspace))))
+        (omnigent-sessions--buffers nil))
+    (cl-letf (((symbol-function
+                'omnigent-transport-start-session-stream)
+               (lambda (_id _on-event &rest _callbacks) 'stream))
+              ((symbol-function
+                'omnigent-transport-stop-session-stream)
+               #'ignore)
+              ((symbol-function 'project-current) #'ignore))
+      (save-window-excursion
+        (omnigent-conversation-open id)
+        (current-buffer)))))
+
 (ert-deftest omnigent-conversation-title-tracks-stream-updates ()
   "Rename an open conversation when its title changes."
   (let ((omnigent-sessions--buffers nil)
@@ -46,6 +62,49 @@
                       (buffer-name buffer)
                       "*omnigent: From update [session-t]*")))
                 (kill-buffer buffer))))))))
+
+(ert-deftest omnigent-conversation-open-uses-session-workspace ()
+  "Use the session workspace as the default directory on every open."
+  (let ((omnigent-host-address-function (lambda (_id) "localhost")))
+    (let ((buffer
+           (omnigent-conversation-test--open-session
+            "session-directory" "/workspace/root")))
+      (unwind-protect
+          (progn
+            (should
+             (equal
+              (buffer-local-value
+               'default-directory buffer)
+              "/workspace/root/"))
+            (setq buffer
+                  (omnigent-conversation-test--open-session
+                   "session-directory" "/changed/root"))
+            (should
+             (equal
+              (buffer-local-value
+               'default-directory buffer)
+              "/changed/root/")))
+        (with-current-buffer buffer
+          (setq omnigent-conversation--stream nil))
+        (kill-buffer buffer)))))
+
+(ert-deftest omnigent-conversation-open-maps-remote-workspace ()
+  "Map a remote session workspace to its TRAMP directory."
+  (let ((omnigent-host-address-function
+         (lambda (_id) "runner.example")))
+    (let ((buffer
+           (omnigent-conversation-test--open-session
+            "session-remote" "/workspace/root")))
+      (unwind-protect
+          (progn
+            (should
+             (equal
+              (buffer-local-value
+               'default-directory buffer)
+              "/ssh:runner.example:/workspace/root/"))
+            (with-current-buffer buffer
+              (setq omnigent-conversation--stream nil)))
+        (kill-buffer buffer)))))
 
 (ert-deftest omnigent-conversation-snapshot-stream-and-draft ()
   "Reconcile snapshot and stream items while keeping the editable composer."
