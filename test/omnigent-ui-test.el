@@ -538,6 +538,24 @@
       (should (string-match-p "read src/a.el" text))
       (should (= 3 (how-many "▶ " (point-min) (point-max)))))))
 
+(ert-deftest omnigent-ui-shell-heading-unwraps-quoted-login-shell ()
+  "Strip /bin/zsh, -lc, and shell quotes from the tool heading."
+  (should
+   (equal
+    (omnigent-ui--unwrap-shell-command
+     "/bin/zsh -lc \"rg -n pattern\\; echo done\"")
+    "rg -n pattern; echo done"))
+  (should
+   (equal
+    (omnigent-ui--unwrap-shell-command
+     "/bin/zsh -lc \"echo one\" \"echo two\"")
+    "echo one echo two"))
+  (should
+   (equal
+    (omnigent-ui--unwrap-shell-command
+     "/bin/zsh -lc \"unbalanced quote")
+    "/bin/zsh -lc \"unbalanced quote")))
+
 (ert-deftest omnigent-ui-inline-forms-survive-output-and-failure ()
   "Keep field edits and composer text while streaming and a resolve is pending."
   (omnigent-ui-test--conversation

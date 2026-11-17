@@ -730,22 +730,24 @@ Signal an error if point is not in a foldable block."
   "Match any tool ITEM."
   t)
 
+(defun omnigent-ui--unwrap-shell-command (command)
+  "Return COMMAND without its /bin/sh and -lc wrapper."
+  (condition-case nil
+      (let ((parts (split-string-and-unquote command)))
+        (if (and (>= (length parts) 3)
+                 (string-match-p "\\`/bin/[^/]+sh\\'" (car parts))
+                 (equal (cadr parts) "-lc"))
+            (mapconcat #'identity (cddr parts) " ")
+          command))
+    (error
+     command)))
+
 (defun omnigent-ui--tool-shell (id item outputs)
   "Render shell ITEM and OUTPUTS for ID."
   (let ((command
          (alist-get 'command (omnigent-ui--tool-arguments item))))
     (when (stringp command)
-      (setq command
-            (condition-case nil
-                (let ((parts (split-string-and-unquote command)))
-                  (if (and (= (length parts) 3)
-                           (string-match-p
-                            "\\`/bin/[^/]+sh\\'" (car parts))
-                           (equal (cadr parts) "-lc"))
-                      (nth 2 parts)
-                    command))
-              (error
-               command))))
+      (setq command (omnigent-ui--unwrap-shell-command command)))
     (omnigent-ui--tool-render id item outputs command)))
 
 (defun omnigent-ui--tool-patch (id item outputs)
