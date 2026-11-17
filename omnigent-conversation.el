@@ -141,13 +141,16 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 
 (defun omnigent-conversation--delta (kind data)
   "Append DATA to an identified item or the active response's KIND section."
-  (let* ((explicit-id (alist-get 'item_id data))
+  (let* ((item-id (alist-get 'item_id data))
+         (message-id (alist-get 'message_id data))
+         (explicit-id (or item-id message-id))
          (id (or explicit-id omnigent-conversation--section-id))
          (item (and id (gethash id omnigent-conversation--items))))
-    (when (and (not explicit-id) omnigent-conversation--response-id)
+    (when (and omnigent-conversation--response-id
+               (or (not explicit-id) (and message-id (not item))))
       (unless (and item (equal (alist-get 'type item) kind))
         (setq
-         id (make-symbol "live-section")
+         id (or message-id (make-symbol "live-section"))
          item
          `((id . ,id)
            (type . ,kind)

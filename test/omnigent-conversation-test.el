@@ -896,6 +896,31 @@
        (gethash "message" omnigent-conversation--items))
       "hello"))))
 
+(ert-deftest omnigent-conversation-message-id-deltas-use-sections ()
+  "Keep Pi message IDs in separate live message sections."
+  (with-temp-buffer
+    (setq omnigent-conversation--items (make-hash-table :test 'equal))
+    (omnigent-conversation--event
+     "response.created" '((response . ((id . "r1")))))
+    (omnigent-conversation--event
+     "response.output_text.delta"
+     '((message_id . "r1:msg:0") (delta . "first")))
+    (omnigent-conversation--event
+     "response.output_text.delta"
+     '((message_id . "r1:msg:1") (delta . "second")))
+    (should
+     (equal omnigent-conversation--order '("r1:msg:0" "r1:msg:1")))
+    (should
+     (equal
+      (omnigent-conversation--text
+       (gethash "r1:msg:0" omnigent-conversation--items))
+      "first"))
+    (should
+     (equal
+      (omnigent-conversation--text
+       (gethash "r1:msg:1" omnigent-conversation--items))
+      "second"))))
+
 (ert-deftest
     omnigent-conversation-snapshot-and-terminal-events-reset-sections
     ()
