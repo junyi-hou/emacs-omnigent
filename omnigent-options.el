@@ -28,7 +28,7 @@
      map (kbd "C-c C-e") #'omnigent-conversation-set-effort)
     (define-key map (kbd "TAB") #'widget-forward)
     (define-key map (kbd "<backtab>") #'widget-backward)
-    (define-key map (kbd "C-c C-a") #'omnigent-ui-archive)
+    (define-key map (kbd "C-c C-a") #'omnigent-conversation-archive)
     (define-key map (kbd "C-c C-d") #'omnigent-ui-delete)
     map)
   "Keymap for `omnigent-conversation-mode'."

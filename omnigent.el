@@ -312,6 +312,22 @@ With prefix argument WORKTREE, prompt for a new worktree branch."
                       workspace
                       branch))))
 
+;;;###autoload
+(defun omnigent-conversation-archive ()
+  "Toggle the current session's archived state.
+Close this conversation buffer after the session becomes archived."
+  (interactive)
+  (unless (derived-mode-p 'omnigent-conversation-mode)
+    (user-error "No Omnigent conversation in this buffer"))
+  (let ((buffer (current-buffer)))
+    (omnigent-sessions-toggle-archive
+     omnigent-conversation-session-id
+     (lambda (status body)
+       (when (and (buffer-live-p buffer)
+                  (omnigent-transport-success-p status)
+                  (eq (alist-get 'archived body) t))
+         (kill-buffer buffer))))))
+
 (define-derived-mode
  omnigent-conversation-mode
  text-mode

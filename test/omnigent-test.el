@@ -38,6 +38,35 @@
             (should (eq callback #'ignore)))))
       (omnigent-transport-list-sessions #'ignore))))
 
+(ert-deftest omnigent-conversation-archive-closes-only-when-archived
+    ()
+  "Toggle the current session and close its buffer only after archiving."
+  (cl-letf (((symbol-function 'omnigent-sessions-toggle-archive)
+             (lambda (_id callback)
+               (funcall callback 200 '((archived . t)))))
+            ((symbol-function 'omnigent--conversation-connect)
+             #'ignore)
+            ((symbol-function 'omnigent-transport-success-p)
+             (lambda (status &optional _body) (eq status 200))))
+    (with-temp-buffer
+      (let ((omnigent-conversation--session-id "session"))
+        (omnigent-conversation-mode))
+      (let ((conversation (current-buffer)))
+        (omnigent-conversation-archive)
+        (should-not (buffer-live-p conversation)))))
+  (cl-letf (((symbol-function 'omnigent-sessions-toggle-archive)
+             (lambda (_id callback)
+               (funcall callback 200 '((archived . :json-false)))))
+            ((symbol-function 'omnigent--conversation-connect)
+             #'ignore)
+            ((symbol-function 'omnigent-transport-success-p)
+             (lambda (status &optional _body) (eq status 200))))
+    (with-temp-buffer
+      (let ((omnigent-conversation--session-id "session"))
+        (omnigent-conversation-mode))
+      (omnigent-conversation-archive)
+      (should (buffer-live-p (current-buffer))))))
+
 (ert-deftest omnigent-start-parses-server-url-from-cli-output ()
   "Extract the URL printed by the Omnigent server command."
   (with-temp-buffer
