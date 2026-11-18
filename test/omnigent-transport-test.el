@@ -208,6 +208,17 @@ Call the user's token function separately for each request."
       (omnigent-transport--request-headers)
       '(("Authorization" . "Bearer token"))))))
 
+(ert-deftest omnigent-transport-header-auth-overrides-different-case
+    ()
+  "Replace an Authorization header regardless of its case."
+  (let ((omnigent-extra-headers '(("authorization" . "custom-auth")))
+        (omnigent-auth-method 'token)
+        (omnigent-auth-token-function (lambda () "token")))
+    (should
+     (equal
+      (omnigent-transport--request-headers)
+      '(("Authorization" . "Bearer token"))))))
+
 (ert-deftest omnigent-transport-header-keep-auth-if-method-is-none ()
   "Replace a user Authorization header with the bearer token header."
   (let ((omnigent-extra-headers '(("Authorization" . "custom-auth")))

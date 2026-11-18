@@ -134,7 +134,7 @@ authentication headers when both use the same header name."
   "Merge HEADER-LISTS into one alist without duplicate header names."
   (cl-remove-duplicates
    (apply #'append header-lists)
-   :key #'car
+   :key (lambda (header) (downcase (car header)))
    :test #'equal))
 
 (defun omnigent-transport--session-path (session-id &optional suffix)
