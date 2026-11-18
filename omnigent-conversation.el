@@ -1029,8 +1029,8 @@ submitted here.  The change hook reports state changes to the frontend."
     (condition-case err
         (progn
           (omnigent-conversation--notify-submission-change)
-          (omnigent-transport-request
-           "POST"
+          (omnigent-transport--request
+           omnigent-conversation-session-id "POST"
            (omnigent-transport--session-path
             omnigent-conversation-session-id
             (concat

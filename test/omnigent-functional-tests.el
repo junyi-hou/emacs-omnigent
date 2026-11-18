@@ -1952,7 +1952,7 @@ Return the recorded model request of the turn."
           (omnigent-server-url omnigent-server-url)
           (omnigent-reconnection-test--requests nil)
           (request-function
-           (symbol-function 'omnigent-transport-request))
+           (symbol-function 'omnigent-transport--request))
           (omnigent-transport--streams nil)
           (omnigent-transport--updates nil)
           (omnigent-sessions nil)
@@ -1971,11 +1971,13 @@ Return the recorded model request of the turn."
            (make-hash-table :test 'equal))
           (omnigent-ui--workspace-visible nil)
           (omnigent-ui--workspace-closed nil))
-     (cl-letf (((symbol-function 'omnigent-transport-request)
-                (lambda (method path callback &optional data)
+     (cl-letf (((symbol-function 'omnigent-transport--request)
+                (lambda (session-id
+                         method path callback &optional data)
                   (push `((method . ,method) (path . ,path))
                         omnigent-reconnection-test--requests)
                   (funcall request-function
+                           session-id
                            method
                            path
                            callback
@@ -2177,15 +2179,16 @@ Return the recorded model request of the turn."
            before
            failed
            (original-request
-            (symbol-function 'omnigent-transport-request))
+            (symbol-function 'omnigent-transport--request))
            (original-message (symbol-function 'message)))
       (with-current-buffer buffer
         (insert "copy this draft before closing")
         (setq before
               (buffer-substring-no-properties
                (point-min) (point-max))))
-      (cl-letf (((symbol-function 'omnigent-transport-request)
-                 (lambda (method path callback &optional data)
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (session-id
+                          method path callback &optional data)
                    (if (and (not failed)
                             (equal method "GET")
                             (string-prefix-p
@@ -2202,6 +2205,7 @@ Return the recorded model request of the turn."
                           '((detail
                              . "Injected history read failure"))))
                      (funcall original-request
+                              session-id
                               method
                               path
                               callback
@@ -2501,7 +2505,7 @@ Return the recorded model request of the turn."
              (path (omnigent-transport--session-path id "/items"))
              (callback (omnigent-stream-snapshot-callback stream))
              (original-request
-              (symbol-function 'omnigent-transport-request))
+              (symbol-function 'omnigent-transport--request))
              (deliveries 0)
              held
              replacement)
@@ -2509,11 +2513,15 @@ Return the recorded model request of the turn."
               (lambda (status body)
                 (cl-incf deliveries)
                 (funcall callback status body)))
-        (cl-letf (((symbol-function 'omnigent-transport-request)
-                   (lambda (method
-                            requested-path on-result &optional data)
+        (cl-letf (((symbol-function 'omnigent-transport--request)
+                   (lambda (session-id
+                            method
+                            requested-path
+                            on-result
+                            &optional
+                            data)
                      (funcall original-request
-                              method requested-path
+                              session-id method requested-path
                               (if (and (equal method "GET")
                                        (string-prefix-p
                                         path requested-path))

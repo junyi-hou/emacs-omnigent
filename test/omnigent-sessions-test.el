@@ -6,8 +6,9 @@
   "Send fork options and launch a worktree on the source host."
   (let (requests
         opened)
-    (cl-letf (((symbol-function 'omnigent-transport-request)
-               (lambda (method path callback &optional data)
+    (cl-letf (((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id
+                        method path callback &optional data)
                  (push (list method path data) requests)
                  (funcall callback
                           201
@@ -116,8 +117,9 @@
                               ((id . "child")
                                (parent_session_id . "root"))])
                             (has_more . t)))))
-              ((symbol-function 'omnigent-transport-request)
-               (lambda (method _path callback &optional data)
+              ((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id
+                        method _path callback &optional data)
                  (if (equal method "GET")
                      (funcall callback
                               200
@@ -257,8 +259,9 @@
                     'omnigent-sessions--read-workspace)
                    (lambda (callback)
                      (funcall callback '("host-b" . "/srv/project"))))
-                  ((symbol-function 'omnigent-transport-request)
-                   (lambda (method path callback &optional _data)
+                  ((symbol-function 'omnigent-transport--request)
+                   (lambda (_session-id
+                            method path callback &optional _data)
                      (push (list method path) requests)
                      (funcall callback status body)))
                   ((symbol-function 'completing-read)
@@ -294,8 +297,8 @@
       (cl-letf (((symbol-function 'omnigent-sessions--read-workspace)
                  (lambda (callback)
                    (funcall callback '("host-b" . "/srv/project"))))
-                ((symbol-function 'omnigent-transport-request)
-                 (lambda (method path cb &optional data)
+                ((symbol-function 'omnigent-transport--request)
+                 (lambda (_session-id method path cb &optional data)
                    (push (list method path) requests)
                    (if (equal method "GET")
                        (funcall cb
@@ -350,8 +353,9 @@
     (cl-letf (((symbol-function 'omnigent-sessions--read-workspace)
                (lambda (callback)
                  (funcall callback '("host-b" . "/srv/project"))))
-              ((symbol-function 'omnigent-transport-request)
-               (lambda (method _path callback &optional _data)
+              ((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id
+                        method _path callback &optional _data)
                  (if (equal method "GET")
                      (funcall callback
                               200
@@ -380,8 +384,8 @@
             callback
             received
             (body '((result . "server result"))))
-        (cl-letf (((symbol-function 'omnigent-transport-request)
-                   (lambda (method path cb &optional data)
+        (cl-letf (((symbol-function 'omnigent-transport--request)
+                   (lambda (_session-id method path cb &optional data)
                      (if (equal method "GET")
                          (funcall cb 200 '((archived . :json-false)))
                        (setq
@@ -414,8 +418,9 @@
   (dolist (state '(t :json-false))
     (let (payload
           result)
-      (cl-letf (((symbol-function 'omnigent-transport-request)
-                 (lambda (method _path callback &optional data)
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_session-id
+                          method _path callback &optional data)
                    (if (equal method "GET")
                        (funcall callback 200 `((archived . ,state)))
                      (setq payload (json-encode data))
@@ -458,8 +463,8 @@
         requests
         result)
     (cl-letf
-        (((symbol-function 'omnigent-transport-request)
-          (lambda (method path callback &optional _data)
+        (((symbol-function 'omnigent-transport--request)
+          (lambda (_session-id method path callback &optional _data)
             (should (equal method "GET"))
             (push path requests)
             (funcall
@@ -550,8 +555,9 @@
   (let (prompts
         requests
         result)
-    (cl-letf (((symbol-function 'omnigent-transport-request)
-               (lambda (_method path callback &optional _data)
+    (cl-letf (((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id
+                        _method path callback &optional _data)
                  (push path requests)
                  (funcall callback
                           200
@@ -604,8 +610,9 @@
           (omnigent-sessions-error-hook nil))
       (setq omnigent-sessions-error-hook
             (list (lambda (error) (push error errors))))
-      (cl-letf (((symbol-function 'omnigent-transport-request)
-                 (lambda (_method path callback &optional _data)
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_session-id
+                          _method path callback &optional _data)
                    (should (equal path "/v1/hosts"))
                    (funcall callback (car response) (cdr response))))
                 ((symbol-function 'completing-read)
@@ -632,8 +639,9 @@
           (omnigent-sessions-error-hook nil))
       (setq omnigent-sessions-error-hook
             (list (lambda (error) (push error errors))))
-      (cl-letf (((symbol-function 'omnigent-transport-request)
-                 (lambda (_method path callback &optional _data)
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_session-id
+                          _method path callback &optional _data)
                    (cond
                     ((equal path "/v1/hosts")
                      (funcall callback
@@ -666,8 +674,8 @@
         (refreshes 0))
     (setq omnigent-sessions-open-hook
           (list (lambda (session) (setq opened session))))
-    (cl-letf (((symbol-function 'omnigent-transport-request)
-               (lambda (method path cb &optional data)
+    (cl-letf (((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id method path cb &optional data)
                  (push (list method path data) requests)
                  (setq callback cb)))
               ((symbol-function 'accept-process-output)
@@ -733,7 +741,8 @@
                (lambda (_host _path callback &rest _)
                  (cl-incf requests)
                  (setq directory-callback callback)))
-              ((symbol-function 'omnigent-transport-request) #'ignore)
+              ((symbol-function 'omnigent-transport--request)
+               #'ignore)
               ((symbol-function 'accept-process-output)
                (lambda (&rest _)
                  (ert-fail
@@ -831,15 +840,16 @@
   "Do not continue discovery on another server or loop on an invalid cursor."
   (let ((omnigent-transport--generation 0)
         selected)
-    (cl-letf (((symbol-function 'omnigent-transport-request)
-               (lambda (&rest _)
+    (cl-letf (((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id &rest _)
                  (cl-incf omnigent-transport--generation))))
       (omnigent-sessions--read-workspace
        (lambda (_) (setq selected t)))
       (should-not selected)))
   (let ((omnigent-transport--generation 0))
-    (cl-letf (((symbol-function 'omnigent-transport-request)
-               (lambda (_method path callback &optional _data)
+    (cl-letf (((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id
+                        _method path callback &optional _data)
                  (funcall callback
                           200
                           (if (equal path "/v1/hosts")
@@ -856,8 +866,9 @@
        (omnigent-sessions--read-workspace #'ignore)
        :type 'user-error)))
   (let (result)
-    (cl-letf (((symbol-function 'omnigent-transport-request)
-               (lambda (_method _path callback &optional _data)
+    (cl-letf (((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id
+                        _method _path callback &optional _data)
                  (funcall callback
                           200
                           '((data . []) (has_more . t))))))
@@ -992,8 +1003,9 @@
                     "Malformed data must not reach a prompt")))
                 ((symbol-function 'omnigent-sessions-refresh)
                  #'ignore)
-                ((symbol-function 'omnigent-transport-request)
-                 (lambda (_method _path cb &optional _data)
+                ((symbol-function 'omnigent-transport--request)
+                 (lambda (_session-id
+                          _method _path cb &optional _data)
                    (funcall cb 200 body))))
         (omnigent-sessions--select-host
          omnigent-transport--generation #'ignore nil 200 body)
@@ -1017,8 +1029,8 @@
           (list (lambda (error) (push error errors))))
     (cl-letf (((symbol-function 'completing-read)
                (lambda (&rest _) "/repo"))
-              ((symbol-function 'omnigent-transport-request)
-               (lambda (_method _path cb &optional _data)
+              ((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id _method _path cb &optional _data)
                  (funcall cb 200 nil))))
       (omnigent-sessions--select-workspace
        omnigent-transport--generation

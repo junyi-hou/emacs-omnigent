@@ -14,8 +14,9 @@
                  (setq started t)))
               ((symbol-function 'omnigent-transport-reset)
                (lambda () (setq reset t)))
-              ((symbol-function 'omnigent-transport-request)
-               (lambda (&rest _) (ert-fail "Unexpected request")))
+              ((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id &rest _)
+                 (ert-fail "Unexpected request")))
               ((symbol-function 'make-process)
                (lambda (&rest _)
                  (ert-fail "Connecting must not launch a process"))))
@@ -28,8 +29,8 @@
   "Request the most recently updated sessions, including archived ones."
   (let ((omnigent-transport-session-limit 42))
     (cl-letf
-        (((symbol-function 'omnigent-transport-request)
-          (lambda (method path callback)
+        (((symbol-function 'omnigent-transport--request)
+          (lambda (_session-id method path callback &optional _data)
             (should (equal method "GET"))
             (should
              (equal

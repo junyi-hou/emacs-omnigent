@@ -593,8 +593,8 @@
          "name" (omnigent-conversation-elicitation-draft "question"))
         "Alice"))
       (should (equal (widget-value field) "Alice"))
-      (cl-letf (((symbol-function 'omnigent-transport-request)
-                 (lambda (_method _path cb _data)
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_session-id _method _path cb _data)
                    (setq callback cb))))
         (omnigent-conversation-elicitation-submit
          "question" 'accept nil)
@@ -747,8 +747,8 @@
         (omnigent-ui--field-notify field)))
     (should-not (omnigent-conversation-elicitation-validate "q"))
     (let (payload)
-      (cl-letf (((symbol-function 'omnigent-transport-request)
-                 (lambda (_method _path _callback data)
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_session-id _method _path _callback data)
                    (setq payload data))))
         (omnigent-conversation-elicitation-submit "q" 'accept nil))
       (let ((content (alist-get "content" payload nil nil #'equal)))
@@ -1947,8 +1947,8 @@
                      (if (eq setting 'model)
                          "second"
                        "high")))
-                  ((symbol-function 'omnigent-transport-request)
-                   (lambda (method path _callback body)
+                  ((symbol-function 'omnigent-transport--request)
+                   (lambda (_session-id method path _callback body)
                      (setq request (list method path body)))))
           (call-interactively
            (if (eq setting 'model)

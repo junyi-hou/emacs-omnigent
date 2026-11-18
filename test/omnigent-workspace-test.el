@@ -39,8 +39,9 @@
   (let (requests
         result
         failure)
-    (cl-letf (((symbol-function 'omnigent-transport-request)
-               (lambda (_method path callback &optional _data)
+    (cl-letf (((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id
+                        _method path callback &optional _data)
                  (push path requests)
                  (cond
                   ((string-suffix-p "/changes" path)
@@ -87,8 +88,9 @@
            '(omnigent-workspace-diff omnigent-workspace-list))
     (dolist (paths '([] [((path . "file") (status . "modified"))]))
       (let ((calls 0))
-        (cl-letf (((symbol-function 'omnigent-transport-request)
-                   (lambda (_method path callback &optional _data)
+        (cl-letf (((symbol-function 'omnigent-transport--request)
+                   (lambda (_session-id
+                            _method path callback &optional _data)
                      (funcall callback
                               200
                               (cond
@@ -114,8 +116,9 @@
   "Report malformed successful root responses through the result callback."
   (dolist (body '(nil "not JSON" [] ((base . 7))))
     (let (result)
-      (cl-letf (((symbol-function 'omnigent-transport-request)
-                 (lambda (_method _path callback &optional _data)
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_session-id
+                          _method _path callback &optional _data)
                    (funcall callback 200 body))))
         (omnigent-workspace-list
          "id" (lambda (status data) (setq result (list status data))))
@@ -126,8 +129,9 @@
 (ert-deftest omnigent-workspace-list-and-access ()
   "Check workspace listing and direct access restrictions."
   (let (result)
-    (cl-letf (((symbol-function 'omnigent-transport-request)
-               (lambda (_method path callback &optional _data)
+    (cl-letf (((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id
+                        _method path callback &optional _data)
                  (funcall callback
                           200
                           (if (string-suffix-p "/filesystem" path)
@@ -160,8 +164,9 @@
   (let (request
         result
         response)
-    (cl-letf (((symbol-function 'omnigent-transport-request)
-               (lambda (_method path callback &optional _data)
+    (cl-letf (((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id
+                        _method path callback &optional _data)
                  (setq request path)
                  (funcall callback (car response) (cdr response)))))
       (setq response '(200 (before . "old\n") (after . "new\n")))
@@ -190,8 +195,9 @@
 (ert-deftest omnigent-workspace-list-rejects-missing-status ()
   "Reject a change list without the status needed by the workspace view."
   (let (result)
-    (cl-letf (((symbol-function 'omnigent-transport-request)
-               (lambda (_method path callback &optional _data)
+    (cl-letf (((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id
+                        _method path callback &optional _data)
                  (funcall callback
                           200
                           (if (string-suffix-p "/filesystem" path)
@@ -210,8 +216,9 @@
           (attempts 0)
           scheduled
           result)
-      (cl-letf (((symbol-function 'omnigent-transport-request)
-                 (lambda (_method path callback &optional _data)
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_session-id
+                          _method path callback &optional _data)
                    (if (string-suffix-p "/filesystem" path)
                        (progn
                          (cl-incf attempts)

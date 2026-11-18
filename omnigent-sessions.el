@@ -573,8 +573,8 @@ Continue through CALLBACK after validating the path on GENERATION's server."
 (defun omnigent-sessions-fork (id options callback)
   "Fork session ID with OPTIONS and call CALLBACK with status and body.
 OPTIONS is an alist of server fork options, or nil for the defaults."
-  (omnigent-transport-request
-   "POST"
+  (omnigent-transport--request
+   id "POST"
    (concat (omnigent-transport--session-path id) "/fork") callback
    (or options (make-hash-table :test 'equal))))
 
@@ -582,7 +582,8 @@ OPTIONS is an alist of server fork options, or nil for the defaults."
     (id host workspace branch callback)
   "Launch fork ID on HOST in WORKSPACE and call CALLBACK with status and body.
 When BRANCH is non-nil, create a worktree with that new branch."
-  (omnigent-transport-request
+  (omnigent-transport--request
+   id
    "POST"
    (format "/v1/hosts/%s/runners" (url-hexify-string host))
    callback

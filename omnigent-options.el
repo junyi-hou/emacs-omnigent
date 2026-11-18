@@ -127,17 +127,16 @@ to use the returned token.  The function is called for every request."
 
 (defcustom omnigent-extra-headers nil
   "Additional headers sent with REST, SSE, and WebSocket requests.
-Each entry is a cons cell: (HEADER-NAME . HEADER-VALUE-FN).
-
-HEADER-VALUE-FN is a function that takes no argument and run in the conversation buffer"
+Each entry is (HEADER-NAME . VALUE).  VALUE is a string or a function.
+The function receives the session ID, or nil for a request without one.
+A nil return value omits the header.  Authentication headers take precedence."
   :type
   '(alist
     :key-type string
     :value-type
     (choice
-     (function
-      :tag
-      "header-value function called from each buffer sending the request")
+     (function :tag
+               "Header value function called with the session ID")
      (string :tag "constant header value")))
   :group 'omnigent-transport)
 

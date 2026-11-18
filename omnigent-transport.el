@@ -111,8 +111,9 @@ STATUS nil means the transport did not return an HTTP status."
      "Omnigent authentication failed for %s; check your token (%s)"
      action (or status "no HTTP status"))))
 
-(defun omnigent-transport--request-headers ()
+(defun omnigent-transport--request-headers (&optional session-id)
   "Return all headers for a transport request.
+Call header functions with SESSION-ID, or nil for non-session requests.
 Put user-configured extra headers first, then replace them with
 authentication headers when both use the same header name."
   (omnigent-transport--merge-headers
@@ -125,7 +126,7 @@ authentication headers when both use the same header name."
         `(,key
           .
           ,(if (functionp value)
-               (funcall value)
+               (funcall value session-id)
              value)))))
     (cl-remove-if-not (lambda (header) (cdr header))))
    (omnigent-transport--auth-headers)))
@@ -185,10 +186,11 @@ Use the HTTP status when available, and always kill the response buffer."
       (when (buffer-live-p response-buffer)
         (kill-buffer response-buffer)))))
 
-(defun omnigent-transport-request
-    (method path callback &optional data)
+(defun omnigent-transport--request
+    (session-id method path callback &optional data)
   "Send METHOD to PATH and call CALLBACK with status and response body.
 
+SESSION-ID identifies the session, or nil for a general request.
 PATH is relative to `omnigent-server-url' and must start with `/'.  DATA,
 when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
   (unless (string-prefix-p "/" path)
@@ -198,7 +200,7 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
           (omnigent-transport--merge-headers
            (when data
              '(("Content-Type" . "application/json")))
-           (omnigent-transport--request-headers)))
+           (omnigent-transport--request-headers session-id)))
          (url-request-data
           (when data
             (encode-coding-string (json-encode data) 'utf-8))))
@@ -208,6 +210,12 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
      (list callback omnigent-transport--generation)
      t
      t)))
+
+(defun omnigent-transport-request
+    (method path callback &optional data)
+  "Send METHOD to PATH and call CALLBACK with status and response body.
+DATA, when non-nil, is JSON-encoded."
+  (omnigent-transport--request nil method path callback data))
 
 (defun omnigent-transport-success-p (status)
   "Return non-nil when STATUS is an HTTP success code from 200 through 299."
@@ -231,22 +239,30 @@ only formats text; the caller decides how to present it."
 
 (defun omnigent-transport-get-session (session-id callback)
   "Get SESSION-ID and call CALLBACK with status and response body."
-  (omnigent-transport-request
+  (omnigent-transport--request
+   session-id
    "GET"
-   (omnigent-transport--session-path session-id) callback))
+   (omnigent-transport--session-path session-id)
+   callback))
 
 (defun omnigent-transport-set-session-model
     (session-id model callback)
   "Set SESSION-ID's MODEL and call CALLBACK with status and response body."
-  (omnigent-transport-request
-   "PATCH" (omnigent-transport--session-path session-id) callback
+  (omnigent-transport--request
+   session-id
+   "PATCH"
+   (omnigent-transport--session-path session-id)
+   callback
    `(("model_override" . ,model))))
 
 (defun omnigent-transport-set-session-effort
     (session-id effort callback)
   "Set SESSION-ID's reasoning EFFORT and call CALLBACK with status and body."
-  (omnigent-transport-request
-   "PATCH" (omnigent-transport--session-path session-id) callback
+  (omnigent-transport--request
+   session-id
+   "PATCH"
+   (omnigent-transport--session-path session-id)
+   callback
    `(("reasoning_effort" . ,effort))))
 
 (defun omnigent-transport-list-sessions (callback)
@@ -261,7 +277,8 @@ only formats text; the caller decides how to present it."
 (defun omnigent-transport-set-session-archived
     (session-id archived callback)
   "Set SESSION-ID's ARCHIVED state and call CALLBACK with status and body."
-  (omnigent-transport-request
+  (omnigent-transport--request
+   session-id
    "PATCH"
    (omnigent-transport--session-path session-id)
    callback
@@ -272,26 +289,29 @@ only formats text; the caller decides how to present it."
 
 (defun omnigent-transport-delete-session (session-id callback)
   "Delete SESSION-ID and call CALLBACK with status and response body."
-  (omnigent-transport-request
-   "DELETE" (omnigent-transport--session-path session-id) callback))
+  (omnigent-transport--request
+   session-id
+   "DELETE"
+   (omnigent-transport--session-path session-id)
+   callback))
 
 (defun omnigent-transport-list-child-sessions (parent-id callback)
   "List children of PARENT-ID and call CALLBACK with status and response body."
-  (omnigent-transport-request
+  (omnigent-transport--request
+   parent-id
    "GET"
-   (omnigent-transport--session-path parent-id
-                                     "/child_sessions")
+   (omnigent-transport--session-path parent-id "/child_sessions")
    callback))
 
 (defun omnigent-transport-post-session-event
     (session-id event callback)
   "Post EVENT to SESSION-ID and call CALLBACK with status and response body."
-  (omnigent-transport-request "POST"
-                              (omnigent-transport--session-path
-                               session-id
-                               "/events")
-                              callback
-                              event))
+  (omnigent-transport--request
+   session-id
+   "POST"
+   (omnigent-transport--session-path session-id "/events")
+   callback
+   event))
 
 (defun omnigent-transport--split-sse-frames (pending chunk)
   "Return complete SSE frames and remainder from PENDING plus CHUNK."
@@ -397,7 +417,8 @@ only formats text; the caller decides how to present it."
           (omnigent-transport--url
            (concat
             (omnigent-transport--session-path session-id) "/stream")))
-         (auth-headers (omnigent-transport--request-headers))
+         (auth-headers
+          (omnigent-transport--request-headers session-id))
          (command
           (list
            (executable-find "curl")
@@ -475,8 +496,8 @@ REMAINING limits items; BEFORE is the cursor and ITEMS is chronological."
     (when before
       (setq query
             (concat query "&after=" (url-hexify-string before))))
-    (omnigent-transport-request
-     "GET" (concat path query)
+    (omnigent-transport--request
+     (omnigent-stream-session-id stream) "GET" (concat path query)
      (lambda (status page)
        (when (omnigent-transport--snapshot-current-p
               stream attempt operation)
@@ -550,8 +571,10 @@ REMAINING limits items; BEFORE is the cursor and ITEMS is chronological."
       (when (omnigent-stream-connect-callback stream)
         (funcall (omnigent-stream-connect-callback stream)))
       (condition-case err
-          (omnigent-transport-request
-           "GET" (concat path "?include_items=false")
+          (omnigent-transport--request
+           (omnigent-stream-session-id stream)
+           "GET"
+           (concat path "?include_items=false")
            (lambda (status body)
              (when (omnigent-transport--snapshot-current-p
                     stream attempt operation)

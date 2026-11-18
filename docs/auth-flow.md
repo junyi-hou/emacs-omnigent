@@ -12,14 +12,16 @@ sent credentials. Remote servers can require authentication.
 
 ## Decision
 
-Use two user options:
+Use these user options:
 
 - `omnigent-auth-method`: set this option to `token` or `none`. The default
   is `none`.
 - `omnigent-auth-token-function`: set this option to a function that returns
   one bearer-token string.
 - `omnigent-extra-headers`: set this option to additional headers that the
-  client sends with every REST, SSE, and WebSocket request.
+  client sends with REST, SSE, and WebSocket requests. Each value is a
+  string or a function. The function receives the session ID, or nil when
+  the request has no single session. A nil return omits that header.
 
 When the method is `token`, the client calls the token function before each
 request. If the function returns a non-empty token, the client sends this

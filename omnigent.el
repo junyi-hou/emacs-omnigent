@@ -660,8 +660,8 @@ Use the current project root when the session workspace is unavailable."
         (args (omnigent--conversation-command-arguments text)))
     (setq omnigent-conversation--sending t)
     (condition-case err
-        (omnigent-transport-request
-         "GET"
+        (omnigent-transport--request
+         omnigent-conversation-session-id "GET"
          (concat
           "/v1/skills?session_id="
           (url-hexify-string omnigent-conversation-session-id))

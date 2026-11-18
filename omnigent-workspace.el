@@ -33,9 +33,11 @@
 
 (defun omnigent-workspace--changes (session-id callback)
   "Request changed paths for SESSION-ID and call CALLBACK with the response."
-  (omnigent-transport-request
+  (omnigent-transport--request
+   session-id
    "GET"
-   (omnigent-workspace--path session-id "changes") callback))
+   (omnigent-workspace--path session-id "changes")
+   callback))
 
 (defun omnigent-workspace--paths (body)
   "Extract workspace-relative paths from changes response BODY."
@@ -84,8 +86,8 @@
 (defun omnigent-workspace-file-diff (session-id path callback)
   "Fetch a unified diff for PATH in SESSION-ID and call CALLBACK.
 CALLBACK receives (STATUS DIFF) on success, or (STATUS ERROR) on failure."
-  (omnigent-transport-request
-   "GET"
+  (omnigent-transport--request
+   session-id "GET"
    (omnigent-workspace--path
     session-id
     (concat
@@ -152,8 +154,10 @@ The result is a best-effort view, not an atomic snapshot."
 ATTEMPT counts retries while the runner starts; disconnect cancels retries."
   (let ((generation omnigent-transport--generation)
         (attempt (or attempt 0)))
-    (omnigent-transport-request
-     "GET" (omnigent-workspace--path session-id "filesystem")
+    (omnigent-transport--request
+     session-id
+     "GET"
+     (omnigent-workspace--path session-id "filesystem")
      (lambda (status body)
        ;; ponytail: retry for five seconds; use a server readiness signal when available.
        (if (and (omnigent-transport-success-p status)

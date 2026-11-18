@@ -279,8 +279,8 @@
                 t)
       (puthash "name" "ok" draft)
       (omnigent-conversation-elicitation-set-draft "id" draft)
-      (cl-letf (((symbol-function 'omnigent-transport-request)
-                 (lambda (_method _path callback data)
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_session-id _method _path callback data)
                    (setq
                     cb callback
                     payload data))))
@@ -330,8 +330,8 @@
            (properties . ((name . ((type . "string")))))))))))
     (let (callback
           (requests 0))
-      (cl-letf (((symbol-function 'omnigent-transport-request)
-                 (lambda (_method _path cb _data)
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_session-id _method _path cb _data)
                    (cl-incf requests)
                    (setq callback cb))))
         (should-error
@@ -354,8 +354,9 @@
          (gethash "id" omnigent-conversation--elicitations))))
     (omnigent-conversation--elicitation-put
      '((elicitation_id . "id")))
-    (cl-letf (((symbol-function 'omnigent-transport-request)
-               (lambda (&rest _) (error "Transport failed"))))
+    (cl-letf (((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id &rest _)
+                 (error "Transport failed"))))
       (should-error
        (omnigent-conversation-elicitation-submit "id" 'cancel nil))
       (should-not
@@ -465,8 +466,8 @@
       (puthash "name" "ok" draft)
       (omnigent-conversation-elicitation-set-draft "id" draft)
       (should-not (omnigent-conversation-elicitation-validate "id"))
-      (cl-letf (((symbol-function 'omnigent-transport-request)
-                 (lambda (_method _path _callback data)
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_session-id _method _path _callback data)
                    (setq payload data))))
         (omnigent-conversation-elicitation-submit "id" 'accept nil))
       (let* ((encoded (json-encode payload))
@@ -1117,8 +1118,8 @@
             (body '((detail . "Server result"))))
         (cl-letf (((symbol-function 'display-warning)
                    (lambda (_type text &rest _) (push text warnings)))
-                  ((symbol-function 'omnigent-transport-request)
-                   (lambda (_method _path cb _data)
+                  ((symbol-function 'omnigent-transport--request)
+                   (lambda (_session-id _method _path cb _data)
                      (setq callback cb))))
           (omnigent-conversation-elicitation-submit
            "id" 'decline
@@ -1165,8 +1166,9 @@
     (omnigent-conversation--elicitation-put
      '((elicitation_id . "id")))
     (cl-letf (((symbol-function 'display-warning) #'ignore)
-              ((symbol-function 'omnigent-transport-request)
-               (lambda (&rest _) (error "Transport failed"))))
+              ((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id &rest _)
+                 (error "Transport failed"))))
       (should
        (equal
         (should-error
@@ -1192,8 +1194,8 @@
      '((elicitation_id . "id")))
     (let (callback
           (calls 0))
-      (cl-letf (((symbol-function 'omnigent-transport-request)
-                 (lambda (_method _path cb _data)
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_session-id _method _path cb _data)
                    (setq callback cb))))
         (omnigent-conversation-elicitation-submit
          "id" 'decline
@@ -1227,8 +1229,9 @@
                   begin on-begin
                   state on-state)
                  stream))
-              ((symbol-function 'omnigent-transport-request)
-               (lambda (&rest _) (error "Unexpected mutation"))))
+              ((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id &rest _)
+                 (error "Unexpected mutation"))))
       (with-temp-buffer
         (let ((omnigent-conversation--session-id "session"))
           (omnigent-conversation-mode))
@@ -1483,8 +1486,8 @@
     (let (catalog
           event
           callback)
-      (cl-letf (((symbol-function 'omnigent-transport-request)
-                 (lambda (_method path cb &rest _)
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_session-id _method path cb &rest _)
                    (setq catalog cb)
                    (should
                     (equal path "/v1/skills?session_id=session"))))

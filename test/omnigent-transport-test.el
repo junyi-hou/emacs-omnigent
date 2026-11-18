@@ -239,28 +239,46 @@ Call the user's token function separately for each request."
       (omnigent-transport--request-headers)
       '(("Authorization" . "custom-auth"))))))
 
-(defvar-local omnigent--local-test-variable nil)
-
 (ert-deftest omnigent-transport-header-support-header-value-fn ()
-  "Support dynamic header values (as buffer local values)."
+  "Pass the session ID to dynamic header values."
   (let ((omnigent-extra-headers
-         '(("Header" .
-            (lambda ()
-              (buffer-local-value
-               'omnigent--local-test-variable (current-buffer))))))
-        (omnigent-server-url "https://example.test"))
-    (with-temp-buffer
-      (setq-local omnigent--local-test-variable "foo")
+         '(("Header" . (lambda (session-id) session-id))
+           ("Static" . "value"))))
+    (should
+     (equal
+      (omnigent-transport--request-headers "foo")
+      '(("Header" . "foo") ("Static" . "value"))))
+    (should
+     (equal
+      (omnigent-transport--request-headers nil)
+      '(("Static" . "value"))))))
+
+(ert-deftest omnigent-transport-session-headers-follow-request-session
+    ()
+  "Send session-specific headers for REST and SSE requests."
+  (let ((omnigent-extra-headers
+         '(("X-Host" . (lambda (id) (and id (concat "host-" id))))))
+        headers)
+    (cl-letf (((symbol-function 'url-retrieve)
+               (lambda (&rest _)
+                 (push url-request-extra-headers headers)))
+              ((symbol-function 'executable-find)
+               (lambda (_) "curl")))
+      (omnigent-transport-post-session-event
+       "one" '(("type" . "test")) #'ignore)
+      (omnigent-transport-get-session "two" #'ignore)
+      (omnigent-transport-request "GET" "/v1/sessions" #'ignore)
       (should
        (equal
-        (omnigent-transport--request-headers) '(("Header" . "foo")))))
-    (with-temp-buffer
-      (setq-local omnigent--local-test-variable "bar")
+        (nth 2 headers)
+        '(("Content-Type" . "application/json")
+          ("X-Host" . "host-one"))))
+      (should (equal (nth 1 headers) '(("X-Host" . "host-two"))))
+      (should-not (nth 0 headers))
       (should
-       (equal
-        (omnigent-transport--request-headers) '(("Header" . "bar")))))
-    (with-temp-buffer
-      (should (equal (omnigent-transport--request-headers) '())))))
+       (member
+        "X-Host: host-one"
+        (omnigent-transport--stream-command "one"))))))
 
 (ert-deftest omnigent-transport-reports-authentication-failure ()
   "Print one user message when a REST request returns HTTP 401."
@@ -545,8 +563,10 @@ Call the user's token function separately for each request."
            :attempt 1
            :snapshot-callback
            (lambda (status body) (setq result (cons status body))))))
-    (cl-letf (((symbol-function 'omnigent-transport-request)
-               (lambda (_method path callback &optional _data)
+    (cl-letf (((symbol-function 'omnigent-transport--request)
+               (lambda (_session-id
+                        _method path callback &optional _data)
+                 (should (equal _session-id "session"))
                  (push (cons path callback) requests))))
       (omnigent-transport--stream-load-snapshot stream 1)
       (should
@@ -925,8 +945,9 @@ Call the user's token function separately for each request."
            :snapshot-callback
            (lambda (status body) (push (cons status body) results)))))
     (unwind-protect
-        (cl-letf (((symbol-function 'omnigent-transport-request)
-                   (lambda (_method path callback &optional _data)
+        (cl-letf (((symbol-function 'omnigent-transport--request)
+                   (lambda (_session-id
+                            _method path callback &optional _data)
                      (push (cons path callback) requests))))
           (omnigent-transport-refresh-session-stream stream)
           (let ((first (cdar requests)))
@@ -957,8 +978,9 @@ Call the user's token function separately for each request."
            :snapshot-callback
            (lambda (status body) (push (cons status body) results)))))
     (unwind-protect
-        (cl-letf (((symbol-function 'omnigent-transport-request)
-                   (lambda (_method path cb &optional _data)
+        (cl-letf (((symbol-function 'omnigent-transport--request)
+                   (lambda (_session-id
+                            _method path cb &optional _data)
                      (if (string-match-p "after=" path)
                          (error "Page setup failed")
                        (setq callback cb)))))
@@ -988,8 +1010,9 @@ Call the user's token function separately for each request."
            :snapshot-callback
            (lambda (status body) (push (cons status body) results)))))
     (unwind-protect
-        (cl-letf (((symbol-function 'omnigent-transport-request)
-                   (lambda (_method _path cb &optional _data)
+        (cl-letf (((symbol-function 'omnigent-transport--request)
+                   (lambda (_session-id
+                            _method _path cb &optional _data)
                      (setq callback cb))))
           (omnigent-transport-refresh-session-stream stream)
           (omnigent-transport--snapshot-timeout
@@ -1023,8 +1046,9 @@ Call the user's token function separately for each request."
              (lambda (status body)
                (setq result (cons status body))))))
       (unwind-protect
-          (cl-letf (((symbol-function 'omnigent-transport-request)
-                     (lambda (_method _path cb &optional _data)
+          (cl-letf (((symbol-function 'omnigent-transport--request)
+                     (lambda (_session-id
+                              _method _path cb &optional _data)
                        (setq callback cb))))
             (omnigent-transport-refresh-session-stream stream)
             (funcall callback
