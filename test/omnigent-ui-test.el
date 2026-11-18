@@ -493,8 +493,8 @@
          (type . "function_call_output")
          (call_id . "c")
          (output . "workspace")))))
-    (should (= (how-many "▶ shell" (point-min) (point-max)) 1))
-    (should (string-match-p "shell pwd — done" (buffer-string)))
+    (should (= (how-many "▶ \uf14a shell" (point-min) (point-max)) 1))
+    (should (string-match-p "\uf14a shell pwd" (buffer-string)))
     (should (string-match-p "Output:\nworkspace" (buffer-string)))
     (let* ((line (make-string 33000 ?x))
            (text

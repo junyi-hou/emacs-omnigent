@@ -614,8 +614,7 @@ Signal an error if point is not in a foldable block."
 
 (defun omnigent-ui--fold (id heading body face)
   "Insert a fold for ID with HEADING, BODY, and FACE."
-  (let ((open (gethash id omnigent-ui--folds))
-        (start (point)))
+  (let ((open (gethash id omnigent-ui--folds)))
     (insert-text-button (if open
                             "▼"
                           "▶")
@@ -661,23 +660,15 @@ Signal an error if point is not in a foldable block."
          (name (or (alist-get 'name item) "Tool")))
     (omnigent-ui--fold
      id
-     (if command
-         (concat
-          (pcase status
-            ("running" "\uf252 ")
-            ("failed" "\uf2d3 ")
-            (_ "\uf14a "))
-          (truncate-string-to-width
-           (replace-regexp-in-string
-            "\n" " " command)
-           80 nil nil "…"))
-       (format "%s %s — %s"
-               name
-               (truncate-string-to-width
-                (replace-regexp-in-string
-                 "\n" " " args)
-                80 nil nil "…")
-               status))
+     (concat
+      (pcase status
+        ("running" "\uf252 ")
+        ("failed" "\uf2d3 ")
+        (_ "\uf14a "))
+      (truncate-string-to-width
+       (replace-regexp-in-string
+        "\n" " " (or command (concat name " " args)))
+       80 nil nil "…"))
      (concat
       "Arguments:\n" args "\n\nOutput:\n"
       (omnigent-ui--bounded-output
