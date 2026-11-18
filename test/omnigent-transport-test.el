@@ -94,6 +94,77 @@
      (omnigent-transport--updates-url)
      :type 'user-error)))
 
+(ert-deftest omnigent-transport-token-auth-adds-headers ()
+  "Add bearer headers to REST, SSE, and WebSocket requests.
+Call the user's token function separately for each request."
+  (let* ((calls 0)
+         (omnigent-auth-method 'token)
+         (omnigent-auth-token-function
+          (lambda ()
+            (cl-incf calls)
+            (format "token-%d" calls)))
+         (headers (omnigent-transport--auth-headers))
+         (omnigent-server-url "https://example.test")
+         (omnigent-transport--generation 1)
+         rest-headers
+         curl-command
+         websocket-headers)
+    (should (equal headers '(("Authorization" . "Bearer token-1"))))
+    (cl-letf (((symbol-function 'url-retrieve)
+               (lambda (_url _callback &rest _args)
+                 (setq rest-headers url-request-extra-headers))))
+      (omnigent-transport-request "GET" "/v1/sessions" #'ignore)
+      (should
+       (equal rest-headers '(("Authorization" . "Bearer token-2")))))
+    (cl-letf (((symbol-function 'executable-find)
+               (lambda (_) "curl")))
+      (setq curl-command
+            (omnigent-transport--stream-command "session"))
+      (should
+       (equal
+        (member "-H" curl-command)
+        '("-H" "Authorization: Bearer token-3"))))
+    (let ((real-require (symbol-function 'require))
+          (open-args nil))
+      (cl-letf (((symbol-function 'require)
+                 (lambda (feature &optional filename noerror)
+                   (if (eq feature 'websocket)
+                       t
+                     (funcall real-require
+                              feature
+                              filename
+                              noerror))))
+                ((symbol-function 'websocket-open)
+                 (lambda (_url &rest args)
+                   (push args open-args)
+                   'fake-websocket))
+                ((symbol-function 'websocket-openp) (lambda (_) t))
+                ((symbol-function 'websocket-send-text) #'ignore)
+                ((symbol-function 'websocket-close) #'ignore))
+        (omnigent-transport-start-session-updates #'ignore)
+        (setq websocket-headers
+              (plist-get (car open-args) :custom-header-alist))
+        (should
+         (equal
+          websocket-headers
+          '(("Authorization" . "Bearer token-4"))))))
+    (should (= calls 4))))
+
+(ert-deftest omnigent-transport-reports-authentication-failure ()
+  "Print one user message when a REST request returns HTTP 401."
+  (let ((messages nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (format &rest args)
+                 (push (apply #'format format args) messages))))
+      (omnigent-transport--auth-failure "REST request" 401)
+      (should-not
+       (omnigent-transport--auth-failure "REST request" 500))
+      (should (= (length messages) 1))
+      (should
+       (string-prefix-p
+        "Omnigent authentication failed for REST request"
+        (car messages))))))
+
 (ert-deftest
     omnigent-transport-session-updates-sends-watch-and-parses-frames
     ()

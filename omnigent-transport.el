@@ -90,6 +90,36 @@
   "Return the server URL with PATH appended."
   (concat (string-remove-suffix "/" omnigent-server-url) path))
 
+(defun omnigent-transport--auth-headers ()
+  "Return authentication headers, or nil when authentication is off.
+Call the user's token function once for each transport request."
+  (when (eq omnigent-auth-method 'token)
+    (unless omnigent-auth-token-function
+      (user-error
+       "Omnigent token authentication requires a token function"))
+    (let ((token (funcall omnigent-auth-token-function)))
+      (unless (and token (not (equal token "")))
+        (user-error
+         "Omnigent token authentication returned no token"))
+      `(("Authorization" . ,(format "Bearer %s" token))))))
+
+(defun omnigent-transport--auth-failure (action status)
+  "Report an authentication failure for ACTION and HTTP STATUS.
+STATUS nil means the transport did not return an HTTP status."
+  (when (equal status 401)
+    (message
+     "Omnigent authentication failed for %s; check your token (%s)"
+     action (or status "no HTTP status"))))
+
+(defun omnigent-transport--merge-headers (&rest header-lists)
+  "Merge HEADER-LISTS into one alist without duplicate header names."
+  (let ((headers nil))
+    (dolist (header-list header-lists)
+      (dolist (header header-list)
+        (setq headers (assq-delete-all (car header) headers))
+        (push header headers)))
+    (nreverse headers)))
+
 (defun omnigent-transport--session-path (session-id &optional suffix)
   "Return the API path for SESSION-ID with optional SUFFIX appended."
   (concat
@@ -129,6 +159,8 @@ Use the HTTP status when available, and always kill the response buffer."
         (let ((http-status
                (and (boundp 'url-http-response-status)
                     url-http-response-status)))
+          (omnigent-transport--auth-failure
+           "REST request" http-status)
           (when (= generation omnigent-transport--generation)
             (funcall callback
                      (or http-status status)
@@ -144,13 +176,15 @@ PATH is relative to `omnigent-server-url' and must start with `/'.  DATA,
 when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
   (unless (string-prefix-p "/" path)
     (error "Omnigent API path must start with /: %s" path))
-  (let ((url-request-method method)
-        (url-request-extra-headers
-         (when data
-           '(("Content-Type" . "application/json"))))
-        (url-request-data
-         (when data
-           (encode-coding-string (json-encode data) 'utf-8))))
+  (let* ((url-request-method method)
+         (url-request-extra-headers
+          (omnigent-transport--merge-headers
+           (when data
+             '(("Content-Type" . "application/json")))
+           (omnigent-transport--auth-headers)))
+         (url-request-data
+          (when data
+            (encode-coding-string (json-encode data) 'utf-8))))
     (url-retrieve
      (omnigent-transport--url path)
      #'omnigent-transport--url-callback
@@ -342,15 +376,26 @@ only formats text; the caller decides how to present it."
 
 (defun omnigent-transport--stream-command (session-id)
   "Return the curl command that streams events for SESSION-ID."
-  (list
-   (executable-find "curl")
-   "--silent"
-   "--show-error"
-   "--no-buffer"
-   "--fail"
-   (omnigent-transport--url
-    (concat
-     (omnigent-transport--session-path session-id) "/stream"))))
+  (let* ((url
+          (omnigent-transport--url
+           (concat
+            (omnigent-transport--session-path session-id) "/stream")))
+         (auth-headers (omnigent-transport--auth-headers))
+         (command
+          (list
+           (executable-find "curl")
+           "--silent"
+           "--show-error"
+           "--no-buffer"
+           "--fail"
+           url)))
+    (dolist (header auth-headers)
+      (setq command
+            (append
+             command
+             (list
+              "-H" (format "%s: %s" (car header) (cdr header))))))
+    command))
 
 (defun omnigent-transport--snapshot-current-p
     (stream attempt operation)
@@ -883,26 +928,26 @@ Ignore _WEBSOCKET."
                     updates
                     attempt))
       (condition-case err
-          (setq websocket
-                (websocket-open
-                 (omnigent-transport--updates-url)
-                 :nowait t
-                 :on-open
-                 (lambda (ws)
-                   (omnigent-transport--updates-opened
-                    updates ws attempt))
-                 :on-message
-                 (lambda (ws frame)
-                   (omnigent-transport--updates-message
-                    updates ws attempt frame))
-                 :on-close
-                 (lambda (ws)
-                   (omnigent-transport--updates-closed
-                    updates attempt ws))
-                 :on-error
-                 (lambda (ws type error)
-                   (omnigent-transport--updates-error
-                    updates attempt ws type error))))
+          (setq
+           websocket
+           (websocket-open
+            (omnigent-transport--updates-url)
+            :nowait t
+            :custom-header-alist (omnigent-transport--auth-headers)
+            :on-open
+            (lambda (ws)
+              (omnigent-transport--updates-opened updates ws attempt))
+            :on-message
+            (lambda (ws frame)
+              (omnigent-transport--updates-message
+               updates ws attempt frame))
+            :on-close
+            (lambda (ws)
+              (omnigent-transport--updates-closed updates attempt ws))
+            :on-error
+            (lambda (ws type error)
+              (omnigent-transport--updates-error
+               updates attempt ws type error))))
         (error
          (setf (omnigent-session-updates-failed updates) t)
          (omnigent-transport--updates-notify-error

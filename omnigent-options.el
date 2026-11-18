@@ -108,6 +108,23 @@ The function takes no arguments."
   :type 'string
   :group 'omnigent-transport)
 
+(defcustom omnigent-auth-method 'none
+  "Authentication method used with the Omnigent server.
+`token' sends a bearer token from `omnigent-auth-token-function'.
+`none' sends no authentication credentials."
+  :type
+  '(choice
+    (const :tag "No authentication" none)
+    (const :tag "Bearer token" token))
+  :group 'omnigent-transport)
+
+(defcustom omnigent-auth-token-function nil
+  "Function that returns the bearer token for server requests.
+The function takes no arguments.  Set `omnigent-auth-method' to `token'
+to use the returned token.  The function is called for every request."
+  :type '(choice (const :tag "None" nil) (function :tag "Token function"))
+  :group 'omnigent-transport)
+
 (defcustom omnigent-transport-session-limit 1000
   "Maximum number of sessions to fetch, between 1 and 1000."
   :type 'integer
