@@ -413,6 +413,27 @@
           (should (equal (car received) status))
           (should (eq (cadr received) body)))))))
 
+(ert-deftest omnigent-sessions-delete-closes-conversation-on-success
+    ()
+  "Close the session's conversation buffer after a successful delete."
+  (let ((omnigent-sessions--buffers nil)
+        (callback nil)
+        (buffer (generate-new-buffer " *delete-session*")))
+    (unwind-protect
+        (progn
+          (omnigent-sessions-register-buffer "session" buffer)
+          (cl-letf (((symbol-function
+                      'omnigent-transport-delete-session)
+                     (lambda (_id cb) (setq callback cb)))
+                    ((symbol-function 'omnigent-sessions-refresh)
+                     #'ignore))
+            (omnigent-sessions-delete "session" #'ignore)
+            (should (buffer-live-p buffer))
+            (funcall callback 204 nil)
+            (should-not (buffer-live-p buffer))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (ert-deftest omnigent-sessions-toggle-archive-uses-server-state ()
   "Toggle both archive states and reject failed or malformed session reads."
   (dolist (state '(t :json-false))

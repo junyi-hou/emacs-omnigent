@@ -621,6 +621,9 @@ after the request completes.  The caller must obtain confirmation first."
   (omnigent-transport-delete-session
    id
    (lambda (status body)
+     (when (omnigent-transport-success-p status)
+       (when-let* ((buffer (omnigent-sessions-buffer id)))
+         (kill-buffer buffer)))
      (unwind-protect
          (omnigent-sessions-refresh)
        (funcall callback status body)))))
