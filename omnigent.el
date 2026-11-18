@@ -876,11 +876,42 @@ When EFFORT is nil, prompt with the current model's supported levels."
 (defun omnigent-ui-archive ()
   "Toggle the selected session's archived state without deleting its history."
   (interactive)
-  (pcase-let ((`(,id . ,title) (omnigent-ui--action-target)))
+  (pcase-let* ((`(,id . ,title) (omnigent-ui--action-target))
+               (buffer (current-buffer))
+               (session
+                (cl-find
+                 id
+                 omnigent-sessions
+                 :key (lambda (row) (alist-get 'id row))
+                 :test #'equal))
+               (next-id
+                (when (and (derived-mode-p 'omnigent-ui-sessions-mode)
+                           (not (eq (alist-get 'archived session) t)))
+                  (save-excursion
+                    (forward-line 1)
+                    (or (omnigent-ui--session-id-at-point)
+                        (progn
+                          (forward-line -2)
+                          (omnigent-ui--session-id-at-point)))))))
     (omnigent-sessions-toggle-archive
      id
-     (apply-partially #'omnigent-ui--action-result
-                      "Toggle archive" title))))
+     (lambda (status body)
+       (when (and next-id
+                  (omnigent-transport-success-p status)
+                  (buffer-live-p buffer))
+         (with-current-buffer buffer
+           (when (equal id (omnigent-ui--session-id-at-point))
+             (goto-char (point-min))
+             (while (and (not (eobp))
+                         (not
+                          (equal
+                           next-id
+                           (omnigent-ui--session-id-at-point))))
+               (forward-line 1))
+             (when (eobp)
+               (goto-char (point-min))))))
+       (omnigent-ui--action-result
+        "Toggle archive" title status body)))))
 
 (defun omnigent-ui-delete ()
   "Delete the selected session after confirmation."
