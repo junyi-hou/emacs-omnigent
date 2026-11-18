@@ -236,7 +236,7 @@
        (response
         (omnigent-mock-test-request
          "GET"
-         "/v1/sessions?limit=1000&include_archived=true&sort_by=updated_at&order=desc")))
+         "/v1/sessions?limit=1000&include_archived=false&sort_by=updated_at&order=desc")))
     (should (= (car response) 200))
     (should (equal (alist-get 'object (cdr response)) "list"))
     (should
