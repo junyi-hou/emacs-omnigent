@@ -116,7 +116,19 @@ STATUS nil means the transport did not return an HTTP status."
 Put user-configured extra headers first, then replace them with
 authentication headers when both use the same header name."
   (omnigent-transport--merge-headers
-   omnigent-extra-headers (omnigent-transport--auth-headers)))
+   (thread-last
+    omnigent-extra-headers
+    (mapcar
+     (lambda (header)
+       (cl-destructuring-bind
+        (key . value) header
+        `(,key
+          .
+          ,(if (functionp value)
+               (funcall value)
+             value)))))
+    (cl-remove-if-not (lambda (header) (cdr header))))
+   (omnigent-transport--auth-headers)))
 
 (defun omnigent-transport--merge-headers (&rest header-lists)
   "Merge HEADER-LISTS into one alist without duplicate header names."

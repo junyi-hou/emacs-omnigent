@@ -218,6 +218,39 @@ Call the user's token function separately for each request."
       (omnigent-transport--request-headers)
       '(("Authorization" . "custom-auth"))))))
 
+(ert-deftest omnigent-transport-header-keep-if-method-is-none ()
+  "Keep Authorization header if `omnigent-auth-method' is 'none."
+  (let ((omnigent-extra-headers '(("Authorization" . "custom-auth")))
+        (omnigent-auth-method 'none)
+        (omnigent-server-url "https://example.test"))
+    (should
+     (equal
+      (omnigent-transport--request-headers)
+      '(("Authorization" . "custom-auth"))))))
+
+(defvar-local omnigent--local-test-variable nil)
+
+(ert-deftest omnigent-transport-header-support-header-value-fn ()
+  "Support dynamic header values (as buffer local values)."
+  (let ((omnigent-extra-headers
+         '(("Header" .
+            (lambda ()
+              (buffer-local-value
+               'omnigent--local-test-variable (current-buffer))))))
+        (omnigent-server-url "https://example.test"))
+    (with-temp-buffer
+      (setq-local omnigent--local-test-variable "foo")
+      (should
+       (equal
+        (omnigent-transport--request-headers) '(("Header" . "foo")))))
+    (with-temp-buffer
+      (setq-local omnigent--local-test-variable "bar")
+      (should
+       (equal
+        (omnigent-transport--request-headers) '(("Header" . "bar")))))
+    (with-temp-buffer
+      (should (equal (omnigent-transport--request-headers) '())))))
+
 (ert-deftest omnigent-transport-reports-authentication-failure ()
   "Print one user message when a REST request returns HTTP 401."
   (let ((messages nil))
