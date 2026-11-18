@@ -2132,3 +2132,18 @@
         (buffer-substring-no-properties
          begin (point-max))
         "**draft** more")))))
+
+(ert-deftest omnigent-ui-markdown-colon-prose-is-not-metadata ()
+  "Keep first-paragraph colon prose free of implicit document metadata faces."
+  (dolist (hide '(nil t))
+    (with-temp-buffer
+      (insert "for kind: subscription\n\n**bold** and `code`\n")
+      (omnigent-ui--markdown-apply (point-min) (point-max) hide)
+      (should-not (get-text-property (point-min) 'face))
+      (goto-char (point-min))
+      (search-forward "subscription")
+      (should-not (get-text-property (1- (point)) 'face))
+      (search-forward "bold")
+      (should (get-text-property (1- (point)) 'face))
+      (search-forward "code")
+      (should (get-text-property (1- (point)) 'face)))))

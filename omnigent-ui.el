@@ -824,6 +824,13 @@ Signal an error if point is not in a foldable block."
         (markdown-mode))
       (setq-local markdown-hide-markup hide)
       (setq-local markdown-fontify-code-blocks-natively t)
+      ;; Chat prose is not an implicit MultiMarkdown metadata header.
+      (font-lock-remove-keywords
+       nil
+       (cl-remove-if-not
+        (lambda (rule)
+          (eq (car-safe rule) 'markdown-match-declarative-metadata))
+        markdown-mode-font-lock-keywords))
       (font-lock-ensure)
       (unless hide
         (remove-text-properties
