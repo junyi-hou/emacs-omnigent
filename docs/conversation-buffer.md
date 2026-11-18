@@ -56,9 +56,11 @@ transcript is read-only text. An editable prompt region sits at the end. Two mar
 Buffer-local state:
 
 - `session-id` and the stream handle from `omnigent-transport-start-session-stream`.
-- A hash table keyed by item id. Each entry holds markers for the rendered block and the
-  fold state. This table is the dedupe index: an item that is already present is never
-  rendered twice, from the snapshot or the stream.
+- A hash table keyed by item ID holds transcript state and prevents duplicate
+  entries from snapshots and stream events. Existing items can still change.
+- Presentation state tracks rendering inputs and boundary markers by item ID.  A
+  separate hash table holds fold state. Unchanged blocks retain their text and
+  display properties; changed blocks are replaced in place.
 - Pending elicitations, keyed by elicitation id, stored separately from transcript
   items.
 - Pending messages, kept in server queue order and separate from committed transcript
@@ -89,9 +91,12 @@ error; do not silently present an empty transcript as complete. Follow
 invalidation. A failed snapshot stops recovery until the user closes and reopens the
 conversation; it does not trigger an automatic read retry.
 
-A snapshot refresh preserves fold state and point by item ID, and preserves composer
-text and elicitation drafts. Reopening a killed buffer restores only server state, not
-unsent drafts or local fold state.
+A snapshot refresh replaces transcript state with server state. The presentation
+layer reconciles that state with existing blocks by item ID. Keep unchanged
+blocks, replace changed blocks, and remove or reorder blocks as needed. Preserve
+fold state and point by item ID, composer text, and elicitation drafts.
+Reopening a killed buffer restores only server state, not unsent drafts or local
+fold state. See [frontend.md](frontend.md#transcript-updates) for rendering.
 
 ### Multiple buffers and stream lifecycle
 
@@ -181,17 +186,20 @@ a potentially accepted message automatically.
   consumed before the response arrived. Do not infer consumption from an interrupt or a
   status change. If the send outcome is unknown, show an explicit unconfirmed label
   rather than claiming acceptance.
-- **Refresh and recovery**: the server is the single source of truth. On a successful
-  snapshot refresh, rebuild committed history and pending messages from server state,
-  then reconcile buffered live events. Render snapshot pending inputs with `[queued]`
-  labels in server order. Do not merge unmatched local submission records back into the
-  recovered queue. A previously queued message can appear as committed history or be
-  absent from the recovered state. Full recovery of earlier client state is not
-  required. Preserve composer text across refreshes in an open buffer. If a snapshot
-  fails, retain the visible state and drafts as read-only, stop recovery, and report the
-  error. Ask the user to copy drafts before closing and reopening the conversation to
-  try again. Do not automatically retry the snapshot or apply further live events to the
-  invalid buffer. Reopening a buffer restores only server state, not local drafts.
+- **Refresh and recovery**: the server is the single source of truth. On a
+  successful snapshot refresh, replace committed history and pending-input data
+  with server state, then reconcile buffered live events. Update displayed
+  transcript blocks by item ID; replacing data state does not require replacing
+  unchanged text. Render snapshot pending inputs with `[queued]` labels in
+  server order. Do not merge unmatched local submission records back into the
+  recovered queue. A previously queued message can appear as committed history
+  or be absent from the recovered state. Full recovery of earlier client state
+  is not required. Preserve composer text across refreshes in an open buffer. If
+  a snapshot fails, retain the visible state and drafts as read-only, stop
+  recovery, and report the error. Ask the user to copy drafts before closing and
+  reopening the conversation to try again. Do not automatically retry the
+  snapshot or apply further live events to the invalid buffer. Reopening a
+  buffer restores only server state, not local drafts.
 - **Uncertain sends**: keep the composer draft and show a persistent warning that the
   server may have accepted it. Do not automatically resend it. A failed or uncertain
   send must not appear as confirmed queued input.
@@ -228,8 +236,8 @@ See [elicitation.md](elicitation.md) for request state and resolution.
   unmatched submission records, or removed pending text. Preserve drafts only while the
   existing buffer remains open.
 - No editing or resending past messages.
-- No client-side replay or diffing of the transcript; a refresh re-renders from the
-  snapshot.
+- No client-side event replay or recovery of history absent from the snapshot.
+  Comparing rendering inputs to preserve unchanged blocks is presentation work.
 - No full queue manager: do not add reordering or cancellation unless separately
   designed.
 

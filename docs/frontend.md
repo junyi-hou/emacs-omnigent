@@ -100,8 +100,8 @@ is needed.
 
 | Item | Presentation |
 |------|--------------|
-| User message | `You:` label, plain text, no fold. |
-| Assistant message | Agent name label, plain text, no fold; append streamed text. |
+| User message | `You:` label, Markdown when ready, no fold. |
+| Assistant message | Agent name label, plain text while streaming, Markdown when ready, no fold. |
 | Reasoning | Foldable `Thinking` block with reasoning text. |
 | Function call | Foldable block with tool name, argument summary, and status in the header; full arguments and output in the body. |
 | Function call output | Merge into its function-call block. |
@@ -123,8 +123,9 @@ mark the constants with a `ponytail:` comment naming that upgrade path.
 
 Faces: `omnigent-ui-prompt` for the composer prompt and message labels,
 `omnigent-ui-reasoning` for reasoning, and `omnigent-ui-error` for error
-headings and interrupt markers. Use plain text, not Markdown rendering, in v1.
-Do not add a plan panel in v1.
+headings and interrupt markers. Apply Markdown to ready messages and highlight
+composer text according to [markdown-rendering.md](markdown-rendering.md).  Do
+not add a plan panel in v1.
 
 Show the workspace folder name, role, model, reasoning effort, access mode, and context
 window usage in the conversation header. Do not show the harness or session name in the

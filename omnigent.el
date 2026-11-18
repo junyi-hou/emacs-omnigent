@@ -1,6 +1,6 @@
 ;;; omnigent.el --- Omnigent for Emacs -*- lexical-binding: t; -*-
 
-;; Package-Requires: ((emacs "27.1") (websocket "1.16"))
+;; Package-Requires: ((emacs "27.1") (websocket "1.16") (markdown-mode "2.6"))
 
 ;;; Commentary:
 ;; Start or connect to an Omnigent server.

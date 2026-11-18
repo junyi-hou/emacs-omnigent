@@ -111,7 +111,6 @@ deleted file. Omnigent does not distinguish that failure from a new file.
 
 ## TODO
 
-- [ ] Use a Markdown parser to render conversation messages.
 - [ ] Autocomplete (via capf) file (@) and slash commands.
 - [ ] Support managed sandbox (issue 1) and external runner (start within emacs).
 - [ ] Design client-to-server retry for requests with no confirmed response, including

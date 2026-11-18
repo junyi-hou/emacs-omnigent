@@ -12,6 +12,7 @@
 (require 'omnigent-options)
 (require 'wid-edit)
 (require 'diff-mode)
+(require 'markdown-mode)
 
 (defgroup omnigent-ui nil
   "Presentation for Omnigent sessions."
@@ -802,7 +803,96 @@ Signal an error if point is not in a foldable block."
                       'omnigent-ui-prompt
                       'font-lock-face
                       'omnigent-ui-prompt)
-          text "\n\n"))))))
+          (if (omnigent-ui--message-complete-p id item)
+              (propertize text 'omnigent-ui-markdown id)
+            text)
+          "\n\n"))))))
+
+(defun omnigent-ui--message-complete-p (id item)
+  "Return non-nil when message ID and ITEM are ready for Markdown display."
+  (or (equal (alist-get 'role item) "user")
+      (alist-get 'omnigent-committed item)
+      (not omnigent-conversation--response-id)
+      (not (equal id omnigent-conversation--section-id))))
+
+(defun omnigent-ui--markdown-apply (begin end hide)
+  "Apply Markdown properties between BEGIN and END; HIDE conceals markup."
+  (let ((text (buffer-substring-no-properties begin end)))
+    (with-temp-buffer
+      (insert text)
+      (let ((markdown-mode-hook nil))
+        (markdown-mode))
+      (setq-local markdown-hide-markup hide)
+      (setq-local markdown-fontify-code-blocks-natively t)
+      (font-lock-ensure)
+      (unless hide
+        (remove-text-properties
+         (point-min) (point-max) '(invisible nil)))
+      (setq text (buffer-string)))
+    (let ((offset 0))
+      (while (< offset (length text))
+        (let ((next (next-property-change offset text (length text))))
+          (dolist (property
+                   '(face
+                     font-lock-face
+                     invisible
+                     display
+                     composition
+                     help-echo
+                     mouse-face))
+            (put-text-property
+             (+ begin offset)
+             (+ begin next)
+             property
+             (get-text-property offset property text)))
+          (setq offset next))))
+    (put-text-property begin end 'omnigent-ui-markdown-done t)))
+
+(defun omnigent-ui--markdown-fontify (start end &optional _loudly)
+  "Apply Markdown to completed messages visible between START and END."
+  (let ((inhibit-read-only t)
+        (inhibit-modification-hooks t))
+    (with-silent-modifications
+      (save-excursion
+        (goto-char start)
+        (while (< (point) end)
+          (let* ((id
+                  (get-text-property (point) 'omnigent-ui-markdown))
+                 (next
+                  (next-single-property-change
+                   (point) 'omnigent-ui-markdown
+                   nil (point-max))))
+            (when (and id
+                       (not
+                        (get-text-property
+                         (point) 'omnigent-ui-markdown-done)))
+              (let ((begin
+                     (or (previous-single-property-change
+                          (1+ (point)) 'omnigent-ui-markdown)
+                         (point-min))))
+                (omnigent-ui--markdown-apply begin next t)))
+            (goto-char next)))
+        (when (and (> end omnigent-conversation--prompt-start)
+                   (not
+                    (get-text-property
+                     omnigent-conversation--prompt-start
+                     'omnigent-ui-markdown-done)))
+          (omnigent-ui--markdown-apply
+           omnigent-conversation--prompt-start (point-max) nil))))))
+
+(defun omnigent-ui--markdown-composer-changed (start _end _old-length)
+  "Invalidate composer Markdown after an edit at START."
+  (when (and omnigent-conversation--prompt-start
+             (>= start omnigent-conversation--prompt-start)
+             (not omnigent-ui--rendering))
+    (let ((inhibit-read-only t))
+      (with-silent-modifications
+        (remove-text-properties
+         omnigent-conversation--prompt-start
+         (point-max)
+         '(omnigent-ui-markdown-done nil))))
+    (font-lock-flush
+     omnigent-conversation--prompt-start (point-max))))
 
 (defvar-local omnigent-ui--blocks nil
   "Rendered item signatures and boundary markers, indexed by item ID.")
@@ -819,7 +909,8 @@ Signal an error if point is not in a foldable block."
    item
    (gethash (alist-get 'call_id item) outputs)
    (gethash id omnigent-ui--folds)
-   omnigent-conversation-agent-name))
+   omnigent-conversation-agent-name
+   (omnigent-ui--message-complete-p id item)))
 
 (defvar-local omnigent-ui--history-positioned nil
   "Non-nil after the first nonempty transcript receives its window position.")
@@ -945,7 +1036,7 @@ Signal an error if point is not in a foldable block."
           (insert
            (propertize (format "[%s] > " (alist-get 'state input))
                        'face 'omnigent-ui-user)
-           text "\n")
+           (propertize text 'omnigent-ui-markdown t) "\n")
           (when (eq (alist-get 'state input) 'unconfirmed)
             (insert
              (propertize
@@ -1161,6 +1252,14 @@ Signal an error if point is not in a foldable block."
    omnigent-ui--folds (make-hash-table :test 'equal)
    omnigent-ui--field-errors (make-hash-table :test 'equal))
   (add-to-invisibility-spec 'omnigent-ui-fold)
+  (add-to-invisibility-spec 'markdown-markup)
+  (setq-local font-lock-defaults '(nil t))
+  (font-lock-mode 1)
+  (setq-local font-lock-fontify-region-function
+              #'omnigent-ui--markdown-fontify)
+  (add-hook
+   'after-change-functions #'omnigent-ui--markdown-composer-changed
+   nil t)
   (let ((inhibit-read-only t))
     (goto-char (point-min))
     (setq

@@ -10,7 +10,7 @@ test-deps:
 	  --eval '(require (quote package))' \
 	  --eval '(setq package-user-dir (expand-file-name ".tools/test-elpa") package-archives (quote (("gnu" . "https://elpa.gnu.org/packages/") ("nongnu" . "https://elpa.nongnu.org/nongnu/") ("melpa" . "https://melpa.org/packages/"))) package-pinned-packages (quote ((evil . "nongnu") (websocket . "gnu"))))' \
 	  --eval '(package-initialize)' \
-	  --eval '(unless (seq-every-p (function package-installed-p) (quote (evil websocket f s))) (package-refresh-contents) (dolist (pkg (quote (evil websocket f s))) (unless (package-installed-p pkg) (package-install pkg))))'
+	  --eval '(unless (seq-every-p (function package-installed-p) (quote (evil websocket f s markdown-mode))) (package-refresh-contents) (dolist (pkg (quote (evil websocket f s markdown-mode))) (unless (package-installed-p pkg) (package-install pkg))))'
 
 format:
 	$(ELISP_AUTOFMT) $(wildcard *.el .*.el test/*.el)

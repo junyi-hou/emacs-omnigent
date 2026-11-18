@@ -2040,3 +2040,71 @@
       (buffer-substring-no-properties
        (point-min) omnigent-ui--request-start)
       "Agent:\nc\n\nAgent:\na\n\n"))))
+
+(ert-deftest omnigent-ui-markdown-waits-for-message-completion ()
+  "Keep active text plain and render completed text only when requested."
+  (omnigent-ui-test--conversation
+    (setq
+     omnigent-conversation--response-id "response"
+     omnigent-conversation--section-id "active")
+    (omnigent-conversation--put-item
+     '((id . "active") (type . "message") (content . "**bold**")))
+    (omnigent-ui--transcript-render)
+    (goto-char (point-min))
+    (search-forward "**bold**")
+    (should-not
+     (get-text-property (- (point) 5) 'omnigent-ui-markdown))
+    (setq omnigent-conversation--section-id "next")
+    (omnigent-ui--transcript-render)
+    (goto-char (point-min))
+    (search-forward "**bold**")
+    (let ((begin (- (point) 8)))
+      (should (get-text-property begin 'omnigent-ui-markdown))
+      (should-not
+       (get-text-property begin 'omnigent-ui-markdown-done))
+      (omnigent-ui--markdown-fontify begin (+ begin 2))
+      (should (get-text-property begin 'omnigent-ui-markdown-done))
+      (should (get-text-property begin 'invisible))
+      (should
+       (equal
+        (buffer-substring-no-properties
+         begin (+ begin 8))
+        "**bold**"))
+      (let ((calls 0))
+        (cl-letf (((symbol-function 'omnigent-ui--markdown-apply)
+                   (lambda (&rest _arguments)
+                     "Count unnecessary repeat renders."
+                     (cl-incf calls))))
+          (font-lock-fontify-region begin (+ begin 2))
+          (should (= calls 0))
+          (should (get-text-property (+ begin 2) 'face))))
+      (setf (alist-get
+             'content
+             (gethash "active" omnigent-conversation--items))
+            "**corrected**")
+      (omnigent-ui--transcript-render)
+      (should-not
+       (get-text-property begin 'omnigent-ui-markdown-done))
+      (omnigent-ui--markdown-fontify begin (+ begin 2))
+      (should (get-text-property begin 'omnigent-ui-markdown-done)))))
+
+(ert-deftest omnigent-ui-markdown-composer-preserves-edits ()
+  "Highlight composer text and invalidate properties after an edit."
+  (omnigent-ui-test--conversation
+    (insert "**draft**")
+    (let ((begin
+           (marker-position omnigent-conversation--prompt-start)))
+      (omnigent-ui--markdown-fontify begin (point-max))
+      (should (get-text-property (+ begin 2) 'face))
+      (should-not (get-text-property begin 'invisible))
+      (should (get-text-property begin 'omnigent-ui-markdown-done))
+      (goto-char (point-max))
+      (insert " more")
+      (should-not
+       (get-text-property begin 'omnigent-ui-markdown-done))
+      (omnigent-ui--markdown-fontify begin (point-max))
+      (should
+       (equal
+        (buffer-substring-no-properties
+         begin (point-max))
+        "**draft** more")))))
