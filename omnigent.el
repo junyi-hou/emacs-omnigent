@@ -862,6 +862,17 @@ When EFFORT is nil, prompt with the current model's supported levels."
   (let ((omnigent-transport-session-limit 1000))
     (omnigent-sessions-refresh)))
 
+(defun omnigent-ui-toggle-archived-sessions ()
+  "Toggle archived sessions in the list and refresh the session list."
+  (interactive)
+  (setq omnigent-fetch-archived-sessions
+        (not omnigent-fetch-archived-sessions))
+  (omnigent-ui-refresh)
+  (message "Archived sessions %s"
+           (if omnigent-fetch-archived-sessions
+               "enabled"
+             "disabled")))
+
 (defun omnigent-ui-archive ()
   "Toggle the selected session's archived state without deleting its history."
   (interactive)

@@ -270,7 +270,10 @@ only formats text; the caller decides how to present it."
   (omnigent-transport-request
    "GET"
    (format
-    "/v1/sessions?limit=%d&include_archived=true&sort_by=updated_at&order=desc"
+    "/v1/sessions?limit=%d&include_archived=%s&sort_by=updated_at&order=desc"
+    (if omnigent-fetch-archived-sessions
+        "true"
+      "false")
     (max 1 (min 1000 omnigent-transport-session-limit)))
    callback))
 

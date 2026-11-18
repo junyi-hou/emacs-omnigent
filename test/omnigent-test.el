@@ -27,7 +27,8 @@
 
 (ert-deftest omnigent-list-sessions-requests-most-recent ()
   "Request the most recently updated sessions, including archived ones."
-  (let ((omnigent-transport-session-limit 42))
+  (let ((omnigent-transport-session-limit 42)
+        (omnigent-fetch-archived-sessions t))
     (cl-letf
         (((symbol-function 'omnigent-transport--request)
           (lambda (_session-id method path callback &optional _data)
@@ -38,6 +39,30 @@
               "/v1/sessions?limit=42&include_archived=true&sort_by=updated_at&order=desc"))
             (should (eq callback #'ignore)))))
       (omnigent-transport-list-sessions #'ignore))))
+
+(ert-deftest omnigent-list-sessions-can-exclude-archived ()
+  "Exclude archived sessions when the user option is nil."
+  (let ((omnigent-fetch-archived-sessions nil))
+    (cl-letf
+        (((symbol-function 'omnigent-transport--request)
+          (lambda (_session-id method path callback &optional _data)
+            (should (equal method "GET"))
+            (should
+             (equal
+              path
+              "/v1/sessions?limit=1000&include_archived=false&sort_by=updated_at&order=desc"))
+            (should (eq callback #'ignore)))))
+      (omnigent-transport-list-sessions #'ignore))))
+
+(ert-deftest omnigent-ui-toggle-archived-sessions-refreshes-list ()
+  "Toggle the archived-session option and refresh the session list."
+  (let ((omnigent-fetch-archived-sessions t)
+        refreshed)
+    (cl-letf (((symbol-function 'omnigent-ui-refresh)
+               (lambda () (setq refreshed t))))
+      (omnigent-ui-toggle-archived-sessions))
+    (should-not omnigent-fetch-archived-sessions)
+    (should refreshed)))
 
 (ert-deftest omnigent-conversation-archive-closes-only-when-archived
     ()

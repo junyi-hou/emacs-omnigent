@@ -16,7 +16,7 @@ the WebSocket subscription has its own transport contract.
 
 | Operation | Server API | Client helper |
 |---|---|---|
-| List sessions | `GET /v1/sessions?limit=1000&include_archived=true&sort_by=updated_at&order=desc` | `omnigent-transport-list-sessions` |
+| List sessions | `GET /v1/sessions?limit=1000&include_archived={true|false}&sort_by=updated_at&order=desc` | `omnigent-transport-list-sessions` |
 | List agents | `GET /v1/agents` | `omnigent-transport-request` |
 | List execution hosts | `GET /v1/hosts` | `omnigent-transport-request` |
 | Browse host directories | `GET /v1/hosts/{host_id}/filesystem` or `/filesystem/{path}` | `omnigent-transport-request` |
@@ -27,9 +27,9 @@ the WebSocket subscription has its own transport contract.
 | List updates | `WS /v1/sessions/updates` | `omnigent-transport-start-session-updates`, `omnigent-transport-set-session-updates-watch`, `omnigent-transport-stop-session-updates` |
 
 Toggle Archive reads the current server state and archives or unarchives the
-session. Both operations preserve history. Keep archived sessions in the list
-with their archived face. The server controls agent cleanup. Archive does not
-request worktree deletion. Session management does not expose a Stop command;
+session. Both operations preserve history. Include archived sessions when
+`omnigent-fetch-archived-sessions` is non-nil. The server controls agent cleanup.
+Archive does not request worktree deletion. Session management does not expose a Stop command;
 use Interrupt to cancel the current turn.
 
 Delete permanently removes the conversation; request confirmation with
@@ -84,7 +84,8 @@ failures belongs to [frontend.md](frontend.md).
 
 ## List and updates
 
-Fetch active and archived sessions on initial load and manual refresh. The server
+Fetch active sessions on initial load and manual refresh. Include archived sessions
+when `omnigent-fetch-archived-sessions` is non-nil. The server
 defaults to 20 entries; request 1,000, sorted by most recently updated first. The server
 must sort before applying the limit. Pagination beyond that is post-v1. Do not silently
 represent a truncated result as complete.

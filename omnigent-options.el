@@ -40,6 +40,7 @@
     (set-keymap-parent map special-mode-map)
     (define-key map (kbd "RET") #'omnigent-ui-sessions-open)
     (define-key map (kbd "g") #'omnigent-ui-refresh)
+    (define-key map (kbd "A") #'omnigent-ui-toggle-archived-sessions)
     (define-key map (kbd "c") #'omnigent-sessions-create)
     (define-key map (kbd "a") #'omnigent-ui-archive)
     (define-key map (kbd "d") #'omnigent-ui-delete)
@@ -80,6 +81,11 @@ Configure this function when a runner is on a different host."
 
 (defcustom omnigent-open-session-list-on-connect t
   "When non-nil, open the session list after connecting to a server."
+  :type 'boolean
+  :group 'omnigent)
+
+(defcustom omnigent-fetch-archived-sessions nil
+  "When non-nil, include archived sessions in the session list."
   :type 'boolean
   :group 'omnigent)
 
