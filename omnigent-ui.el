@@ -804,6 +804,23 @@ Signal an error if point is not in a foldable block."
                       'omnigent-ui-prompt)
           text "\n\n"))))))
 
+(defvar-local omnigent-ui--blocks nil
+  "Rendered item signatures and boundary markers, indexed by item ID.")
+
+(defun omnigent-ui--block-remove (block)
+  "Delete rendered BLOCK and release its boundary markers."
+  (delete-region (nth 1 block) (nth 2 block))
+  (set-marker (nth 1 block) nil)
+  (set-marker (nth 2 block) nil))
+
+(defun omnigent-ui--block-signature (id item outputs)
+  "Return the rendering inputs for ID, ITEM and tool OUTPUTS."
+  (list
+   item
+   (gethash (alist-get 'call_id item) outputs)
+   (gethash id omnigent-ui--folds)
+   omnigent-conversation-agent-name))
+
 (defvar-local omnigent-ui--history-positioned nil
   "Non-nil after the first nonempty transcript receives its window position.")
 
@@ -827,27 +844,50 @@ Signal an error if point is not in a foldable block."
         (let ((item (gethash id omnigent-conversation--items)))
           (when (equal (alist-get 'type item) "function_call_output")
             (puthash (alist-get 'call_id item) item outputs))))
-      (delete-region (point-min) omnigent-ui--request-start)
+      (maphash
+       (lambda (id block)
+         (unless (gethash id omnigent-conversation--items)
+           (omnigent-ui--block-remove block)
+           (remhash id omnigent-ui--blocks)))
+       omnigent-ui--blocks)
       (goto-char (point-min))
       (dolist (id omnigent-conversation--order)
-        (let ((start (point)))
-          (omnigent-ui--item
-           id (gethash id omnigent-conversation--items) outputs)
-          (add-text-properties
-           start (point)
-           (list
-            'omnigent-ui-item-id
-            id
-            'read-only
-            t
-            'rear-nonsticky
-            t
-            'line-prefix
-            "   "
-            'wrap-prefix
-            "   "))
-          (when (and (< start (point)) (button-at start))
-            (put-text-property start (1+ start) 'line-prefix "  "))))
+        (let* ((item (gethash id omnigent-conversation--items))
+               (block (gethash id omnigent-ui--blocks))
+               (signature
+                (omnigent-ui--block-signature id item outputs)))
+          (if (and block
+                   (= (point) (nth 1 block))
+                   (equal signature (car block)))
+              (goto-char (nth 2 block))
+            (when block
+              (omnigent-ui--block-remove block))
+            (let ((start (point)))
+              (omnigent-ui--item id item outputs)
+              (add-text-properties
+               start (point)
+               (list
+                'omnigent-ui-item-id
+                id
+                'read-only
+                t
+                'rear-nonsticky
+                t
+                'line-prefix
+                "   "
+                'wrap-prefix
+                "   "))
+              (when (and (< start (point)) (button-at start))
+                (put-text-property
+                 start (1+ start) 'line-prefix "  "))
+              (puthash
+               id
+               (list
+                (copy-tree
+                 (omnigent-ui--block-signature id item outputs))
+                (copy-marker start (< start (point)))
+                (copy-marker (point)))
+               omnigent-ui--blocks)))))
       (move-overlay
        omnigent-ui--busy-overlay
        omnigent-ui--composer-label
@@ -1117,6 +1157,7 @@ Signal an error if point is not in a foldable block."
 (defun omnigent-ui-conversation-setup ()
   "Initialize transcript, request and composer boundaries for this session."
   (setq
+   omnigent-ui--blocks (make-hash-table :test 'equal)
    omnigent-ui--folds (make-hash-table :test 'equal)
    omnigent-ui--field-errors (make-hash-table :test 'equal))
   (add-to-invisibility-spec 'omnigent-ui-fold)

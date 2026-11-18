@@ -1982,3 +1982,61 @@
 
 (provide 'omnigent-ui-test)
 ;;; omnigent-ui-test.el ends here
+
+(ert-deftest omnigent-ui-transcript-updates-only-changed-blocks ()
+  "Preserve old text properties while appending and replacing individual items."
+  (omnigent-ui-test--conversation
+    (dotimes (index 2000)
+      (omnigent-conversation--put-item
+       `((id . ,(format "item-%d" index))
+         (type . "message")
+         (content . "unchanged"))))
+    (omnigent-ui--transcript-render)
+    (let ((inhibit-read-only t))
+      (put-text-property 1 2 'omnigent-test-retained t))
+    (let ((calls 0)
+          (render (symbol-function 'omnigent-ui--item)))
+      (cl-letf (((symbol-function 'omnigent-ui--item)
+                 (lambda (&rest arguments)
+                   "Count item renders with ARGUMENTS."
+                   (cl-incf calls)
+                   (apply render arguments))))
+        (omnigent-conversation--put-item
+         '((id . "new") (type . "message") (content . "new text")))
+        (omnigent-ui--transcript-render)
+        (should (= calls 1))
+        (setf (alist-get
+               'content (gethash "new" omnigent-conversation--items))
+              "updated text")
+        (omnigent-ui--transcript-render)
+        (should (= calls 2))
+        (omnigent-ui--transcript-render)
+        (should (= calls 2))
+        (should (get-text-property 1 'omnigent-test-retained))
+        (goto-char (point-min))
+        (should (search-forward "updated text" nil t))))))
+
+(ert-deftest
+    omnigent-ui-transcript-reconciles-reordered-and-removed-items
+    ()
+  "Reconcile snapshot removals and reordering without duplicate text."
+  (omnigent-ui-test--conversation
+    (dolist (id '("a" "b" "c"))
+      (omnigent-conversation--put-item
+       `((id . ,id) (type . "message") (content . ,id))))
+    (omnigent-ui--transcript-render)
+    (remhash "b" omnigent-conversation--items)
+    (setq omnigent-conversation--order '("c" "a"))
+    (omnigent-ui--transcript-render)
+    (should
+     (equal
+      (buffer-substring-no-properties
+       (point-min) omnigent-ui--request-start)
+      "Agent:\nc\n\nAgent:\na\n\n"))
+    (should (= (hash-table-count omnigent-ui--blocks) 2))
+    (omnigent-ui--transcript-render)
+    (should
+     (equal
+      (buffer-substring-no-properties
+       (point-min) omnigent-ui--request-start)
+      "Agent:\nc\n\nAgent:\na\n\n"))))
