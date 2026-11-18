@@ -160,6 +160,38 @@ composer or interrupt typing. Follow incoming output with normal Emacs scrolling
 when needed to keep point visible. Restore the window's reading position after
 transcript updates without forced recentering.
 
+### Transcript updates
+
+Keep unchanged transcript blocks in the buffer, including their display
+properties. Append new blocks and replace only blocks whose rendering inputs
+change. Track boundary markers and rendering inputs by item ID. Reconcile
+snapshot removals and ordering against the server state. This strategy applies
+to both stream updates and snapshots. The first snapshot in an empty buffer
+inserts all blocks; later snapshots preserve unchanged blocks. A stream update
+can replace the current block without rebuilding the full transcript. Stream
+updates remain batched at 50 ms intervals while a response is active.
+
+Updates can target any existing item, including an earlier message. Compare
+rendering inputs by item ID rather than assuming that only the last item can
+change. Replace the affected block at its existing position. Function-call
+rendering inputs include the output matched by call ID, so late tool output
+updates its earlier call block. Fold changes also affect only their block.
+
+The conversation layer decides whether to accept an event. Committed items
+reject added-item events and text deltas. A later final full item or snapshot
+can still replace their content. Rendering does not bypass these rules or infer
+event order from the displayed block position.
+
+When a ready message changes, discard its previous Markdown properties with the
+replaced text. Apply Markdown again when the replacement enters the display
+area. Preserve unchanged blocks, composer text, request drafts, folds, point,
+and reading position. See [markdown-rendering.md](markdown-rendering.md) for
+readiness and deferred processing.
+
+Reconciliation still scans transcript items to compare rendering inputs. It
+avoids deleting, inserting, and parsing all message text on each update; it does
+not make each update constant-time.
+
 ## Workspace view
 
 Show workspace changes for the selected conversation in a left side window below

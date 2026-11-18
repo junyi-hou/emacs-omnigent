@@ -310,9 +310,12 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
                          (and (equal
                                (alist-get 'status data) "running")
                               (alist-get 'response_id data)))))
-          (unless (equal id omnigent-conversation--response-id)
-            (setq omnigent-conversation--section-id nil))
-          (setq omnigent-conversation--response-id id))
+          (when (or (not omnigent-conversation--response-id)
+                    (equal id omnigent-conversation--response-id)
+                    (equal (alist-get 'status data) "running"))
+            (unless (equal id omnigent-conversation--response-id)
+              (setq omnigent-conversation--section-id nil))
+            (setq omnigent-conversation--response-id id)))
         (when (and (member
                     (alist-get 'status data) '("idle" "failed"))
                    (equal
@@ -336,8 +339,7 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
      ,(lambda (data)
         ;; Input delivery can complete independently of the native model turn.
         (let ((id (alist-get 'id (alist-get 'response data))))
-          (when (or (not id)
-                    (equal id omnigent-conversation--response-id))
+          (when (and id (equal id omnigent-conversation--response-id))
             (setq
              omnigent-conversation--response-id nil
              omnigent-conversation--section-id nil)))))

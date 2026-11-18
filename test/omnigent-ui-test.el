@@ -285,6 +285,30 @@
             " ")))
       (omnigent-ui--busy-stop))))
 
+(ert-deftest omnigent-ui-busy-indicator-survives-steering-delivery ()
+  "Keep animating when a steering message finishes delivery during a turn."
+  (omnigent-ui-test--conversation
+    (unwind-protect
+        (progn
+          (omnigent-conversation--event
+           "session.status"
+           '((status . "running") (response_id . "native")))
+          (omnigent-conversation--event
+           "response.created" '((response . ((id . "delivery")))))
+          (omnigent-conversation--event
+           "response.completed" '((response . ((id . "delivery")))))
+          (should (timerp omnigent-ui--busy-timer))
+          (should-not
+           (equal
+            (overlay-get
+             omnigent-ui--busy-overlay 'before-string)
+            " "))
+          (omnigent-conversation--event
+           "session.status"
+           '((status . "idle") (response_id . "native")))
+          (should-not omnigent-ui--busy-timer))
+      (omnigent-ui--busy-stop))))
+
 (ert-deftest omnigent-ui-session-archive-and-delete-commands ()
   "Archive the selected session and require confirmation for permanent deletion."
   (dolist (conversation '(nil t))
