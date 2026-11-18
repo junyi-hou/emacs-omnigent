@@ -121,10 +121,10 @@ lines retain the first and last 400 lines and show the omitted count. Apply
 both limits deterministically on refresh. Fetching omitted content is deferred;
 mark the constants with a `ponytail:` comment naming that upgrade path.
 
-Faces: `omnigent-ui-prompt` for the composer prompt and message labels, `omnigent-ui-tool`
-for tool headers, `omnigent-ui-reasoning` for reasoning, and `omnigent-ui-error` for
-failed status and interrupt markers. Use plain text, not Markdown rendering, in v1. Do
-not add a plan panel in v1.
+Faces: `omnigent-ui-prompt` for the composer prompt and message labels,
+`omnigent-ui-reasoning` for reasoning, and `omnigent-ui-error` for error
+headings and interrupt markers. Use plain text, not Markdown rendering, in v1.
+Do not add a plan panel in v1.
 
 Show the workspace folder name, role, model, reasoning effort, access mode, and context
 window usage in the conversation header. Do not show the harness or session name in the

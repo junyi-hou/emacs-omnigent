@@ -485,9 +485,6 @@
   'mouse-face
   'omnigent-ui-fold-marker)
 
-(defface omnigent-ui-tool '((t :inherit font-lock-builtin-face))
-  "Face for tool fold headers."
-  :group 'omnigent-ui)
 (defface omnigent-ui-reasoning '((t :inherit shadow))
   "Face for reasoning blocks."
   :group 'omnigent-ui)
@@ -612,8 +609,8 @@ Signal an error if point is not in a foldable block."
     (unless (eq (and (gethash item-id omnigent-ui--folds) t) open)
       (button-activate button))))
 
-(defun omnigent-ui--fold (id heading body face)
-  "Insert a fold for ID with HEADING, BODY, and FACE."
+(defun omnigent-ui--fold (id heading body &optional face)
+  "Insert a fold for ID with HEADING, BODY, and optional FACE."
   (let ((open (gethash id omnigent-ui--folds)))
     (insert-text-button (if open
                             "▼"
@@ -639,7 +636,7 @@ Signal an error if point is not in a foldable block."
        start (point) 'invisible
        (unless open
          'omnigent-ui-fold))
-      (when (eq face 'omnigent-ui-reasoning)
+      (when face
         (put-text-property start (point) 'face face)))
     (insert "\n\n")))
 
@@ -675,10 +672,7 @@ Signal an error if point is not in a foldable block."
        (omnigent-ui--string
         (or (alist-get 'output output)
             (alist-get 'content output)
-            ""))))
-     (if (equal status "failed")
-         'omnigent-ui-error
-       'omnigent-ui-tool))))
+            "")))))))
 
 (defun omnigent-ui--tool-arguments (item)
   "Parse the JSON arguments of tool ITEM."

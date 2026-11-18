@@ -429,7 +429,7 @@
   "Keep the fold marker face when fontification removes its explicit face."
   (with-temp-buffer
     (let ((omnigent-ui--folds (make-hash-table :test 'equal)))
-      (omnigent-ui--fold "fold" "Heading" "Body" 'omnigent-ui-tool))
+      (omnigent-ui--fold "fold" "Heading" "Body"))
     (remove-text-properties (point-min) (point-max) '(face nil))
     (should
      (eq
