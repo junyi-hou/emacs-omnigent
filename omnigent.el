@@ -410,12 +410,50 @@ Use the current project root when the session workspace is unavailable."
             (project-root project)
           default-directory)))))
 
+(defvar-local omnigent-conversation--directory-pending nil
+  "Non-nil when the session workspace is not yet available.")
+
+(defun omnigent-conversation--update-directories ()
+  "Set pending conversation directories when session metadata arrives."
+  (dolist (entry omnigent-sessions--buffers)
+    (when (buffer-live-p (cdr entry))
+      (with-current-buffer (cdr entry)
+        (when omnigent-conversation--directory-pending
+          (let* ((session
+                  (cl-find
+                   (car entry)
+                   omnigent-sessions
+                   :key (lambda (row) (alist-get 'id row))
+                   :test #'equal))
+                 (workspace (alist-get 'workspace session))
+                 (host (alist-get 'host_id session)))
+            (when (and (stringp workspace)
+                       (not (string-empty-p workspace))
+                       (stringp host)
+                       (not (string-empty-p host)))
+              (setq
+               default-directory
+               (omnigent-conversation--default-directory (car entry))
+               omnigent-conversation--directory-pending nil))))))))
+
+(add-hook
+ 'omnigent-sessions-change-hook
+ #'omnigent-conversation--update-directories)
+
 ;;;###autoload
 (defun omnigent-conversation-open (id &optional title)
   "Open the conversation for session ID, with optional TITLE."
   (interactive "sSession ID: ")
   (let* ((directory (omnigent-conversation--default-directory id))
-         (buffer (omnigent-sessions-buffer id)))
+         (buffer (omnigent-sessions-buffer id))
+         (session
+          (cl-find
+           id
+           omnigent-sessions
+           :key (lambda (row) (alist-get 'id row))
+           :test #'equal))
+         (workspace (alist-get 'workspace session))
+         (host (alist-get 'host_id session)))
     (unless buffer
       (setq buffer
             (generate-new-buffer
@@ -435,7 +473,14 @@ Use the current project root when the session workspace is unavailable."
          (kill-buffer buffer)
          (signal (car err) (cdr err)))))
     (with-current-buffer buffer
-      (setq default-directory (file-name-as-directory directory)))
+      (setq
+       default-directory (file-name-as-directory directory)
+       omnigent-conversation--directory-pending
+       (not
+        (and (stringp workspace)
+             (not (string-empty-p workspace))
+             (stringp host)
+             (not (string-empty-p host))))))
     (pop-to-buffer buffer)))
 
 (defun omnigent-conversation-reconnect ()
