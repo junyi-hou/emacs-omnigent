@@ -20,6 +20,24 @@ codex_bin=$(command -v codex)
 server_bin=${OMNIGENT_BIN:-"$PWD/.pixi/envs/test/bin/omnigent"}
 emacs_bin=${EMACS:-emacs}
 python_bin=${PYTHON:-"$PWD/.pixi/envs/test/bin/python"}
+package_dir="$PWD/.tools/test-elpa"
+websocket_load_path=${OMNIGENT_WEBSOCKET_LOAD_PATH:-}
+if ! OMNIGENT_TEST_PACKAGE_DIR="$package_dir" \
+  OMNIGENT_TEST_WEBSOCKET_OVERRIDE="$websocket_load_path" \
+  "$emacs_bin" -Q --batch \
+  --eval '(require (quote package))' \
+  --eval '(setq package-user-dir (getenv "OMNIGENT_TEST_PACKAGE_DIR"))' \
+  --eval '(package-initialize)' \
+  --eval '(unless
+           (and
+            (package-installed-p (quote markdown-mode))
+            (or
+             (getenv "OMNIGENT_TEST_WEBSOCKET_OVERRIDE")
+             (package-installed-p (quote websocket))))
+           (kill-emacs 1))'; then
+  echo "Missing Emacs test packages. Run 'make test-deps' first." >&2
+  exit 1
+fi
 
 # Pull the upstream test suite at the omnigent version pinned in pixi.lock so
 # the mock model and the installed server share one exact release.
@@ -178,8 +196,6 @@ if [ "$i" -eq 100 ] || ! kill -0 "$host_pid" 2>/dev/null; then
   tail -n 80 "$tmp/host.log" >&2
   exit 1
 fi
-package_dir="$PWD/.tools/test-elpa"
-websocket_load_path=${OMNIGENT_WEBSOCKET_LOAD_PATH:-}
 # Runtime permission_mode controls are Claude-specific, not Codex controls.
 if [ "${OMNIGENT_TEST_HARNESS:-claude-native}" = codex-native ] && [ -z "${OMNIGENT_TEST_SELECTOR:-}" ]; then
   export OMNIGENT_TEST_SELECTOR='(not "^omnigent-mock-claude-")'

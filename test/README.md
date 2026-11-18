@@ -37,12 +37,12 @@ make integration-test HARNESS=claude-native
 make integration-test HARNESS=codex-native
 ```
 
-`make test-deps` installs Evil, WebSocket, `f`, `s`, and their dependencies in
-`.tools/test-elpa`, separate from user packages. Run it once before either
-suite. Both runners load this shared directory. The integration runner no longer
-installs Emacs packages. Unit tests then run offline and require Evil so the
-composer regression test cannot silently skip. CI runs setup before the unit
-suite. The package itself does not require Evil.
+`make test-deps` installs Evil, WebSocket, `markdown-mode`, `f`, `s`, and their
+dependencies in `.tools/test-elpa`, separate from user packages. Run it once
+before either suite. Both runners load this shared directory. The integration
+runner no longer installs Emacs packages. Unit tests then run offline and require
+Evil so the composer regression test cannot silently skip. CI runs setup before
+the unit suite. The package itself does not require Evil.
 
 `make test` runs unit tests and the selected integration suite
 together. `HARNESS` defaults to `claude-native`. The Makefile passes

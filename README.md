@@ -94,9 +94,11 @@ make integration-test HARNESS=claude-native
 make integration-test HARNESS=codex-native
 ```
 
-`make test-deps` installs Evil, WebSocket, `f`, `s`, and their dependencies in
-`.tools/test-elpa`. Evil is not a runtime dependency. After setup, unit tests
-run offline. Integration tests need network access for dependency installation.
+`make test-deps` installs Evil, WebSocket, `markdown-mode`, `f`, `s`, and their
+dependencies in `.tools/test-elpa`. Evil is not a runtime dependency. After
+setup, unit tests run offline. Integration tests need network access for
+dependency installation.
+
 `make test HARNESS=claude-native` runs unit tests and the selected integration
 suite together; the default harness is `claude-native`. See
 [test/README.md](test/README.md) for details.
