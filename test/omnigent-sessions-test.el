@@ -434,6 +434,33 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(ert-deftest omnigent-sessions-archive-closes-conversation-on-success
+    ()
+  "Close the conversation buffer when a session is archived."
+  (let ((omnigent-sessions--buffers nil)
+        (archive-callback nil)
+        (buffer (generate-new-buffer " *archive-session*")))
+    (unwind-protect
+        (progn
+          (omnigent-sessions-register-buffer "session" buffer)
+          (cl-letf (((symbol-function 'omnigent-transport-get-session)
+                     (lambda (_id callback)
+                       (funcall callback
+                                200
+                                '((archived . :json-false)))))
+                    ((symbol-function
+                      'omnigent-transport-set-session-archived)
+                     (lambda (_id _archived callback)
+                       (setq archive-callback callback)))
+                    ((symbol-function 'omnigent-sessions-refresh)
+                     #'ignore))
+            (omnigent-sessions-toggle-archive "session" #'ignore)
+            (should (buffer-live-p buffer))
+            (funcall archive-callback 204 nil)
+            (should-not (buffer-live-p buffer))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (ert-deftest omnigent-sessions-toggle-archive-uses-server-state ()
   "Toggle both archive states and reject failed or malformed session reads."
   (dolist (state '(t :json-false))

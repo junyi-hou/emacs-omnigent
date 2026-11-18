@@ -610,6 +610,10 @@ after the update completes."
        (omnigent-transport-set-session-archived
         id (not (eq (alist-get 'archived body) t))
         (lambda (update-status update-body)
+          (when (and (omnigent-transport-success-p update-status)
+                     (not (eq (alist-get 'archived body) t)))
+            (when-let* ((buffer (omnigent-sessions-buffer id)))
+              (kill-buffer buffer)))
           (unwind-protect
               (omnigent-sessions-refresh)
             (funcall callback update-status update-body)))))))))
