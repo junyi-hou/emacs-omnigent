@@ -150,6 +150,74 @@ Call the user's token function separately for each request."
           '(("Authorization" . "Bearer token-4"))))))
     (should (= calls 4))))
 
+(ert-deftest
+    omnigent-transport-extra-headers-are-sent-on-all-transports
+    ()
+  "Send user-configured headers on REST, SSE, and WebSocket requests."
+  (let* ((omnigent-extra-headers '(("X-Client" . "emacs")))
+         (omnigent-auth-method 'none)
+         (headers (omnigent-transport--request-headers))
+         (omnigent-server-url "https://example.test")
+         (omnigent-transport--generation 1)
+         rest-headers
+         curl-command
+         websocket-headers)
+    (should (equal headers '(("X-Client" . "emacs"))))
+    (cl-letf (((symbol-function 'url-retrieve)
+               (lambda (_url _callback &rest _args)
+                 (setq rest-headers url-request-extra-headers))))
+      (omnigent-transport-request "GET" "/v1/sessions" #'ignore)
+      (should (equal rest-headers '(("X-Client" . "emacs")))))
+    (cl-letf (((symbol-function 'executable-find)
+               (lambda (_) "curl")))
+      (setq curl-command
+            (omnigent-transport--stream-command "session"))
+      (should
+       (equal (member "-H" curl-command) '("-H" "X-Client: emacs"))))
+    (let ((real-require (symbol-function 'require))
+          (open-args nil))
+      (cl-letf (((symbol-function 'require)
+                 (lambda (feature &optional filename noerror)
+                   (if (eq feature 'websocket)
+                       t
+                     (funcall real-require
+                              feature
+                              filename
+                              noerror))))
+                ((symbol-function 'websocket-open)
+                 (lambda (_url &rest args)
+                   (push args open-args)
+                   'fake-websocket))
+                ((symbol-function 'websocket-openp) (lambda (_) t))
+                ((symbol-function 'websocket-send-text) #'ignore)
+                ((symbol-function 'websocket-close) #'ignore))
+        (omnigent-transport-start-session-updates #'ignore)
+        (setq websocket-headers
+              (plist-get (car open-args) :custom-header-alist))
+        (should
+         (equal websocket-headers '(("X-Client" . "emacs"))))))))
+
+(ert-deftest omnigent-transport-header-auth-overrides-extra-header ()
+  "Replace a user Authorization header with the bearer token header."
+  (let ((omnigent-extra-headers '(("Authorization" . "custom-auth")))
+        (omnigent-auth-method 'token)
+        (omnigent-auth-token-function (lambda () "token"))
+        (omnigent-server-url "https://example.test"))
+    (should
+     (equal
+      (omnigent-transport--request-headers)
+      '(("Authorization" . "Bearer token"))))))
+
+(ert-deftest omnigent-transport-header-keep-auth-if-method-is-none ()
+  "Replace a user Authorization header with the bearer token header."
+  (let ((omnigent-extra-headers '(("Authorization" . "custom-auth")))
+        (omnigent-auth-method 'none)
+        (omnigent-server-url "https://example.test"))
+    (should
+     (equal
+      (omnigent-transport--request-headers)
+      '(("Authorization" . "custom-auth"))))))
+
 (ert-deftest omnigent-transport-reports-authentication-failure ()
   "Print one user message when a REST request returns HTTP 401."
   (let ((messages nil))

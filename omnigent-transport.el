@@ -111,14 +111,19 @@ STATUS nil means the transport did not return an HTTP status."
      "Omnigent authentication failed for %s; check your token (%s)"
      action (or status "no HTTP status"))))
 
+(defun omnigent-transport--request-headers ()
+  "Return all headers for a transport request.
+Put user-configured extra headers first, then replace them with
+authentication headers when both use the same header name."
+  (omnigent-transport--merge-headers
+   omnigent-extra-headers (omnigent-transport--auth-headers)))
+
 (defun omnigent-transport--merge-headers (&rest header-lists)
   "Merge HEADER-LISTS into one alist without duplicate header names."
-  (let ((headers nil))
-    (dolist (header-list header-lists)
-      (dolist (header header-list)
-        (setq headers (assq-delete-all (car header) headers))
-        (push header headers)))
-    (nreverse headers)))
+  (cl-remove-duplicates
+   (apply #'append header-lists)
+   :key #'car
+   :test #'equal))
 
 (defun omnigent-transport--session-path (session-id &optional suffix)
   "Return the API path for SESSION-ID with optional SUFFIX appended."
@@ -181,7 +186,7 @@ when non-nil, is JSON-encoded.  CALLBACK receives (STATUS BODY)."
           (omnigent-transport--merge-headers
            (when data
              '(("Content-Type" . "application/json")))
-           (omnigent-transport--auth-headers)))
+           (omnigent-transport--request-headers)))
          (url-request-data
           (when data
             (encode-coding-string (json-encode data) 'utf-8))))
@@ -380,7 +385,7 @@ only formats text; the caller decides how to present it."
           (omnigent-transport--url
            (concat
             (omnigent-transport--session-path session-id) "/stream")))
-         (auth-headers (omnigent-transport--auth-headers))
+         (auth-headers (omnigent-transport--request-headers))
          (command
           (list
            (executable-find "curl")
@@ -933,7 +938,7 @@ Ignore _WEBSOCKET."
            (websocket-open
             (omnigent-transport--updates-url)
             :nowait t
-            :custom-header-alist (omnigent-transport--auth-headers)
+            :custom-header-alist (omnigent-transport--request-headers)
             :on-open
             (lambda (ws)
               (omnigent-transport--updates-opened updates ws attempt))

@@ -125,6 +125,14 @@ to use the returned token.  The function is called for every request."
   :type '(choice (const :tag "None" nil) (function :tag "Token function"))
   :group 'omnigent-transport)
 
+(defcustom omnigent-extra-headers nil
+  "Additional headers sent with REST, SSE, and WebSocket requests.
+Each entry is a cons cell: (HEADER-NAME . HEADER-VALUE).  Authentication
+headers replace entries with the same header name.
+"
+  :type '(alist :key-type string :value-type string)
+  :group 'omnigent-transport)
+
 (defcustom omnigent-transport-session-limit 1000
   "Maximum number of sessions to fetch, between 1 and 1000."
   :type 'integer
