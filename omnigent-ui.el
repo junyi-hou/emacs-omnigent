@@ -488,12 +488,6 @@
 (defface omnigent-ui-tool '((t :inherit font-lock-builtin-face))
   "Face for tool fold headers."
   :group 'omnigent-ui)
-(defface omnigent-ui-tool-running '((t :foreground "goldenrod"))
-  "Face for running command status."
-  :group 'omnigent-ui)
-(defface omnigent-ui-tool-done '((t :foreground "forest green"))
-  "Face for finished command status."
-  :group 'omnigent-ui)
 (defface omnigent-ui-reasoning '((t :inherit shadow))
   "Face for reasoning blocks."
   :group 'omnigent-ui)
@@ -618,8 +612,8 @@ Signal an error if point is not in a foldable block."
     (unless (eq (and (gethash item-id omnigent-ui--folds) t) open)
       (button-activate button))))
 
-(defun omnigent-ui--fold (id heading body face &optional status-face)
-  "Insert a fold for ID with HEADING, BODY, FACE, and optional STATUS-FACE."
+(defun omnigent-ui--fold (id heading body face)
+  "Insert a fold for ID with HEADING, BODY, and FACE."
   (let ((open (gethash id omnigent-ui--folds))
         (start (point)))
     (insert-text-button (if open
@@ -640,8 +634,6 @@ Signal an error if point is not in a foldable block."
                         'follow-link
                         t)
     (insert " " heading)
-    (when status-face
-      (add-face-text-property (+ start 2) (+ start 3) status-face))
     (let ((start (point)))
       (insert "\n" body)
       (put-text-property
@@ -667,42 +659,35 @@ Signal an error if point is not in a foldable block."
            (t
             "running")))
          (name (or (alist-get 'name item) "Tool")))
-    (omnigent-ui--fold id
-                       (if command
-                           (concat
-                            (pcase status
-                              ("running" "\uf252 ")
-                              ("failed" "\uf2d3 ")
-                              (_ "\uf14a "))
-                            (truncate-string-to-width
-                             (replace-regexp-in-string
-                              "\n" " " command)
-                             80 nil nil "…"))
-                         (format "%s %s — %s"
-                                 name
-                                 (truncate-string-to-width
-                                  (replace-regexp-in-string
-                                   "\n" " " args)
-                                  80 nil nil "…")
-                                 status))
-                       (concat
-                        "Arguments:\n" args "\n\nOutput:\n"
-                        (omnigent-ui--bounded-output
-                         (omnigent-ui--string
-                          (or (alist-get 'output output)
-                              (alist-get 'content output)
-                              ""))))
-                       (if (equal status "failed")
-                           'omnigent-ui-error
-                         'omnigent-ui-tool)
-                       (when command
-                         (cond
-                          ((equal status "running")
-                           'omnigent-ui-tool-running)
-                          ((equal status "failed")
-                           'omnigent-ui-error)
-                          (t
-                           'omnigent-ui-tool-done))))))
+    (omnigent-ui--fold
+     id
+     (if command
+         (concat
+          (pcase status
+            ("running" "\uf252 ")
+            ("failed" "\uf2d3 ")
+            (_ "\uf14a "))
+          (truncate-string-to-width
+           (replace-regexp-in-string
+            "\n" " " command)
+           80 nil nil "…"))
+       (format "%s %s — %s"
+               name
+               (truncate-string-to-width
+                (replace-regexp-in-string
+                 "\n" " " args)
+                80 nil nil "…")
+               status))
+     (concat
+      "Arguments:\n" args "\n\nOutput:\n"
+      (omnigent-ui--bounded-output
+       (omnigent-ui--string
+        (or (alist-get 'output output)
+            (alist-get 'content output)
+            ""))))
+     (if (equal status "failed")
+         'omnigent-ui-error
+       'omnigent-ui-tool))))
 
 (defun omnigent-ui--tool-arguments (item)
   "Parse the JSON arguments of tool ITEM."
