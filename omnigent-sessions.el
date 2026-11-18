@@ -180,6 +180,14 @@ Signal a user error if ID already has a different live buffer or the
          :key #'cdr))
   (omnigent-sessions--watch))
 
+(defun omnigent-sessions--close-conversation (id)
+  "Close the registered conversation buffer for session ID."
+  (when-let* ((buffer (omnigent-sessions-buffer id)))
+    (if-let* ((window (get-buffer-window buffer t)))
+      (with-selected-window window
+        (kill-buffer-and-window))
+      (kill-buffer buffer))))
+
 (defun omnigent-sessions-reset ()
   "Forget state from the current server."
   (cl-incf omnigent-sessions--refresh-number)
@@ -612,8 +620,7 @@ after the update completes."
         (lambda (update-status update-body)
           (when (and (omnigent-transport-success-p update-status)
                      (not (eq (alist-get 'archived body) t)))
-            (when-let* ((buffer (omnigent-sessions-buffer id)))
-              (kill-buffer buffer)))
+            (omnigent-sessions--close-conversation id))
           (unwind-protect
               (omnigent-sessions-refresh)
             (funcall callback update-status update-body)))))))))
@@ -626,8 +633,7 @@ after the request completes.  The caller must obtain confirmation first."
    id
    (lambda (status body)
      (when (omnigent-transport-success-p status)
-       (when-let* ((buffer (omnigent-sessions-buffer id)))
-         (kill-buffer buffer)))
+       (omnigent-sessions--close-conversation id))
      (unwind-protect
          (omnigent-sessions-refresh)
        (funcall callback status body)))))

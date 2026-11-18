@@ -422,15 +422,19 @@
     (unwind-protect
         (progn
           (omnigent-sessions-register-buffer "session" buffer)
-          (cl-letf (((symbol-function
-                      'omnigent-transport-delete-session)
-                     (lambda (_id cb) (setq callback cb)))
-                    ((symbol-function 'omnigent-sessions-refresh)
-                     #'ignore))
-            (omnigent-sessions-delete "session" #'ignore)
-            (should (buffer-live-p buffer))
-            (funcall callback 204 nil)
-            (should-not (buffer-live-p buffer))))
+          (save-window-excursion
+            (let ((window (split-window-right)))
+              (set-window-buffer window buffer)
+              (cl-letf (((symbol-function
+                          'omnigent-transport-delete-session)
+                         (lambda (_id cb) (setq callback cb)))
+                        ((symbol-function 'omnigent-sessions-refresh)
+                         #'ignore))
+                (omnigent-sessions-delete "session" #'ignore)
+                (should (buffer-live-p buffer))
+                (funcall callback 204 nil)
+                (should-not (buffer-live-p buffer))
+                (should-not (window-live-p window))))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
@@ -443,21 +447,26 @@
     (unwind-protect
         (progn
           (omnigent-sessions-register-buffer "session" buffer)
-          (cl-letf (((symbol-function 'omnigent-transport-get-session)
-                     (lambda (_id callback)
-                       (funcall callback
-                                200
-                                '((archived . :json-false)))))
-                    ((symbol-function
-                      'omnigent-transport-set-session-archived)
-                     (lambda (_id _archived callback)
-                       (setq archive-callback callback)))
-                    ((symbol-function 'omnigent-sessions-refresh)
-                     #'ignore))
-            (omnigent-sessions-toggle-archive "session" #'ignore)
-            (should (buffer-live-p buffer))
-            (funcall archive-callback 204 nil)
-            (should-not (buffer-live-p buffer))))
+          (save-window-excursion
+            (let ((window (split-window-right)))
+              (set-window-buffer window buffer)
+              (cl-letf (((symbol-function
+                          'omnigent-transport-get-session)
+                         (lambda (_id callback)
+                           (funcall callback
+                                    200
+                                    '((archived . :json-false)))))
+                        ((symbol-function
+                          'omnigent-transport-set-session-archived)
+                         (lambda (_id _archived callback)
+                           (setq archive-callback callback)))
+                        ((symbol-function 'omnigent-sessions-refresh)
+                         #'ignore))
+                (omnigent-sessions-toggle-archive "session" #'ignore)
+                (should (buffer-live-p buffer))
+                (funcall archive-callback 204 nil)
+                (should-not (buffer-live-p buffer))
+                (should-not (window-live-p window))))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
