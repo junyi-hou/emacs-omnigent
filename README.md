@@ -23,10 +23,10 @@ What works:
   (`omnigent-start-server`).
 - Select an existing local or remote server with `omnigent-connect`, without
   starting a local process. Remote-server authentication is not implemented yet.
-- Create sessions on the connected server with `omnigent-sessions-create`, regardless
-  of who started it. Use the sole online execution host, or select one if several
-  are online. Always pick a workspace through host filesystem completion. No Emacs
-  project-path default or prefix argument is used.
+- Run `omnigent-sessions-create` or enter `/new` for quick creation. Use
+  `C-u` with the command to review and edit the session in a Transient menu.
+  Both paths use the defaults in the `omnigent-session-creation` Customize
+  group. Quick creation prompts only for missing required settings.
 
 - Conversation state, snapshot parsing, and message and interrupt requests
   (`omnigent-conversation.el`).
@@ -114,18 +114,16 @@ deleted file. Omnigent does not distinguish that failure from a new file.
 ## TODO
 
 - [ ] Autocomplete (via capf) file (@) and slash commands.
-- [ ] Support managed sandbox (issue 1) and external runner (start within emacs).
 - [ ] Design client-to-server retry for requests with no confirmed response, including
       messages and elicitation responses the server may already have accepted.
 - [ ] Support workspace diffs for non-Git workspaces.
 - [ ] Design centralized authentication for remote servers, including token expiration.
 - [ ] Fetch sessions incrementally: load 20 first, then let the user fetch more.
 - [ ] Fetch older conversation items on demand.
-- [ ] Advanced session-creation options in a Transient menu: sandbox,
-      model override, reasoning effort, launch args, and
-      fork options (harness switch, fork-from-response).
 - [ ] Support side chat.
-- [ ] Fork sessions, including fork options.
+- [ ] Add managed sandbox provisioning feedback for session creation and forks.
+      Show an animated “Provisioning sandbox…” message while waiting. Open the
+      conversation when its runner is ready. Report failures with the session ID.
 
 ## Sources
 

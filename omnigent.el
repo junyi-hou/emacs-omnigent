@@ -1,6 +1,6 @@
 ;;; omnigent.el --- Omnigent for Emacs -*- lexical-binding: t; -*-
 
-;; Package-Requires: ((emacs "27.1") (websocket "1.16") (markdown-mode "2.6"))
+;; Package-Requires: ((emacs "27.1") (websocket "1.16") (markdown-mode "2.6") (transient "0.4.0"))
 
 ;;; Commentary:
 ;; Start or connect to an Omnigent server.
@@ -10,6 +10,7 @@
 (require 'subr-x)
 (require 'cl-lib)
 (require 'project)
+(require 'transient)
 (require 'omnigent-options)
 (require 'omnigent-transport)
 (require 'omnigent-sessions)
@@ -213,12 +214,51 @@ Run `omnigent-sessions-change-hook' on success, or the error hook on failure."
      (apply-partially #'omnigent-sessions--refreshed
                       number revision))))
 
+(defvar omnigent--create-draft nil
+  "Current creation draft as a cons of server generation and fields.")
+
+(defun omnigent--create-managed-p ()
+  "Return non-nil when the draft requests a managed sandbox."
+  (equal
+   (alist-get 'host_type (cdr omnigent--create-draft)) "managed"))
+
+(defun omnigent--create-default-fields ()
+  "Return a fresh draft from the session creation user options."
+  `((host_type . ,omnigent-session-default-host-type)
+    (host_id . ,omnigent-session-default-host)
+    (workspace . ,omnigent-session-default-workspace)
+    (agent_id . ,omnigent-session-default-agent)
+    (model_override . ,omnigent-session-default-model)
+    (reasoning_effort . ,omnigent-session-default-reasoning-effort)
+    (title . ,omnigent-session-default-title)
+    (terminal_launch_args
+     .
+     ,(and omnigent-session-default-launch-arguments
+           (vconcat omnigent-session-default-launch-arguments)))
+    (sandbox_provider . ,omnigent-session-default-sandbox-provider)
+    (sandbox_profile_id . ,omnigent-session-default-sandbox-profile)
+    (sandbox_profile_revision
+     .
+     ,(and omnigent-session-default-sandbox-profile
+           omnigent-session-default-sandbox-profile-revision))
+    (workspaces
+     .
+     ,(and omnigent-session-default-sandbox-repositories
+           (vconcat omnigent-session-default-sandbox-repositories)))
+    (git
+     .
+     ,(when omnigent-session-default-worktree-branch
+        `((branch_name . ,omnigent-session-default-worktree-branch)
+          ,@
+          (when omnigent-session-default-worktree-base-branch
+            `((base_branch
+               .
+               ,omnigent-session-default-worktree-base-branch))))))))
+
 ;;;###autoload
-(defun omnigent-sessions-create (&optional select-location)
-  "Create a session with asynchronously fetched agent choices.
-Use context at point or in the current conversation when available.
-With prefix argument SELECT-LOCATION, prompt for host and workspace.
-Report failures through `omnigent-sessions-error-hook'."
+(defun omnigent-sessions-create (&optional edit)
+  "Create a session using configured and server defaults.
+With a prefix argument EDIT, open the session creation menu."
   (interactive "P")
   (let* ((id (omnigent-ui--session-id-at-point))
          (session
@@ -237,21 +277,434 @@ Report failures through `omnigent-sessions-error-hook'."
               (and (derived-mode-p 'omnigent-conversation-mode)
                    (alist-get
                     'workspace omnigent-conversation-header-data))))
-         (target
-          (and (not select-location)
-               (stringp host)
-               (not (string-empty-p host))
-               (stringp workspace)
-               (not (string-empty-p workspace))
-               (cons host workspace)))
-         (callback
-          (apply-partially #'omnigent-sessions--workspace-selected
-                           omnigent-transport--generation)))
-    (if target
-        (funcall callback target)
-      (if session
-          (omnigent-sessions--read-workspace callback session)
-        (omnigent-sessions--read-workspace callback)))))
+         (fields (omnigent--create-default-fields))
+         (configured-host (alist-get 'host_id fields)))
+    (unless (equal (alist-get 'host_type fields) "managed")
+      (unless configured-host
+        (setf (alist-get 'host_id fields) host))
+      (when (and (not (alist-get 'workspace fields))
+                 (or (not configured-host)
+                     (equal configured-host host)))
+        (setf (alist-get 'workspace fields) workspace)))
+    (setq omnigent--create-draft
+          (cons omnigent-transport--generation fields))
+    (if edit
+        (omnigent--create-menu)
+      (omnigent--create-resolve omnigent--create-draft session))))
+
+(defun omnigent--create-pick-location
+    (draft callback &optional session keep)
+  "Update DRAFT location using SESSION context, then call CALLBACK.
+When KEEP is non-nil, retain any location settings already in DRAFT."
+  (let* ((fields (cdr draft))
+         (host (and keep (alist-get 'host_id fields)))
+         (workspace (and keep (alist-get 'workspace fields)))
+         (selected
+          (lambda (target)
+            (when (and (eq draft omnigent--create-draft)
+                       (= (car draft) omnigent-transport--generation))
+              (when target
+                (unless (or keep
+                            (and (equal
+                                  (car target)
+                                  (alist-get 'host_id fields))
+                                 (equal
+                                  (cdr target)
+                                  (alist-get 'workspace fields))))
+                  (setf (alist-get 'git (cdr draft)) nil))
+                (setf
+                 (alist-get 'host_id (cdr draft)) (car target)
+                 (alist-get 'workspace (cdr draft)) (cdr target)))
+              (funcall callback target)))))
+    (cond
+     ((or host workspace)
+      (omnigent-sessions--read-workspace
+       selected session host workspace))
+     (session
+      (omnigent-sessions--read-workspace selected session))
+     (t
+      (omnigent-sessions--read-workspace selected)))))
+
+(defun omnigent--create-resolve (draft &optional session menu)
+  "Resolve DRAFT using SESSION context and submit.
+When MENU is non-nil, restore the draft after a failed request."
+  (unless (= (car draft) omnigent-transport--generation)
+    (user-error "Server changed during session creation"))
+  (let ((fields (cdr draft)))
+    (cond
+     ((and (not (omnigent--create-managed-p))
+           (not
+            (and (alist-get 'host_id fields)
+                 (alist-get 'workspace fields))))
+      (omnigent--create-pick-location draft
+                                      (lambda (target)
+                                        (when target
+                                          (omnigent--create-resolve
+                                           draft
+                                           nil menu)))
+                                      session t))
+     ((not (alist-get 'agent_id fields))
+      (omnigent-sessions--read-agent
+       (car draft)
+       (lambda (agent)
+         (when (eq draft omnigent--create-draft)
+           (cond
+            (agent
+             (setf (alist-get 'agent_id (cdr draft)) agent)
+             (omnigent--create-resolve draft nil menu))
+            (menu
+             (omnigent--create-menu)))))))
+     ((and (omnigent--create-managed-p)
+           (not (alist-get 'sandbox_profile_id fields)))
+      (omnigent--create-read-profile
+       draft (lambda () (omnigent--create-send draft menu))))
+     (t
+      (omnigent--create-send draft menu)))))
+
+(defun omnigent--create-send (draft menu)
+  "Send DRAFT and restore MENU after a failed request when non-nil."
+  (omnigent-sessions--submit-create
+   (car draft) (cdr draft)
+   (when menu
+     (lambda (status body)
+       (omnigent-sessions--created status body)
+       (when (and (not (omnigent-transport-success-p status))
+                  (eq draft omnigent--create-draft)
+                  (= (car draft) omnigent-transport--generation))
+         (omnigent--create-menu))))))
+
+(defun omnigent--create-submit ()
+  "Submit the active creation draft."
+  (interactive)
+  (omnigent--create-resolve omnigent--create-draft nil t))
+
+(defun omnigent--create-location ()
+  "Choose a connected host and workspace."
+  (interactive)
+  (omnigent--create-pick-location
+   omnigent--create-draft (lambda (_) (omnigent--create-menu))
+   (cdr omnigent--create-draft)))
+
+(defun omnigent--create-agent ()
+  "Choose a registered agent for this draft."
+  (interactive)
+  (let ((draft omnigent--create-draft))
+    (omnigent-sessions--read-agent
+     (car draft)
+     (lambda (agent)
+       (when (eq draft omnigent--create-draft)
+         (when (and agent
+                    (not
+                     (equal agent (alist-get 'agent_id (cdr draft)))))
+           (dolist (field
+                    '(model_override
+                      reasoning_effort terminal_launch_args))
+             (setf (alist-get field (cdr draft)) nil))
+           (setf (alist-get 'agent_id (cdr draft)) agent))
+         (omnigent--create-menu))))))
+
+(defun omnigent--create-edit-field
+    (field label &optional choices parse)
+  "Edit FIELD using LABEL, optional CHOICES and optional PARSE function."
+  (let ((current (alist-get field (cdr omnigent--create-draft))))
+    (condition-case nil
+        (let* ((prompt (concat label " (empty for server default): "))
+               (input
+                (if choices
+                    (completing-read prompt choices
+                                     nil
+                                     t
+                                     nil
+                                     nil
+                                     "Server default")
+                  (read-string prompt
+                               (if (and parse
+                                        (sequencep current)
+                                        (not (stringp current)))
+                                   (mapconcat
+                                    #'shell-quote-argument current
+                                    " ")
+                                 current))))
+               (value
+                (unless (member input '("" "Server default"))
+                  (if parse
+                      (funcall parse input)
+                    input))))
+          (unless (equal current value)
+            (setf (alist-get field (cdr omnigent--create-draft))
+                  value)
+            (when (eq field 'model_override)
+              (setf (alist-get
+                     'reasoning_effort (cdr omnigent--create-draft))
+                    nil))
+            (when (memq field '(sandbox_provider sandbox_profile_id))
+              (setf (alist-get
+                     'sandbox_profile_revision
+                     (cdr omnigent--create-draft))
+                    nil)
+              (when (eq field 'sandbox_provider)
+                (setf (alist-get
+                       'sandbox_profile_id
+                       (cdr omnigent--create-draft))
+                      nil)))))
+      (quit
+       nil))
+    (omnigent--create-menu)))
+
+(defun omnigent--create-label (field label)
+  "Show LABEL and the draft value of FIELD."
+  (format "%s (%s)"
+          label
+          (or (alist-get field (cdr omnigent--create-draft))
+              "Server default")))
+
+(defun omnigent--create-host-type ()
+  "Set the execution host type for this session."
+  (interactive)
+  (omnigent--create-edit-field 'host_type "Execution host type"
+                               '("Server default"
+                                 "external"
+                                 "managed")))
+
+(defun omnigent--create-discover (draft path callback)
+  "Fetch PATH for DRAFT and call CALLBACK with status and data."
+  (omnigent-transport-request
+   "GET" path
+   (lambda (status body)
+     (when (and (eq draft omnigent--create-draft)
+                (= (car draft) omnigent-transport--generation))
+       (funcall callback status body)))))
+
+(defun omnigent--create-provider ()
+  "Choose a sandbox provider from the connected server."
+  (interactive)
+  (omnigent--create-discover
+   omnigent--create-draft "/v1/info"
+   (lambda (status body)
+     (if (omnigent-transport-success-p status)
+         (omnigent--create-edit-field
+          'sandbox_provider "Sandbox provider"
+          (cons
+           "Server default"
+           (append (alist-get 'sandbox_providers body) nil)))
+       (omnigent-sessions--error "List sandbox providers" status body)
+       (omnigent--create-menu)))))
+
+(defun omnigent--create-read-profile (draft callback &optional edit)
+  "Resolve the sandbox profile for DRAFT, then call CALLBACK on success.
+With EDIT, prompt even if the provider does not require a profile."
+  (let ((provider (alist-get 'sandbox_provider (cdr draft))))
+    (if provider
+        (omnigent--create-profiles draft provider callback edit)
+      (omnigent--create-discover
+       draft "/v1/info"
+       (lambda (status body)
+         (cond
+          ((and (omnigent-transport-success-p status)
+                (alist-get 'sandbox_provider body))
+           (omnigent--create-profiles
+            draft
+            (alist-get 'sandbox_provider body) callback edit))
+          ((not edit)
+           (funcall callback))
+          (t
+           (omnigent-sessions--error
+            "Discover default sandbox provider" status body)
+           (omnigent--create-menu))))))))
+
+(defun omnigent--create-profiles (draft provider callback edit)
+  "Resolve a PROVIDER profile for DRAFT and call CALLBACK.
+When EDIT is non-nil, allow clearing the selection."
+  (omnigent--create-discover
+   draft
+   (concat
+    "/v1/sandbox-profiles?provider=" (url-hexify-string provider))
+   (lambda (status body)
+     (cond
+      ((and (not edit)
+            (or (equal status 404)
+                (and (omnigent-transport-success-p status)
+                     (not
+                      (seq-contains-p
+                       (alist-get
+                        'managed_providers body)
+                       provider)))))
+       (funcall callback))
+      ((not (omnigent-transport-success-p status))
+       (omnigent-sessions--error "List sandbox profiles" status body)
+       (when edit
+         (omnigent--create-menu)))
+      (t
+       (let* ((choices
+               (mapcar
+                (lambda (profile)
+                  (cons
+                   (format "%s [%s]"
+                           (alist-get 'name profile)
+                           (alist-get 'id profile))
+                   profile))
+                (alist-get 'profiles body)))
+              (selection
+               (cond
+                ((or edit choices)
+                 (condition-case nil
+                     (completing-read "Sandbox profile: "
+                                      (if edit
+                                          (cons
+                                           (list
+                                            "Server default")
+                                           choices)
+                                        choices)
+                                      nil t)
+                   (quit
+                    nil)))
+                (t
+                 (omnigent-sessions--error
+                  "Create session" "No sandbox profiles available")
+                 nil)))
+              (profile (cdr (assoc selection choices))))
+         (when selection
+           (setf
+            (alist-get 'sandbox_profile_id (cdr draft))
+            (alist-get 'id profile)
+            (alist-get 'sandbox_profile_revision (cdr draft)) (alist-get 'revision profile)))
+         (when (or edit selection)
+           (funcall callback))))))))
+
+(defun omnigent--create-profile ()
+  "Choose an authorized sandbox profile."
+  (interactive)
+  (omnigent--create-read-profile
+   omnigent--create-draft #'omnigent--create-menu
+   t))
+
+(defun omnigent--create-repository ()
+  "Set the git repositories for this session."
+  (interactive)
+  (omnigent--create-edit-field 'workspaces "Git repositories"
+                               nil
+                               (lambda (input)
+                                 (vconcat
+                                  (split-string-shell-command
+                                   input)))))
+
+(defun omnigent--create-model ()
+  "Set the model id for this session."
+  (interactive)
+  (omnigent--create-edit-field 'model_override "Model ID"))
+
+(defun omnigent--create-effort ()
+  "Set the reasoning effort for this session."
+  (interactive)
+  (omnigent--create-edit-field 'reasoning_effort "Reasoning effort"
+                               '("Server default"
+                                 "none"
+                                 "minimal"
+                                 "low"
+                                 "medium"
+                                 "high"
+                                 "xhigh"
+                                 "max"
+                                 "ultra")))
+
+(defun omnigent--create-title ()
+  "Set the title for this session."
+  (interactive)
+  (omnigent--create-edit-field 'title "Title"))
+
+(defun omnigent--create-args ()
+  "Set the native launch arguments for this session."
+  (interactive)
+  (omnigent--create-edit-field
+   'terminal_launch_args "Native launch arguments"
+   nil (lambda (input) (vconcat (split-string-shell-command input)))))
+
+(defun omnigent--create-worktree ()
+  "Choose a new worktree branch and optional base branch."
+  (interactive)
+  (let* ((settings (alist-get 'git (cdr omnigent--create-draft)))
+         (branch (alist-get 'branch_name settings)))
+    (condition-case nil
+        (let ((name
+               (read-string "New branch (empty for no worktree): "
+                            branch)))
+          (setf (alist-get 'git (cdr omnigent--create-draft))
+                (unless (string-empty-p name)
+                  (let ((base
+                         (read-string
+                          "Base branch (empty for current HEAD): "
+                          (alist-get 'base_branch settings))))
+                    (if (string-empty-p base)
+                        (list (cons 'branch_name name))
+                      (list
+                       (cons 'branch_name name)
+                       (cons 'base_branch base)))))))
+      (quit
+       nil))
+    (omnigent--create-menu)))
+
+(transient-define-prefix
+ omnigent--create-menu
+ ()
+ "Review and edit the session creation draft."
+ ["Location" ("h" omnigent--create-host-type
+   :description
+   (lambda ()
+     (omnigent--create-label 'host_type "Execution host type")))
+  ("w" omnigent--create-location
+   :description
+   (lambda ()
+     (format "Host and workspace (%s %s)"
+             (or (alist-get 'host_id (cdr omnigent--create-draft))
+                 "Choose host")
+             (or (alist-get 'workspace (cdr omnigent--create-draft))
+                 "")))
+   :if-not omnigent--create-managed-p)
+  ("g" omnigent--create-worktree
+   :if-not omnigent--create-managed-p
+   :description
+   (lambda ()
+     (format "Worktree (%s)"
+             (or (alist-get
+                  'branch_name
+                  (alist-get 'git (cdr omnigent--create-draft)))
+                 "In place"))))]
+ ["Managed sandbox"
+  :if omnigent--create-managed-p
+  ("s" omnigent--create-provider
+   :description
+   (lambda ()
+     (omnigent--create-label 'sandbox_provider "Sandbox provider")))
+  ("i" omnigent--create-profile
+   :description
+   (lambda ()
+     (omnigent--create-label
+      'sandbox_profile_id "Sandbox profile ID")))
+  ("r" omnigent--create-repository
+   :description
+   (lambda ()
+     (omnigent--create-label 'workspaces "Git repositories")))]
+ ["Session" ("a" omnigent--create-agent
+   :description
+   (lambda () (omnigent--create-label 'agent_id "Agent")))
+  ("m"
+   omnigent--create-model
+   :description
+   (lambda () (omnigent--create-label 'model_override "Model ID")))
+  ("e" omnigent--create-effort
+   :description
+   (lambda ()
+     (omnigent--create-label 'reasoning_effort "Reasoning effort")))
+  ("t"
+   omnigent--create-title
+   :description
+   (lambda () (omnigent--create-label 'title "Title")))
+  ("l" omnigent--create-args
+   :description
+   (lambda ()
+     (omnigent--create-label
+      'terminal_launch_args "Native launch arguments")))]
+ ["Actions" ("RET" "Create session" omnigent--create-submit)])
 
 (defun omnigent--fork-launched (session status body)
   "Open fork SESSION after launch STATUS, or report failure BODY."
@@ -284,33 +737,215 @@ Report failures through `omnigent-sessions-error-hook'."
      branch
      (apply-partially #'omnigent--fork-launched session)))))
 
-;;;###autoload
-(defun omnigent-conversation-fork (worktree)
-  "Fork the current session on its host and workspace.
-With prefix argument WORKTREE, prompt for a new worktree branch."
-  (interactive "P")
-  (unless (derived-mode-p 'omnigent-conversation-mode)
-    (user-error "No Omnigent conversation in this buffer"))
-  (let ((host omnigent-conversation-host-id)
-        (workspace
-         (alist-get 'workspace omnigent-conversation-header-data))
-        branch)
+(defvar omnigent--fork-draft nil
+  "Active connected-host fork settings.")
+
+(defun omnigent--fork-send (draft)
+  "Create the fork described by DRAFT and launch its runner."
+  (let ((generation (alist-get 'generation draft))
+        (host (alist-get 'host_id draft))
+        (workspace (alist-get 'workspace draft))
+        (branch (alist-get 'branch draft))
+        options)
+    (unless (= generation omnigent-transport--generation)
+      (user-error "Server changed during fork setup"))
     (unless (and (stringp host)
                  (not (string-empty-p host))
                  (stringp workspace)
                  (not (string-empty-p workspace)))
-      (user-error "The source session has no host or workspace"))
-    (when worktree
-      (setq branch (read-string "New worktree branch: "))
-      (when (string-empty-p branch)
-        (user-error "A worktree branch is required")))
+      (user-error "Choose an execution host and workspace"))
+    (dolist (field
+             '(agent_id
+               up_to_response_id model_override reasoning_effort))
+      (when-let* ((value (alist-get field draft)))
+        (push (cons (symbol-name field) value) options)))
     (message "Forking session...")
     (omnigent-sessions-fork
-     omnigent-conversation-session-id nil
-     (apply-partially #'omnigent--fork-created
-                      host
-                      workspace
-                      branch))))
+     (alist-get 'source draft) options
+     (lambda (status session)
+       (when (= generation omnigent-transport--generation)
+         (omnigent--fork-created
+          host workspace branch status session))))))
+
+;;;###autoload
+(defun omnigent-conversation-fork (edit)
+  "Fork the current session on its host and workspace.
+With prefix argument EDIT, open the connected-host fork menu."
+  (interactive "P")
+  (unless (derived-mode-p 'omnigent-conversation-mode)
+    (user-error "No Omnigent conversation in this buffer"))
+  (let (responses)
+    (when (and edit (hash-table-p omnigent-conversation--items))
+      (maphash
+       (lambda (_ item)
+         (when-let* ((id (alist-get 'response_id item)))
+           (when (stringp id)
+             (push id responses))))
+       omnigent-conversation--items))
+    (let ((draft
+           `((source . ,omnigent-conversation-session-id)
+             (generation . ,omnigent-transport--generation)
+             (host_id . ,omnigent-conversation-host-id)
+             (workspace
+              .
+              ,(alist-get
+                'workspace omnigent-conversation-header-data))
+             (responses . ,(delete-dups responses)))))
+      (if edit
+          (progn
+            (setq omnigent--fork-draft draft)
+            (omnigent--fork-menu))
+        (omnigent--fork-send draft)))))
+
+(defun omnigent--fork-submit ()
+  "Submit the connected-host fork draft."
+  (interactive)
+  (omnigent--fork-send omnigent--fork-draft))
+
+(defun omnigent--fork-location ()
+  "Choose a connected host and workspace for the fork."
+  (interactive)
+  (let ((draft omnigent--fork-draft))
+    (unless (= (alist-get 'generation draft)
+               omnigent-transport--generation)
+      (user-error "Server changed during fork setup"))
+    (omnigent-sessions--read-workspace
+     (lambda (target)
+       (when (and target
+                  (eq draft omnigent--fork-draft)
+                  (= (alist-get 'generation draft)
+                     omnigent-transport--generation))
+         (unless (and (equal (car target) (alist-get 'host_id draft))
+                      (equal
+                       (cdr target) (alist-get 'workspace draft)))
+           (setf (alist-get 'branch omnigent--fork-draft) nil))
+         (setf
+          (alist-get 'host_id omnigent--fork-draft) (car target)
+          (alist-get 'workspace omnigent--fork-draft) (cdr target))
+         (omnigent--fork-menu)))
+     draft)))
+
+(defun omnigent--fork-agent ()
+  "Choose a registered agent for the fork."
+  (interactive)
+  (let ((draft omnigent--fork-draft))
+    (unless (= (alist-get 'generation draft)
+               omnigent-transport--generation)
+      (user-error "Server changed during fork setup"))
+    (omnigent-sessions--read-agent
+     (alist-get 'generation draft)
+     (lambda (agent)
+       (when (and (eq draft omnigent--fork-draft)
+                  (= (alist-get 'generation draft)
+                     omnigent-transport--generation))
+         (when agent
+           (when (eq agent 'inherit)
+             (setq agent nil))
+           (unless (equal agent (alist-get 'agent_id draft))
+             (setf
+              (alist-get 'model_override omnigent--fork-draft) nil
+              (alist-get 'reasoning_effort omnigent--fork-draft) nil))
+           (setf (alist-get 'agent_id omnigent--fork-draft) agent))
+         (omnigent--fork-menu)))
+     "Source agent")))
+
+(defun omnigent--fork-read-field
+    (field prompt &optional choices default)
+  "Set fork FIELD using PROMPT, optional CHOICES and DEFAULT."
+  (condition-case nil
+      (let ((value
+             (if choices
+                 (completing-read prompt choices
+                                  nil
+                                  t
+                                  nil
+                                  nil
+                                  default)
+               (read-string prompt
+                            (alist-get field omnigent--fork-draft)))))
+        (setf (alist-get field omnigent--fork-draft)
+              (unless (or (string-empty-p value)
+                          (equal value default))
+                value)))
+    (quit
+     nil))
+  (omnigent--fork-menu))
+
+(defun omnigent--fork-branch ()
+  "Set the new worktree branch for the fork."
+  (interactive)
+  (omnigent--fork-read-field
+   'branch "New branch (empty for no worktree): "))
+
+(defun omnigent--fork-response ()
+  "Choose the last response to include in the fork."
+  (interactive)
+  (omnigent--fork-read-field
+   'up_to_response_id
+   "Fork through response: "
+   (cons "Full history" (alist-get 'responses omnigent--fork-draft))
+   "Full history"))
+
+(defun omnigent--fork-model ()
+  "Set a model ID, inherit the source model, or reset to the agent default."
+  (interactive)
+  (omnigent--fork-read-field
+   'model_override "Model ID (empty to inherit, default to reset): "))
+
+(defun omnigent--fork-effort ()
+  "Set reasoning effort, inherit the source effort, or reset it."
+  (interactive)
+  (omnigent--fork-read-field 'reasoning_effort "Reasoning effort: "
+                             '("Inherit"
+                               "default"
+                               "none"
+                               "minimal"
+                               "low"
+                               "medium"
+                               "high"
+                               "xhigh"
+                               "max"
+                               "ultra")
+                             "Inherit"))
+
+(defun omnigent--fork-label (field label default)
+  "Show fork FIELD under LABEL, with DEFAULT when unset."
+  (format "%s (%s)"
+          label
+          (or (alist-get field omnigent--fork-draft) default)))
+
+(transient-define-prefix
+ omnigent--fork-menu () "Review a fork on a connected execution host."
+ ["Location" ("w" omnigent--fork-location
+   :description
+   (lambda ()
+     (format "Host and workspace (%s %s)"
+             (or (alist-get 'host_id omnigent--fork-draft)
+                 "Choose host")
+             (or (alist-get 'workspace omnigent--fork-draft) ""))))
+  ("g"
+   omnigent--fork-branch
+   :description
+   (lambda () (omnigent--fork-label 'branch "Worktree" "In place")))]
+ ["Session" ("a" omnigent--fork-agent
+   :description
+   (lambda ()
+     (omnigent--fork-label 'agent_id "Agent" "Source agent")))
+  ("r" omnigent--fork-response
+   :description
+   (lambda ()
+     (omnigent--fork-label
+      'up_to_response_id "History" "Full history")))
+  ("m" omnigent--fork-model
+   :description
+   (lambda ()
+     (omnigent--fork-label 'model_override "Model" "Inherit")))
+  ("e" omnigent--fork-effort
+   :description
+   (lambda ()
+     (omnigent--fork-label
+      'reasoning_effort "Reasoning effort" "Inherit")))]
+ ["Actions" ("RET" "Fork session" omnigent--fork-submit)])
 
 ;;;###autoload
 (defun omnigent-conversation-archive ()

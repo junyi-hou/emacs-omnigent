@@ -298,20 +298,33 @@ When HOST-ID is non-nil, expand the path through its configured mapping."
         input
       (concat "~/" input))))
 
-(defun omnigent-sessions--read-workspace (callback &optional session)
+(defun omnigent-sessions--read-workspace
+    (callback &optional session fixed-host fixed-workspace)
   "Select a host and workspace asynchronously, then call CALLBACK with their cons.
 Use the sole online host, or prompt when several hosts are online.
 Use SESSION as a workspace default when its host matches.
+Use FIXED-HOST or FIXED-WORKSPACE when already configured.
 Report discovery failures through `omnigent-sessions-error-hook'."
   (message "Reading execution hosts...")
-  (omnigent-transport-request
-   "GET" "/v1/hosts"
-   (apply-partially #'omnigent-sessions--select-host
-                    omnigent-transport--generation callback session)))
+  (let ((generation omnigent-transport--generation))
+    (omnigent-transport-request
+     "GET" "/v1/hosts"
+     (lambda (status body)
+       (omnigent-sessions--select-host
+        generation callback session status body
+        fixed-host fixed-workspace)))))
 
 (defun omnigent-sessions--select-host
-    (generation callback session status body)
-  "Present hosts from BODY for GENERATION and continue through CALLBACK."
+    (generation
+     callback
+     session
+     status
+     body
+     &optional
+     fixed-host
+     fixed-workspace)
+  "Present hosts from BODY after STATUS and call CALLBACK on GENERATION.
+Use SESSION for context and retain FIXED-HOST and FIXED-WORKSPACE."
   (cond
    ((not (omnigent-transport-success-p status))
     (omnigent-sessions--error "List hosts" status body))
@@ -321,7 +334,12 @@ Report discovery failures through `omnigent-sessions-error-hook'."
    (t
     (let* ((hosts
             (cl-remove-if-not
-             (lambda (host) (equal (alist-get 'status host) "online"))
+             (lambda (host)
+               (and (equal
+                     (alist-get 'status host) "online")
+                    (or (not fixed-host)
+                        (equal
+                         fixed-host (alist-get 'host_id host)))))
              (append (alist-get 'hosts body) nil)))
            (choices
             (mapcar
@@ -349,14 +367,16 @@ Report discovery failures through `omnigent-sessions-error-hook'."
             (unless (= generation omnigent-transport--generation)
               (user-error
                "Server changed during workspace selection"))
-            (message "Reading workspaces on %s..." choice)
-            (omnigent-sessions--workspace-directories
-             host-id ""
-             (apply-partially
-              #'omnigent-sessions--select-workspace
-              generation host-id choice callback
-              (and (equal host-id (alist-get 'host_id session))
-                   (alist-get 'workspace session)))))))))))
+            (if fixed-workspace
+                (funcall callback (cons host-id fixed-workspace))
+              (message "Reading workspaces on %s..." choice)
+              (omnigent-sessions--workspace-directories
+               host-id ""
+               (apply-partially
+                #'omnigent-sessions--select-workspace
+                generation host-id choice callback
+                (and (equal host-id (alist-get 'host_id session))
+                     (alist-get 'workspace session))))))))))))
 
 (defun omnigent-sessions--select-workspace
     (generation host-id choice callback default status directories)
@@ -507,60 +527,75 @@ Continue through CALLBACK after validating the path on GENERATION's server."
             (t
              (funcall callback (cons host-id workspace))))))))))
 
-(defun omnigent-sessions--workspace-selected (generation target)
-  "Fetch agents for GENERATION after the user selects workspace TARGET."
-  (message "Reading agents...")
+(defun omnigent-sessions--read-agent
+    (generation callback &optional inherit)
+  "Read an agent on GENERATION and pass its ID to CALLBACK.
+When INHERIT is a label, offer it and pass the symbol inherit if selected."
   (omnigent-transport-request
    "GET" "/v1/agents"
    (apply-partially #'omnigent-sessions--select-agent
-                    generation target)))
+                    generation callback inherit)))
 
-(defun omnigent-sessions--select-agent (generation target status body)
-  "Present agents from BODY and create a session on GENERATION at TARGET."
+(defun omnigent-sessions--select-agent
+    (generation callback inherit status body)
+  "Read an agent from BODY after STATUS on GENERATION, with optional INHERIT choice."
+  (unless (= generation omnigent-transport--generation)
+    (user-error "Server changed during session creation"))
   (cond
    ((not (omnigent-transport-success-p status))
     (omnigent-sessions--error "List agents" status body))
    ((not (omnigent-sessions--rows-p body 'data 'id 'name))
     (omnigent-sessions--error "List agents" nil
                               "Invalid agent list response"))
+   ((and (not inherit) (zerop (length (alist-get 'data body))))
+    (omnigent-sessions--error "Create session" "No agents available"))
    (t
-    (let* ((agents (append (alist-get 'data body) nil))
-           (choices
-            (mapcar
-             (lambda (agent)
-               (cons
-                (format "%s [%s]"
-                        (alist-get 'name agent)
-                        (alist-get 'id agent))
-                (alist-get 'id agent)))
-             agents)))
-      (if (null choices)
-          (omnigent-sessions--error
-           "Create session" "No agents available")
-        (let ((selection
+    (let ((choices
+           (mapcar
+            (lambda (agent)
+              (let ((id (alist-get 'id agent)))
+                (cons
+                 (format "%s [%s]" (alist-get 'name agent) id) id)))
+            (alist-get 'data body))))
+      (when inherit
+        (push (cons inherit 'inherit) choices))
+      (funcall callback
                (condition-case nil
-                   (cons
-                    (completing-read "Agent: " choices nil t)
-                    (read-string "Title (optional): "))
+                   (cdr
+                    (assoc
+                     (completing-read "Agent: " choices
+                                      nil
+                                      t
+                                      nil
+                                      nil
+                                      inherit)
+                     choices))
                  (quit
-                  nil))))
-          (when selection
-            (let* ((choice (car selection))
-                   (title (cdr selection))
-                   (data
-                    `(("agent_id" . ,(cdr (assoc choice choices)))
-                      ("host_id" . ,(car target))
-                      ("workspace" . ,(cdr target)))))
-              (unless (string-empty-p title)
-                (push (cons "title" title) data))
-              (unless (= generation omnigent-transport--generation)
-                (user-error "Server changed during session creation"))
-              (message "Creating session...")
-              (omnigent-transport-request
-               "POST"
-               "/v1/sessions"
-               #'omnigent-sessions--created
-               data)))))))))
+                  nil)))))))
+
+(defun omnigent-sessions--submit-create
+    (generation fields &optional callback)
+  "Create a session with FIELDS on GENERATION and notify CALLBACK."
+  (unless (= generation omnigent-transport--generation)
+    (user-error "Server changed during session creation"))
+  (let ((managed (equal (alist-get 'host_type fields) "managed"))
+        payload)
+    (dolist (field fields)
+      (when (and (cdr field)
+                 (not
+                  (memq
+                   (car field)
+                   (if managed
+                       '(host_id workspace git)
+                     '(sandbox_provider
+                       sandbox_profile_id
+                       sandbox_profile_revision
+                       workspaces
+                       initial_input)))))
+        (push (cons (symbol-name (car field)) (cdr field)) payload)))
+    (omnigent-transport-request
+     "POST" "/v1/sessions"
+     (or callback #'omnigent-sessions--created) payload)))
 
 (defun omnigent-sessions--created (status session)
   "Refresh sessions and open SESSION after successful creation STATUS."

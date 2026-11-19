@@ -22,12 +22,20 @@
          omnigent-conversation-session-id "source"
          omnigent-conversation-host-id "host"
          omnigent-conversation-header-data '((workspace . "/repo")))
-        (cl-letf (((symbol-function 'read-string)
+        (cl-letf (((symbol-function 'omnigent--fork-menu) #'ignore)
+                  ((symbol-function 'read-string)
                    (lambda (&rest _) "feature")))
-          (omnigent-conversation-fork t)))
+          (omnigent-conversation-fork t)
+          (should-not requests)
+          (omnigent--fork-branch)
+          (setf (alist-get 'up_to_response_id omnigent--fork-draft)
+                "resp")
+          (omnigent--fork-submit)))
       (setq requests (nreverse requests))
       (should (equal (cadar requests) "/v1/sessions/source/fork"))
-      (should (hash-table-p (nth 2 (car requests))))
+      (should
+       (equal
+        (nth 2 (car requests)) '(("up_to_response_id" . "resp"))))
       (should (equal (cadr (cadr requests)) "/v1/hosts/host/runners"))
       (should
        (equal
@@ -144,30 +152,95 @@
        (equal (cdr (assoc "workspace" post-data)) "/srv/project"))
       (should (equal (alist-get 'id created) "new")))))
 
-(ert-deftest
-    omnigent-sessions-create-uses-conversation-context-unless-prefixed
-    ()
-  "Use conversation location context unless a prefix requests selection."
-  (let (target
-        selected)
-    (cl-letf (((symbol-function
-                'omnigent-sessions--workspace-selected)
-               (lambda (_generation value) (setq target value)))
-              ((symbol-function 'omnigent-sessions--read-workspace)
-               (lambda (_callback &optional _session)
-                 (setq selected t))))
+(ert-deftest omnigent-sessions-create-prefix-uses-same-defaults ()
+  "Use the same draft for quick creation and the menu."
+  (let ((omnigent-session-default-agent "configured")
+        quick
+        menu)
+    (cl-letf (((symbol-function 'omnigent--create-resolve)
+               (lambda (draft &optional _) (setq quick draft)))
+              ((symbol-function 'omnigent--create-menu)
+               (lambda () (setq menu omnigent--create-draft))))
       (with-temp-buffer
         (setq
          major-mode 'omnigent-conversation-mode
          omnigent-conversation-host-id "host-a"
          omnigent-conversation-header-data '((workspace . "/repo")))
         (omnigent-sessions-create)
-        (should (equal target '("host-a" . "/repo")))
-        (should-not selected)
-        (setq target nil)
         (omnigent-sessions-create '(4))
-        (should-not target)
-        (should selected)))))
+        (should (equal quick menu))
+        (should (equal (alist-get 'host_id (cdr menu)) "host-a"))
+        (should (equal (alist-get 'workspace (cdr menu)) "/repo"))
+        (should
+         (equal (alist-get 'agent_id (cdr menu)) "configured"))))))
+
+(ert-deftest omnigent-sessions-create-managed-uses-configured-defaults
+    ()
+  "Create a managed session without prompting for a connected host."
+  (let ((omnigent-session-default-host-type "managed")
+        (omnigent-session-default-agent "agent")
+        (omnigent-session-default-model "model")
+        request)
+    (cl-letf (((symbol-function 'omnigent-transport-request)
+               (lambda (method path callback &optional payload)
+                 (cond
+                  ((equal path "/v1/info")
+                   (funcall callback
+                            200
+                            '((sandbox_provider . "provider"))))
+                  ((equal
+                    path "/v1/sandbox-profiles?provider=provider")
+                   (funcall callback 200 '((managed_providers . []))))
+                  (t
+                   (setq request (list method path payload)))))))
+      (omnigent-sessions-create)
+      (should (equal (car request) "POST"))
+      (should (equal (cadr request) "/v1/sessions"))
+      (should
+       (equal (cdr (assoc "host_type" (caddr request))) "managed"))
+      (should
+       (equal (cdr (assoc "model_override" (caddr request))) "model"))
+      (should-not (assoc "sandbox_provider" (caddr request)))
+      (should-not (assoc "host_id" (caddr request))))))
+
+(ert-deftest omnigent-sessions-create-picks-required-sandbox-profile
+    ()
+  "Use completion for a required profile and send its exact revision."
+  (let ((omnigent-session-default-host-type "managed")
+        (omnigent-session-default-agent "agent")
+        payload)
+    (cl-letf (((symbol-function 'omnigent-transport-request)
+               (lambda (_method path callback &optional data)
+                 (cond
+                  ((equal path "/v1/info")
+                   (funcall callback
+                            200
+                            '((sandbox_provider . "provider"))))
+                  ((equal
+                    path "/v1/sandbox-profiles?provider=provider")
+                   (funcall callback
+                            200
+                            '((managed_providers . ["provider"])
+                              (profiles
+                               .
+                               [((name . "Profile")
+                                 (id . "profile")
+                                 (revision . "revision"))]))))
+                  ((equal path "/v1/sessions")
+                   (setq payload data))
+                  (t
+                   (ert-fail path)))))
+              ((symbol-function 'completing-read)
+               (lambda (prompt choices &rest _)
+                 (should (equal prompt "Sandbox profile: "))
+                 (caar choices))))
+      (omnigent-sessions-create)
+      (should
+       (equal (cdr (assoc "sandbox_profile_id" payload)) "profile"))
+      (should
+       (equal
+        (cdr (assoc "sandbox_profile_revision" payload)) "revision"))
+      (should-not (assoc "sandbox_provider" payload)))))
 
 (ert-deftest omnigent-sessions-refreshes-after-reconnect ()
   (let (opened
@@ -281,7 +354,8 @@
     ()
   "Send the selected agent and title; refresh on success and failure."
   (dolist (status '(201 500))
-    (let ((omnigent-sessions-open-hook nil)
+    (let ((omnigent-session-default-title "My session")
+          (omnigent-sessions-open-hook nil)
           (omnigent-sessions-error-hook nil)
           (refreshes 0)
           errors
@@ -365,11 +439,9 @@
                                    (name . "Agent"))])))
                    (setq posted t))))
               ((symbol-function 'completing-read)
-               (lambda (&rest _) "Agent [agent]"))
-              ((symbol-function 'read-string)
                (lambda (&rest _)
                  (cl-incf omnigent-transport--generation)
-                 "")))
+                 "Agent [agent]")))
       (should-error (omnigent-sessions-create) :type 'user-error)
       (should-not posted))))
 
@@ -990,7 +1062,7 @@
       (omnigent-sessions--refreshed
        0 0 403 '((detail . "Access denied")))
       (omnigent-sessions--select-agent
-       0 '("host" . "/repo") 403 '((detail . "Access denied")))
+       0 #'ignore nil 403 '((detail . "Access denied")))
       (omnigent-sessions--created 403 '((detail . "Access denied"))))
     (should
      (equal
@@ -1067,7 +1139,7 @@
         (omnigent-sessions--select-host
          omnigent-transport--generation #'ignore nil 200 body)
         (omnigent-sessions--select-agent
-         omnigent-transport--generation '("host" . "/repo") 200 body)
+         omnigent-transport--generation #'ignore nil 200 body)
         (omnigent-sessions--workspace-directories
          "host"
          "/repo"

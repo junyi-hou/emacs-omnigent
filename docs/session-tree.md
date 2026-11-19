@@ -20,7 +20,7 @@ the WebSocket subscription has its own transport contract.
 | List agents | `GET /v1/agents` | `omnigent-transport-request` |
 | List execution hosts | `GET /v1/hosts` | `omnigent-transport-request` |
 | Browse host directories | `GET /v1/hosts/{host_id}/filesystem` or `/filesystem/{path}` | `omnigent-transport-request` |
-| Create session | `POST /v1/sessions` with `agent_id`, `host_id`, `workspace`, and optional `title` | `omnigent-transport-request` |
+| Create session | `POST /v1/sessions` with an agent and draft settings | `omnigent-transport-request` |
 | Interrupt | `POST /v1/sessions/{id}/events`, type `interrupt` | `omnigent-transport-post-session-event` |
 | Toggle archive | `GET /v1/sessions/{id}`, then `PATCH` with the opposite `archived` boolean | `omnigent-sessions-toggle-archive` |
 | Delete | `DELETE /v1/sessions/{id}` | `omnigent-transport-delete-session` |
@@ -35,52 +35,75 @@ use Interrupt to cancel the current turn.
 Delete permanently removes the conversation; request confirmation with
 `y-or-n-p` before deleting it. Do not use deletion as a close operation.
 
-### Execution host and workspace
+### Session creation
 
-V1 creates sessions on the connected server, whether local or remote and regardless
-of who started it. Starting a local server is an optional convenience, not a creation
-requirement. The server must be reachable and its requests must be authorized; see
-[transport authentication](transport.md#authentication) for the current limitation.
+Create sessions on the connected server. See
+[transport authentication](transport.md#authentication) for the current
+authorization requirements.
 
-The server coordinates sessions. An execution host runs the agent and its tools.
-The server can run on machine A while the selected host runs on machine B. The
-workspace is a directory on B, not necessarily a directory on A or the Emacs machine.
-The host service must already be online and have the agent dependencies installed.
-Connecting to a server does not install or start a host.
+Both creation paths start with the individual user options in the
+`omnigent-session-creation` Customize group. A Transient edit overrides
+the corresponding option for one request. Clearing an
+optional field leaves it out of the request so the server can apply its
+default. Quick creation has no draft edits and prompts only for required
+values that it cannot resolve. The server requires an agent ID for
+ordinary creation. Fetch the agent list and use completion if the draft
+has no agent ID. An omitted title lets the server derive one.
 
-At creation time, query `GET /v1/hosts`. This response lists hosts but does not declare
-a default execution host. Select the sole online host automatically; if several are
-online, prompt with their names and IDs. If none are online, report the problem.
-Do not assume that a host runs on the server machine or the Emacs machine.
+#### Execution host and workspace
 
-When the session at point has a host and workspace, use them for the new session.
-Otherwise, when the current buffer is a conversation with a host and workspace,
-use that context. With a prefix argument, always prompt for the host and workspace.
-If context is incomplete, use the full host and workspace selection flow.
-When selecting a workspace, use the session at point as its default only when its
-host matches. Query the selected host's filesystem through the server; do not
-inspect the Emacs filesystem. Empty input selects the default when available.
-Otherwise it cannot create a session. Completion initially lists the
-host's home directory. Relative input resolves under that home; absolute and
-host-relative tilde paths retain their meaning on the selected host.
+When the draft omits `host_type`, the server uses `"external"`.
+External sessions need an online execution host and a
+workspace on that host. Use the session at point or the current
+conversation to fill missing location fields. Use the context workspace
+only when its host matches the chosen host.
 
-Offer directories only, support navigation by path, and fetch all listing pages.
-Cache listings only during the prompt. Validate the chosen directory with a fresh
-filesystem request before creation, including paths the user types directly.
-Send the host ID and native workspace path in the create request. Reject TRAMP
-syntax rather than send it to the agent. Abort if the server changes during selection.
-The selection helpers live in `omnigent-sessions.el`. Fetch hosts, directory
-listings, and agents asynchronously. Show an echo-area message while each request
-runs, except during directory completion. A response callback presents the next prompt
-or processes a
-failure. Directory completion uses cached results and refreshes when an
-asynchronous listing arrives.  Do not wait for network output inside a command
-or completion table.
+If the draft needs a host, fetch `GET /v1/hosts`. Select the sole online
+host automatically. When several are online, prompt with their names and
+IDs. Report an error when none are online. When the host is known and
+the draft still needs a workspace, browse that host's filesystem through
+the server. The Emacs project root does not supply a remote path.
 
-Create prompts for an agent and optional title. An empty title lets the server derive
-one. The `omnigent-sessions-open-hook` receives the new session; the conversation
-component opens its buffer. Refresh the list after a write completes. Presentation of
-failures belongs to [frontend.md](frontend.md).
+Offer directories only. Fetch all listing pages and cache them during
+the prompt. Validate the chosen directory with a fresh request, including
+when the user types the path. Resolve relative input under the host's
+home directory. Accept absolute and host-relative tilde paths. Reject
+TRAMP paths. Send the host ID and native workspace path. An optional
+`git` object requests a new worktree with a branch name and optional base
+branch.
+
+#### Managed sandbox
+
+Set `host_type` to `"managed"` to request a managed sandbox. Omit
+`sandbox_provider` to let the server choose. Use `GET /v1/info` to discover
+providers and the server's default provider. If the draft has no profile,
+check `GET /v1/sandbox-profiles` and prompt when the provider requires a
+profile. Send the selected profile ID and revision.
+
+Managed requests omit the connected host and worktree settings. Optional
+Git repository URLs go in `workspaces`. A URL can include a
+`#branch` fragment. The server provisions the sandbox after creating
+the session. The current create flow opens the conversation as soon as
+it receives the session ID. Provisioning feedback and waiting for the
+runner are tracked in the [README TODO list](../README.md#todo).
+
+For example, configure quick creation with a registered agent and the
+server's default sandbox provider.
+
+```elisp
+(setq omnigent-session-default-host-type "managed"
+      omnigent-session-default-agent "ag_example")
+```
+
+#### Requests and results
+
+Fetch picker data asynchronously. Use cached directory results during
+completion and refresh them when another listing arrives. Abort
+submission if the server changes during selection.
+
+Pass a successful create response to `omnigent-sessions-open-hook` and
+refresh the session list after the write completes. See
+[frontend.md](frontend.md#session-creation) for menu and error behavior.
 
 ## List and updates
 
@@ -145,12 +168,26 @@ archived sessions.
 
 ## Forking
 
-From a conversation, `C-c C-f` forks the session with its existing agent and
-history. The client launches a new runner on the source host in the source
-workspace, then opens the fork. With a prefix argument, prompt for a new Git
-branch and ask the host to create a worktree for it. Report the fork ID if
-runner launch fails, because the fork already exists. The fork request accepts
-server options separately from runner launch so side chat can reuse it.
+`C-c C-f` forks a conversation with its existing agent and history. The
+client launches a new runner on the source host in the source workspace
+and opens the fork after launch succeeds.
+
+### Connected-host fork menu
+
+Keep the quick fork on the source host and workspace. Use
+`C-u C-c C-f` to open a Fork Transient with those values filled in.
+Use the same async host and workspace picker as session creation.
+Allow the user to choose a new worktree branch. Use the source agent
+and full history by default. The response picker lists response IDs
+from the loaded conversation. For model and reasoning effort, distinguish inheritance
+from a reset to the selected agent's defaults.
+
+Resolve the host and workspace before creating the fork. Send the
+history and agent options in the fork request. After the server
+creates the fork, launch its runner on the selected host. If launch
+fails, report the fork ID so the user can find the session that
+already exists. Keep the fork request separate from runner launch
+so side chat can reuse it.
 
 ## References
 

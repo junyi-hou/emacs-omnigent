@@ -108,8 +108,10 @@ incomplete catalog when caching results.
 ## Draft and request behavior
 
 For `/new`, clear the submitted command and call `omnigent-sessions-create`
-interactively. For `/model` and `/effort`, use the same composer behavior: clear
-the submitted command when invoking the existing command. Preserve later edits.
+interactively. This uses the quick creation path and its configured defaults.
+See [session creation](session-tree.md#session-creation). For `/model` and
+`/effort`, clear the submitted command when invoking the existing command.
+Preserve later edits.
 
 For other commands, keep the submitted command in the composer during selection
 and request processing.

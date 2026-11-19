@@ -52,17 +52,26 @@ stale-state visual indicators in v1. Disconnected or recovering conversations ar
 read-only. A failed snapshot leaves its conversation invalid and read-only; report the
 error and ask the user to copy drafts before closing and reopening it to try again. See
 [reconnection.md](reconnection.md) for the recovery lifecycle. Keep open sessions
-visible by merging
-the fetched list with watched sessions. The list
-is a view of server data, not its source. A Transient menu for advanced creation
-options is deferred.
+visible by merging the fetched list with watched sessions.
 
-Session creation uses the connected server, whether Emacs started it or not.
-Select its sole online execution host automatically; prompt when several are online.
-Always prompt for a workspace with directory completion through that host's filesystem
-interface. Start with empty input and no default or prefix argument. The prompt names
-its execution host. Do not use the Emacs project root as a remote workspace.
-See [session-tree.md](session-tree.md#execution-host-and-workspace).
+### Session creation
+
+Run `omnigent-sessions-create` for quick creation. With a prefix argument,
+open a Transient that displays the draft values. Use `RET` to submit.
+The Transient edits only this draft and does not save user options.
+
+Use `h` to set the execution host type. For an external host, show host,
+workspace, and worktree controls. For a managed sandbox, show provider,
+profile, and Git repository controls. Both host types show agent, model
+ID, reasoning effort, title, and native launch arguments.
+
+Fetch host, workspace, agent, provider, and profile choices asynchronously
+and use `completing-read`. Use a fixed completion list for reasoning
+effort. Read the model ID, title, and native launch arguments as text.
+When a create request reports failure, return to the draft if it still
+belongs to the active server. Do not resubmit automatically. See
+[session-tree.md](session-tree.md#session-creation) for defaults and
+request behavior.
 
 ## Conversation
 

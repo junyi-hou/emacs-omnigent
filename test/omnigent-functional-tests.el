@@ -1050,6 +1050,7 @@ Native input delivery completes before the transcript forwarder commits output."
           (alist-get 'host_id (aref (alist-get 'hosts hosts) 0)))
          (workspace (file-truename (getenv "HOME")))
          (omnigent-executable "/not-installed-on-this-client")
+         (omnigent-session-default-title "Functional create-to-chat")
          buffer)
     (unwind-protect
         (save-window-excursion
@@ -1074,10 +1075,7 @@ Native input delivery completes before the transcript forwarder commits output."
                                 (concat
                                  omnigent-integration-agent-name " [")
                                 (car choice)))
-                             choices)))))
-                      ((symbol-function 'read-string)
-                       (lambda (&rest _args)
-                         "Functional create-to-chat")))
+                             choices))))))
               (omnigent-sessions-create)
               (omnigent-functional-wait "Created session did not open"
                 buffer)))

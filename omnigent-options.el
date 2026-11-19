@@ -15,6 +15,99 @@
   "Transport settings for Omnigent."
   :group 'applications)
 
+(defgroup omnigent-session-creation nil
+  "Defaults shared by quick session creation and the creation menu."
+  :group 'omnigent)
+
+(defcustom omnigent-session-default-host-type nil
+  "Execution host type for new sessions.  Nil uses the server default."
+  :type
+  '(choice
+    (const :tag "Use default" nil)
+    (const "external")
+    (const "managed"))
+  :group 'omnigent-session-creation)
+
+(defcustom omnigent-session-default-host nil
+  "Execution host ID for new external sessions.
+Nil allows the current session or the host picker to supply the host."
+  :type '(choice (const :tag "Use default" nil) string)
+  :group 'omnigent-session-creation)
+
+(defcustom omnigent-session-default-workspace nil
+  "Absolute workspace path on the execution host for new external sessions.
+Nil allows the current session or the workspace picker to supply the path."
+  :type '(choice (const :tag "Use default" nil) string)
+  :group 'omnigent-session-creation)
+
+(defcustom omnigent-session-default-agent nil
+  "Registered agent ID for new sessions.  Nil prompts for an agent."
+  :type '(choice (const :tag "Use default" nil) string)
+  :group 'omnigent-session-creation)
+
+(defcustom omnigent-session-default-model nil
+  "Model ID for new sessions.  Nil uses the agent default."
+  :type '(choice (const :tag "Use default" nil) string)
+  :group 'omnigent-session-creation)
+
+(defcustom omnigent-session-default-reasoning-effort nil
+  "Reasoning effort for new sessions.  Nil uses the agent default."
+  :type
+  '(choice
+    (const :tag "Use default" nil)
+    (const "none")
+    (const "minimal")
+    (const "low")
+    (const "medium")
+    (const "high")
+    (const "xhigh")
+    (const "max")
+    (const "ultra"))
+  :group 'omnigent-session-creation)
+
+(defcustom omnigent-session-default-title nil
+  "Title for new sessions.  Nil lets the server derive a title."
+  :type '(choice (const :tag "Use default" nil) string)
+  :group 'omnigent-session-creation)
+
+(defcustom omnigent-session-default-launch-arguments nil
+  "Native launch arguments for new sessions, as a list of strings.
+Nil uses the harness defaults."
+  :type '(repeat string)
+  :group 'omnigent-session-creation)
+
+(defcustom omnigent-session-default-sandbox-provider nil
+  "Provider for new managed sandboxes.  Nil uses the server default."
+  :type '(choice (const :tag "Use default" nil) string)
+  :group 'omnigent-session-creation)
+
+(defcustom omnigent-session-default-sandbox-profile nil
+  "Profile ID for new managed sandboxes.  Nil prompts when required."
+  :type '(choice (const :tag "Use default" nil) string)
+  :group 'omnigent-session-creation)
+
+(defcustom omnigent-session-default-sandbox-profile-revision nil
+  "Expected revision of the default sandbox profile.
+This applies only when a default profile ID is set."
+  :type '(choice (const :tag "Use default" nil) string)
+  :group 'omnigent-session-creation)
+
+(defcustom omnigent-session-default-sandbox-repositories nil
+  "Git repository URLs for new managed sandboxes, as a list of strings.
+A URL can include a #branch fragment.  Nil uses an empty workspace."
+  :type '(repeat string)
+  :group 'omnigent-session-creation)
+
+(defcustom omnigent-session-default-worktree-branch nil
+  "New worktree branch for external sessions.  Nil uses the workspace in place."
+  :type '(choice (const :tag "Use default" nil) string)
+  :group 'omnigent-session-creation)
+
+(defcustom omnigent-session-default-worktree-base-branch nil
+  "Base ref for the default worktree branch.  Nil uses the repository HEAD."
+  :type '(choice (const :tag "Use default" nil) string)
+  :group 'omnigent-session-creation)
+
 (defcustom omnigent-conversation-mode-map
   (let ((map (make-sparse-keymap)))
     (require 'text-mode)
