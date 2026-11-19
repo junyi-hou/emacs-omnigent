@@ -191,7 +191,10 @@
         quick
         menu)
     (cl-letf (((symbol-function 'omnigent--create-resolve)
-               (lambda (draft &optional _) (setq quick draft)))
+               (lambda (draft &optional session menu)
+                 (should-not session)
+                 (should menu)
+                 (setq quick draft)))
               ((symbol-function 'omnigent--create-menu)
                (lambda () (setq menu omnigent--create-draft))))
       (with-temp-buffer

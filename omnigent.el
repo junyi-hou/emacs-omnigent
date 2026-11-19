@@ -290,7 +290,7 @@ With a prefix argument EDIT, open the session creation menu."
           (cons omnigent-transport--generation fields))
     (if edit
         (omnigent--create-menu)
-      (omnigent--create-resolve omnigent--create-draft session))))
+      (omnigent--create-submit))))
 
 (defun omnigent--create-pick-location
     (draft callback &optional session keep)
@@ -858,7 +858,7 @@ With prefix argument EDIT, open the fork menu."
       (setq omnigent--fork-draft draft)
       (if edit
           (omnigent--fork-menu)
-        (omnigent--fork-send draft)))))
+        (omnigent--fork-submit)))))
 
 (defun omnigent--fork-submit ()
   "Submit the connected-host fork draft."
