@@ -333,6 +333,76 @@ Signal a user error if ID already has a different live buffer or the
    `(("name" . ,name))))
 
 (defun omnigent-sessions-delete-project (id)
+  "Archive and unassign all sessions in project ID before deleting the project."
+  (omnigent-transport-request
+   "GET" (concat "/v1/projects/" (url-hexify-string id))
+   (lambda (status body)
+     (cond
+      ((not (omnigent-transport-success-p status))
+       (omnigent-sessions--error "Read project" status body))
+      ((not (and (listp body) (stringp (alist-get 'name body))))
+       (omnigent-sessions--error "Read project" nil
+                                 "Invalid project response"))
+      (t
+       (omnigent-sessions--project-members
+        id (alist-get 'name body) nil nil))))))
+
+(defun omnigent-sessions--project-members (id name after members)
+  "Collect members of project ID named NAME after cursor AFTER into MEMBERS."
+  (omnigent-transport-request
+   "GET"
+   (concat
+    "/v1/sessions?limit=1000&include_archived=true&sort_by=created_at&order=asc&project="
+    (url-hexify-string name)
+    (when after
+      (concat "&after=" (url-hexify-string after))))
+   (lambda (status body)
+     (cond
+      ((not (omnigent-transport-success-p status))
+       (omnigent-sessions--error "List project members" status body))
+      ((not
+        (and (omnigent-sessions--rows-p body 'data 'id)
+             (memq (alist-get 'has_more body) '(t :json-false))))
+       (omnigent-sessions--error "List project members" nil
+                                 "Invalid session list response"))
+      (t
+       (dolist (row (append (alist-get 'data body) nil))
+         (when (equal id (alist-get 'project_id row))
+           (push (alist-get 'id row) members)))
+       (if (eq (alist-get 'has_more body) t)
+           (let ((next (alist-get 'last_id body)))
+             (if (and (stringp next)
+                      (not (string-empty-p next))
+                      (not (equal next after)))
+                 (omnigent-sessions--project-members
+                  id name next members)
+               (omnigent-sessions--error
+                "List project members" nil
+                "Invalid session list cursor")))
+         (omnigent-sessions--archive-project-members
+          id (delete-dups members))))))))
+
+(defun omnigent-sessions--archive-project-members (id members)
+  "Archive and unassign MEMBERS in sequence, then delete project ID."
+  (if-let* ((session (car members)))
+    (omnigent-transport--request
+     session "PATCH" (omnigent-transport--session-path session)
+     (lambda (status body)
+       (if (omnigent-transport-success-p status)
+           (progn
+             (omnigent-sessions--close-conversation session)
+             (omnigent-sessions--archive-project-members
+              id (cdr members)))
+         (omnigent-sessions--error
+          (format "Archive and unassign session %s (project kept)"
+                  session)
+          status
+          body)
+         (omnigent-sessions-refresh)))
+     '(("archived" . t) ("project_id" . "")))
+    (omnigent-sessions--delete-empty-project id)))
+
+(defun omnigent-sessions--delete-empty-project (id)
   "Delete server project ID and refresh the session list."
   (omnigent-transport-request
    "DELETE" (concat "/v1/projects/" (url-hexify-string id))
@@ -351,7 +421,8 @@ Signal a user error if ID already has a different live buffer or the
            (remhash id omnigent-sessions--project-lists)
            (run-hooks 'omnigent-sessions-change-hook)
            (omnigent-sessions-refresh))
-       (omnigent-sessions--error "Delete project" status body)))))
+       (omnigent-sessions--error "Delete project" status body)
+       (omnigent-sessions-refresh)))))
 
 (defun omnigent-sessions-refresh-projects ()
   "Fetch details for projects represented in the global session list."

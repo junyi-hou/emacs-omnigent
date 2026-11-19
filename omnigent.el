@@ -1887,9 +1887,11 @@ When UNASSIGN is non-nil, offer to remove the project assignment."
              omnigent-sessions-projects
              :key (lambda (row) (alist-get 'id row))
              :test #'equal))))
-      (when (y-or-n-p
-             (format "Delete project %s and keep its sessions? "
-                     (or name id)))
+      (when
+          (y-or-n-p
+           (format
+            "Archive and unassign all sessions, then delete project %s? "
+            (or name id)))
         (unless (= generation omnigent-transport--generation)
           (user-error "Server changed during project deletion"))
         (omnigent-sessions-delete-project id)))))

@@ -60,7 +60,8 @@ use the current archive setting.
 
 On a session row, `c` creates a session, `d` deletes it, and `a` toggles
 archive. On a project heading, `c` creates a project and `d` deletes the
-project after confirmation. The server keeps its sessions. The server has no
+project after confirmation. First, archive and unassign all of its sessions.
+If a session update fails, keep the project. The server has no
 project archive action. In an empty list, use `c` to create a project or
 `C-c C-n` to create a session.
 
