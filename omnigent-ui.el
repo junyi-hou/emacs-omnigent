@@ -202,6 +202,11 @@
   "Insert SESSION within LINE-WIDTH."
   (let* ((start (point))
          (attention (alist-get 'pending_elicitations_count session))
+         (pending (and (numberp attention) (> attention 0)))
+         (prefix-width
+          (if pending
+              4
+            2))
          (title (alist-get 'title session))
          (updated-at
           (omnigent-ui--session-age (alist-get 'updated_at session)))
@@ -210,15 +215,13 @@
               (replace-regexp-in-string "[\n\r]" " " title)
             "Untitled")))
     (insert "  ")
-    (insert
-     (if (and (numberp attention) (> attention 0))
-         "! "
-       "  "))
+    (when pending
+      (insert "! "))
     (insert
      (truncate-string-to-width
       title
       (max 1
-           (- line-width 4
+           (- line-width prefix-width
               (if updated-at
                   (+ 1 (string-width updated-at))
                 0)))
@@ -242,8 +245,9 @@
       (omnigent-ui--session-face session)))
     (when (equal
            (alist-get 'id session) omnigent-ui--selected-session)
-      (add-face-text-property (+ start 4) (1- (point)) 'bold))
-    (when (and (numberp attention) (> attention 0))
+      (add-face-text-property
+       (+ start prefix-width) (1- (point)) 'bold))
+    (when pending
       (put-text-property
        (+ start 2)
        (+ start 3)

@@ -60,7 +60,7 @@
             (omnigent-ui-sessions-render))
           (should
            (equal
-            (buffer-string) "▾ Unassigned\n    A very l… 2d\n")))
+            (buffer-string) "▾ Unassigned\n  A very lon… 2d\n")))
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 
