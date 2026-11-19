@@ -48,8 +48,11 @@ conventions for other bindings where applicable. Use `a` to toggle archive and
 confirmation before permanent deletion with `y-or-n-p`. The conversation
 commands use `C-c C-a` to toggle archive and `C-c C-d` for Delete.
 
-On connection, fetch all project headings and the configured global session
-limit. The default is 20 sessions total. Press `+` or `-` on a project heading
+On connection, fetch the configured global session limit. The default is 20
+sessions total. Load project details for the sessions in that list. Press
+`/` to find a project, show its heading, and fetch its sessions. Search and
+move load the full project catalog on first use and cache it for the
+connection. Press `+` or `-` on a project heading
 or session row to change only that group's limit. The commands start from the
 number of sessions shown in that group. A numeric prefix changes the limit by
 that amount. A limit of zero hides the group's session rows. Project fetches

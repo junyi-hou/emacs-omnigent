@@ -102,7 +102,9 @@
                (run-hooks 'omnigent-sessions-change-hook)))))
          name limit)))))
 
-(defvar omnigent-sessions--project-request 0)
+(defvar omnigent-sessions--project-catalog nil)
+(defvar omnigent-sessions--pending-projects
+  (make-hash-table :test 'equal))
 
 (defvar omnigent-sessions-truncated nil
   "Non-nil when the server reports more sessions than were fetched.")
@@ -176,6 +178,7 @@
                rows)))
       (setq omnigent-sessions-truncated
             (eq (alist-get 'has_more body) t))
+      (omnigent-sessions-refresh-projects)
       (run-hooks 'omnigent-sessions-change-hook)
       (maphash
        (lambda (key entry)
@@ -282,23 +285,62 @@ Signal a user error if ID already has a different live buffer or the
         (kill-buffer-and-window))
       (kill-buffer buffer))))
 
+(defun omnigent-sessions-show-project (project)
+  "Add PROJECT to the displayed project list and notify the frontend."
+  (let ((id (alist-get 'id project)))
+    (unless (cl-find
+             id
+             omnigent-sessions-projects
+             :key (lambda (row) (alist-get 'id row))
+             :test #'equal)
+      (setq omnigent-sessions-projects
+            (append omnigent-sessions-projects (list project)))
+      (run-hooks 'omnigent-sessions-change-hook))))
+
 (defun omnigent-sessions-refresh-projects ()
-  "Fetch the project list and notify the session list on success."
-  (let ((number (cl-incf omnigent-sessions--project-request)))
+  "Fetch details for projects represented in the global session list."
+  (dolist (session omnigent-sessions)
+    (let ((id (alist-get 'project_id session)))
+      (when (and (stringp id)
+                 (not
+                  (gethash id omnigent-sessions--pending-projects))
+                 (not
+                  (cl-find
+                   id
+                   omnigent-sessions-projects
+                   :key (lambda (row) (alist-get 'id row))
+                   :test #'equal)))
+        (puthash id t omnigent-sessions--pending-projects)
+        (omnigent-transport-request
+         "GET" (concat "/v1/projects/" (url-hexify-string id))
+         (lambda (status body)
+           (remhash id omnigent-sessions--pending-projects)
+           (when (and (omnigent-transport-success-p status)
+                      (listp body)
+                      (equal id (alist-get 'id body))
+                      (stringp (alist-get 'name body)))
+             (omnigent-sessions-show-project body))))))))
+
+(defun omnigent-sessions-read-projects (callback)
+  "Pass the cached or newly fetched project catalog to CALLBACK."
+  (if omnigent-sessions--project-catalog
+      (funcall callback
+               (append omnigent-sessions--project-catalog nil))
     (omnigent-transport-request
      "GET" "/v1/projects"
      (lambda (status body)
-       (when (= number omnigent-sessions--project-request)
-         (cond
-          ((not (omnigent-transport-success-p status))
-           (omnigent-sessions--error "List projects" status body))
-          ((not (omnigent-sessions--rows-p body 'data 'id 'name))
-           (omnigent-sessions--error "List projects" nil
-                                     "Invalid project list"))
-          (t
-           (setq omnigent-sessions-projects
-                 (append (alist-get 'data body) nil))
-           (run-hooks 'omnigent-sessions-change-hook))))))))
+       (cond
+        ((not (omnigent-transport-success-p status))
+         (omnigent-sessions--error "List projects" status body))
+        ((not (omnigent-sessions--rows-p body 'data 'id 'name))
+         (omnigent-sessions--error "List projects" nil
+                                   "Invalid project list"))
+        (t
+         (setq omnigent-sessions--project-catalog
+               (alist-get 'data body))
+         (funcall callback
+                  (append
+                   omnigent-sessions--project-catalog nil))))))))
 
 (defun omnigent-sessions-move (id project-id)
   "Move session ID to PROJECT-ID.  An empty string unassigns it."
@@ -313,8 +355,10 @@ Signal a user error if ID already has a different live buffer or the
 (defun omnigent-sessions-reset ()
   "Forget state from the current server."
   (cl-incf omnigent-sessions--refresh-number)
-  (cl-incf omnigent-sessions--project-request)
-  (setq omnigent-sessions-projects nil)
+  (clrhash omnigent-sessions--pending-projects)
+  (setq
+   omnigent-sessions-projects nil
+   omnigent-sessions--project-catalog nil)
   (clrhash omnigent-sessions--project-lists)
   (when omnigent-sessions-updates
     (omnigent-transport-stop-session-updates

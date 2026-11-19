@@ -140,7 +140,12 @@
                   (setq keys (append keys (list key))))))
             (dolist (key
                      (append
-                      keys
+                      (cl-remove-if-not
+                       (lambda (key)
+                         (or (gethash key groups)
+                             (gethash
+                              key omnigent-sessions--project-lists)))
+                       keys)
                       (when (or (gethash 'unassigned groups)
                                 (gethash
                                  'unassigned
@@ -261,7 +266,6 @@
 (defun omnigent-ui-start ()
   "Load server data and open the session list after connection."
   (unless omnigent-sessions-updates
-    (omnigent-sessions-refresh-projects)
     (omnigent-sessions-start
      (lambda ()
        (when (and omnigent-open-session-list-on-connect

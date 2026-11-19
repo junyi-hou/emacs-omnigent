@@ -1712,26 +1712,67 @@ When EFFORT is nil, prompt with the current model's supported levels."
               (cons key omnigent-ui--folded-projects))))
     (omnigent-ui-sessions-render)))
 
+(defun omnigent-ui--read-project (prompt projects &optional unassign)
+  "Read a project from PROJECTS with PROMPT.
+When UNASSIGN is non-nil, offer to remove the project assignment."
+  (let* ((generation omnigent-transport--generation)
+         (choices
+          (mapcar
+           (lambda (row) (cons (alist-get 'name row) row)) projects))
+         (choices
+          (if unassign
+              (cons '("[Unassigned]" . unassigned) choices)
+            choices))
+         (choice (completing-read prompt choices nil t)))
+    (when (= generation omnigent-transport--generation)
+      (cdr (assoc choice choices)))))
+
+(defun omnigent-ui-find-project ()
+  "Find a server project and load its sessions in the session list."
+  (interactive)
+  (unless (derived-mode-p 'omnigent-ui-sessions-mode)
+    (user-error "Open the Omnigent session list first"))
+  (let ((buffer (current-buffer)))
+    (omnigent-sessions-read-projects
+     (lambda (projects)
+       (when (buffer-live-p buffer)
+         (when-let* ((project
+                      (omnigent-ui--read-project
+                       "Find project: " projects))
+                     (id (alist-get 'id project)))
+           (with-current-buffer buffer
+             (setq omnigent-ui--folded-projects
+                   (delete id omnigent-ui--folded-projects))
+             (omnigent-sessions-show-project project)
+             (omnigent-sessions-fetch-project
+              id
+              (or
+               (car (gethash id omnigent-sessions--project-lists))
+               (max 1 (min 1000 omnigent-transport-session-limit))))
+             (omnigent-ui-sessions-render)
+             (goto-char (point-min))
+             (while (and (not (eobp))
+                         (not
+                          (equal id (omnigent-ui--project-at-point))))
+               (forward-line 1)))))))))
+
 (defun omnigent-ui-move-session ()
   "Move the session at point to a server project."
   (interactive)
-  (let ((id (omnigent-ui--session-id-at-point))
-        (generation omnigent-transport--generation))
+  (let ((id (omnigent-ui--session-id-at-point)))
     (unless id
       (user-error "No session at point"))
-    (let* ((choices
-            (cons
-             '("[Unassigned]" . "")
-             (mapcar
-              (lambda (row)
-                (cons (alist-get 'name row) (alist-get 'id row)))
-              omnigent-sessions-projects)))
-           (choice
-            (completing-read "Move session to: " choices nil t)))
-      (when-let* ((destination (assoc choice choices)))
-        (unless (= generation omnigent-transport--generation)
-          (user-error "Server changed during project selection"))
-        (omnigent-sessions-move id (cdr destination))))))
+    (omnigent-sessions-read-projects
+     (lambda (projects)
+       (when-let* ((destination
+                    (omnigent-ui--read-project
+                     "Move session to: " projects
+                     t)))
+         (omnigent-sessions-move
+          id
+          (if (eq destination 'unassigned)
+              ""
+            (alist-get 'id destination))))))))
 
 (define-derived-mode
  omnigent-ui-sessions-mode
@@ -1761,7 +1802,6 @@ When EFFORT is nil, prompt with the current model's supported levels."
 (defun omnigent-ui-refresh ()
   "Refresh the full root session list."
   (interactive)
-  (omnigent-sessions-refresh-projects)
   (omnigent-sessions-refresh))
 
 (defun omnigent-ui--adjust-project-limit (amount)

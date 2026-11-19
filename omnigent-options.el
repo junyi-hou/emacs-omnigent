@@ -135,6 +135,7 @@ A URL can include a #branch fragment.  Nil uses an empty workspace."
     (define-key map (kbd "TAB") #'omnigent-ui-toggle-project)
     (define-key map (kbd "<tab>") #'omnigent-ui-toggle-project)
     (define-key map (kbd "m") #'omnigent-ui-move-session)
+    (define-key map (kbd "/") #'omnigent-ui-find-project)
     (define-key map (kbd "g") #'omnigent-ui-refresh)
     (define-key map (kbd "+") #'omnigent-ui-increase-session-limit)
     (define-key map (kbd "-") #'omnigent-ui-decrease-session-limit)
