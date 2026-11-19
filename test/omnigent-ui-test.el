@@ -80,7 +80,13 @@
             (title . "Archived")
             (archived . t)
             (updated_at . "2025-01-03"))))
-        (omnigent-sessions-truncated t))
+        (omnigent-fetch-archived-sessions t)
+        (omnigent-sessions--project-lists
+         (make-hash-table :test 'equal)))
+    (puthash
+     'unassigned
+     (list 3 omnigent-sessions t)
+     omnigent-sessions--project-lists)
     (unwind-protect
         (with-current-buffer (get-buffer-create "*omnigent-sessions*")
           (omnigent-ui-sessions-mode)
@@ -119,8 +125,9 @@
               (get-text-property (match-beginning 0) 'display) nil)))
           (should
            (save-excursion
-             (goto-char (point-min))
-             (looking-at "Session list is truncated"))))
+             (goto-char (point-max))
+             (forward-line -1)
+             (looking-at "  [.][.][.]$"))))
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 

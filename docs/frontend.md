@@ -34,8 +34,8 @@ marker visible in narrow windows. Do not show a legend in the buffer. Use `g`
 for manual refresh.  Refresh once after Emacs has been idle for 10 seconds,
 even if the side window is hidden; stop the idle timer on disconnect. If
 refresh fails, report the failure and keep the existing rows, which may be
-stale. If the server reports a truncated list, show a non-selectable warning
-line. `RET` opens the selected session's conversation buffer in the main
+stale. If a project fetch reports more sessions, show `...` below that
+project’s session rows. `RET` opens the selected session's conversation buffer in the main
 window and keeps the session side window visible. Move point to the
 conversation buffer. Press `TAB` on a project heading to fold or unfold its
 sessions. Press `TAB` on a session to fold its project and move point to the

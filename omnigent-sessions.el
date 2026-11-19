@@ -19,7 +19,7 @@
   "List of project alists from the current server.")
 (defvar omnigent-sessions--project-lists
   (make-hash-table :test 'equal)
-  "Map project keys to their requested limit and last fetched rows.")
+  "Map project keys to a list of limit, fetched rows, and whether more exist.")
 
 (defun omnigent-sessions-project-key (session)
   "Return SESSION's project ID or the symbol unassigned."
@@ -32,8 +32,8 @@
     (let (rows)
       (maphash
        (lambda (_key entry)
-         (when (cdr entry)
-           (setq rows (append (cdr entry) rows))))
+         (when (cadr entry)
+           (setq rows (append (cadr entry) rows))))
        omnigent-sessions--project-lists)
       (setq rows
             (append
@@ -44,7 +44,7 @@
                        (gethash
                         (omnigent-sessions-project-key row)
                         omnigent-sessions--project-lists)))
-                  (and entry (or (zerop (car entry)) (cdr entry)))))
+                  (and entry (or (zerop (car entry)) (cadr entry)))))
               omnigent-sessions)))
       (cl-delete-duplicates
        (if omnigent-fetch-archived-sessions
@@ -68,7 +68,11 @@
               :key (lambda (row) (alist-get 'id row))
               :test #'equal))))
          (old (gethash key omnigent-sessions--project-lists))
-         (entry (cons limit (and (> limit 0) (cdr old))))
+         (entry
+          (list
+           limit
+           (and (> limit 0) (cadr old))
+           (and (> limit 0) (nth 2 old))))
          (archived omnigent-fetch-archived-sessions))
     (when name
       (puthash key entry omnigent-sessions--project-lists)
@@ -90,15 +94,16 @@
                 "List project sessions" nil
                 "Invalid session list response"))
               (t
-               (setcdr
-                entry
+               (setf
+                (cadr entry)
                 (or
                  (cl-remove-if-not
                   (lambda (row)
                     (equal key (omnigent-sessions-project-key row)))
                   (append (alist-get 'data body) nil))
                  ;; Distinguish an empty result from a pending request.
-                 []))
+                 [])
+                (nth 2 entry) (eq (alist-get 'has_more body) t))
                (run-hooks 'omnigent-sessions-change-hook)))))
          name limit)))))
 

@@ -121,9 +121,6 @@
                             (format "%s" (or left ""))
                             (format "%s" (or right ""))))))))))
         (erase-buffer)
-        (when omnigent-sessions-truncated
-          (insert
-           (propertize "Session list is truncated\n" 'face 'warning)))
         (let ((line-width
                (if-let* ((window (get-buffer-window buffer t)))
                  (window-body-width window)
@@ -176,7 +173,12 @@
                 (unless folded
                   (dolist (session (nreverse (gethash key groups)))
                     (omnigent-ui--insert-session-row
-                     session line-width)))))))
+                     session line-width))
+                  (when (nth
+                         2
+                         (gethash
+                          key omnigent-sessions--project-lists))
+                    (insert "  ...\n")))))))
         (goto-char (point-min))
         (when (or id project)
           (while (and (not (eobp))
