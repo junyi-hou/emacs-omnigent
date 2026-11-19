@@ -672,7 +672,9 @@ Signal an error if point is not in a foldable block."
          (start
           (and item-id
                (or (previous-single-property-change
-                    (point) 'omnigent-ui-item-id)
+                    (min (point-max)
+                         (1+ (point)))
+                    'omnigent-ui-item-id)
                    (point-min))))
          (end
           (and start

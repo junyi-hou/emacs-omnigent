@@ -495,6 +495,23 @@
     (forward-line 1)
     (should (invisible-p (point)))))
 
+(ert-deftest omnigent-ui-fold-commands-work-at-indicator ()
+  "Open and close a fold when point is on its indicator."
+  (omnigent-ui-test--conversation
+    (omnigent-conversation--event
+     "response.output_item.added"
+     '((item
+        .
+        ((id . "r") (type . "reasoning") (content . "think")))))
+    (goto-char (point-min))
+    (should (eq (char-after) ?▶))
+    (omnigent-conversation-open-block)
+    (goto-char (point-min))
+    (should (eq (char-after) ?▼))
+    (omnigent-conversation-close-block)
+    (goto-char (point-min))
+    (should (eq (char-after) ?▶))))
+
 (ert-deftest omnigent-ui-fold-face-survives-fontification ()
   "Keep the fold marker face when fontification removes its explicit face."
   (with-temp-buffer
