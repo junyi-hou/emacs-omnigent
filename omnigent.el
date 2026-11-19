@@ -1872,6 +1872,50 @@ When UNASSIGN is non-nil, offer to remove the project assignment."
        #'omnigent-sessions-create
      #'omnigent-ui-create-project)))
 
+(defun omnigent-ui-rename-project ()
+  "Rename the project heading at point in the session buffer."
+  (interactive)
+  (unless (derived-mode-p 'omnigent-ui-sessions-mode)
+    (user-error "Use this command in the session buffer"))
+  (let* ((id (omnigent-ui--project-at-point))
+         (project
+          (cl-find
+           id
+           omnigent-sessions-projects
+           :key (lambda (row) (alist-get 'id row))
+           :test #'equal))
+         (generation omnigent-transport--generation))
+    (unless (and (stringp id) project)
+      (user-error "No server project at point"))
+    (let* ((name (alist-get 'name project))
+           (new-name
+            (string-trim (read-string "Project name: " name))))
+      (when (string-empty-p new-name)
+        (user-error "Project name is empty"))
+      (unless (= generation omnigent-transport--generation)
+        (user-error "Server changed during project rename"))
+      (unless (equal name new-name)
+        (omnigent-transport-request
+         "PATCH" (concat "/v1/projects/" (url-hexify-string id))
+         (lambda (status body)
+           (if (omnigent-transport-success-p status)
+               (progn
+                 (setf (alist-get 'name project) new-name)
+                 (setq omnigent-sessions--project-catalog nil)
+                 (run-hooks 'omnigent-sessions-change-hook))
+             (omnigent-sessions--error "Rename project" status body)))
+         `(("name" . ,new-name)))))))
+
+(defun omnigent-ui-rename-at-point ()
+  "Rename the project or session at point in the session buffer."
+  (interactive)
+  (unless (derived-mode-p 'omnigent-ui-sessions-mode)
+    (user-error "Use this command in the session buffer"))
+  (call-interactively
+   (if (omnigent-ui--project-at-point)
+       #'omnigent-ui-rename-project
+     #'omnigent-ui-rename-session)))
+
 (defun omnigent-ui-delete-project ()
   "Delete the project heading at point after confirmation."
   (interactive)
@@ -1950,6 +1994,20 @@ When UNASSIGN is non-nil, offer to remove the project assignment."
                (goto-char (point-min))))))
        (omnigent-ui--action-result
         "Toggle archive" title status body)))))
+
+(defun omnigent-ui-rename-session ()
+  "Change the title of the current session or the session at point."
+  (interactive)
+  (pcase-let* ((`(,id . ,title) (omnigent-ui--action-target))
+               (new-title (read-string "Session title: " title)))
+    (unless (equal title new-title)
+      (omnigent-transport--request
+       id "PATCH" (omnigent-transport--session-path id)
+       (lambda (status body)
+         (if (omnigent-transport-success-p status)
+             (omnigent-sessions-refresh)
+           (omnigent-ui--action-result "Rename" title status body)))
+       `(("title" . ,new-title))))))
 
 (defun omnigent-ui-delete ()
   "Delete the selected session after confirmation."
