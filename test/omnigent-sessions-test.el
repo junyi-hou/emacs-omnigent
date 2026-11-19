@@ -435,6 +435,7 @@
       (cl-letf (((symbol-function 'omnigent-sessions--read-workspace)
                  (lambda (callback)
                    (funcall callback '("host-b" . "/srv/project"))))
+                ((symbol-function 'omnigent--create-menu) #'ignore)
                 ((symbol-function 'omnigent-transport--request)
                  (lambda (_session-id method path cb &optional data)
                    (push (list method path) requests)
