@@ -705,15 +705,11 @@ Signal an error if point is not in a foldable block."
 
 (defun omnigent-ui--unwrap-shell-command (command)
   "Return COMMAND without its /bin/sh and -lc wrapper."
-  (condition-case nil
-      (let ((parts (split-string-and-unquote command)))
-        (if (and (>= (length parts) 3)
-                 (string-match-p "\\`/bin/[^/]+sh\\'" (car parts))
-                 (equal (cadr parts) "-lc"))
-            (mapconcat #'identity (cddr parts) " ")
-          command))
-    (error
-     command)))
+  (if (string-match
+       "\\`/bin/[^/]+sh -lc \\(['\"]\\)\\(\\(?:.\\|\n\\)*\\)\\1\\'"
+       command)
+      (match-string 2 command)
+    command))
 
 (defun omnigent-ui--tool-shell (id item outputs)
   "Render shell ITEM and OUTPUTS for ID."
