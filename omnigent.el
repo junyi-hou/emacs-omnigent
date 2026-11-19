@@ -1594,6 +1594,9 @@ When MODEL is nil, fetch the session catalog and prompt with completion."
                   (omnigent-transport-error-message
                    "Change model" status body)))))))
 
+(defvar-local omnigent--effort-request-generation 0
+  "Generation of the latest effort change request.")
+
 (defun omnigent-conversation-set-effort (&optional effort)
   "Change the current session's reasoning EFFORT asynchronously.
 When EFFORT is nil, prompt with the current model's supported levels."
@@ -1606,14 +1609,60 @@ When EFFORT is nil, prompt with the current model's supported levels."
     (user-error "The effort is empty"))
   (if (null effort)
       (omnigent--conversation-select-setting 'effort)
-    (omnigent-transport-set-session-effort
-     omnigent-conversation-session-id effort
-     (lambda (status body)
-       (if (omnigent-transport-success-p status)
-           (message "Effort change requested: %s" effort)
-         (message "%s"
-                  (omnigent-transport-error-message
-                   "Change effort" status body)))))))
+    (let ((buffer (current-buffer))
+          (generation (cl-incf omnigent--effort-request-generation))
+          (server-generation omnigent-transport--generation)
+          (session-id omnigent-conversation-session-id))
+      (omnigent-transport-set-session-effort
+       session-id effort
+       (lambda (status body)
+         (if (not (omnigent-transport-success-p status))
+             (message "%s"
+                      (omnigent-transport-error-message
+                       "Change effort" status body))
+           (when (and (buffer-live-p buffer)
+                      (= server-generation
+                         omnigent-transport--generation))
+             (with-current-buffer buffer
+               (when (= generation
+                        omnigent--effort-request-generation)
+                 (let ((previous
+                        (alist-get
+                         'reasoning_effort
+                         omnigent-conversation-header-data)))
+                   (omnigent-transport-get-session
+                    session-id
+                    (lambda (fetch-status session)
+                      (when (and (buffer-live-p buffer)
+                                 (= server-generation
+                                    omnigent-transport--generation))
+                        (with-current-buffer buffer
+                          (when
+                              (and
+                               (= generation
+                                  omnigent--effort-request-generation)
+                               (equal
+                                previous
+                                (alist-get
+                                 'reasoning_effort
+                                 omnigent-conversation-header-data)))
+                            (if (omnigent-transport-success-p
+                                 fetch-status)
+                                (progn
+                                  (setf
+                                   (alist-get
+                                    'reasoning_effort
+                                    omnigent-conversation-header-data)
+                                   (alist-get
+                                    'reasoning_effort session))
+                                  (run-hooks
+                                   'omnigent-conversation-change-hook))
+                              (message
+                               "%s"
+                               (omnigent-transport-error-message
+                                "Read session settings"
+                                fetch-status
+                                session))))))))))))))))))
 
 (defun omnigent-conversation-interrupt ()
   "Interrupt the current session asynchronously."
