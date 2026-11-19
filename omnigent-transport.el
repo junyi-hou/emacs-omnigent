@@ -265,16 +265,21 @@ only formats text; the caller decides how to present it."
    callback
    `(("reasoning_effort" . ,effort))))
 
-(defun omnigent-transport-list-sessions (callback)
-  "List sessions and call CALLBACK with status and response body."
+(defun omnigent-transport-list-sessions
+    (callback &optional project limit)
+  "List sessions for CALLBACK, optionally scoped to PROJECT with LIMIT.
+An empty PROJECT string selects unassigned sessions."
   (omnigent-transport-request
    "GET"
-   (format
-    "/v1/sessions?limit=%d&include_archived=%s&sort_by=updated_at&order=desc"
-    (max 1 (min 1000 omnigent-transport-session-limit))
-    (if omnigent-fetch-archived-sessions
-        "true"
-      "false"))
+   (concat
+    (format
+     "/v1/sessions?limit=%d&include_archived=%s&sort_by=updated_at&order=desc"
+     (max 1 (min 1000 (or limit omnigent-transport-session-limit)))
+     (if omnigent-fetch-archived-sessions
+         "true"
+       "false"))
+    (when project
+      (concat "&project=" (url-hexify-string project))))
    callback))
 
 (defun omnigent-transport-set-session-archived

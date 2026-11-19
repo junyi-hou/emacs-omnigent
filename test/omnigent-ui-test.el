@@ -58,7 +58,9 @@
                     ((symbol-function 'omnigent-ui--session-age)
                      (lambda (_) "2d")))
             (omnigent-ui-sessions-render))
-          (should (equal (buffer-string) "  A very lon… 2d\n")))
+          (should
+           (equal
+            (buffer-string) "▾ Unassigned\n    A very l… 2d\n")))
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 
@@ -86,14 +88,14 @@
           (goto-char (point-min))
           (search-forward "! First")
           (beginning-of-line)
-          (should (looking-at "! First"))
-          (should
-           (eq
-            (get-text-property (point) 'face)
-            'omnigent-ui-session-attention))
+          (should (looking-at "  ! First"))
           (should
            (eq
             (get-text-property (+ (point) 2) 'face)
+            'omnigent-ui-session-attention))
+          (should
+           (eq
+            (get-text-property (+ (point) 4) 'face)
             'omnigent-ui-session-running))
           (omnigent-ui-sessions-render)
           (should (equal (omnigent-ui--session-id-at-point) "a"))
@@ -1027,6 +1029,9 @@
                        'updates))
                     ((symbol-function 'omnigent-sessions-refresh)
                      #'ignore)
+                    ((symbol-function
+                      'omnigent-sessions-refresh-projects)
+                     #'ignore)
                     ((symbol-function 'run-with-idle-timer) #'ignore))
             (omnigent-ui-start)
             (should-not (get-buffer-window "*omnigent-sessions*"))
@@ -1052,6 +1057,8 @@
                    (setq opened callback)
                    'updates))
                 ((symbol-function 'omnigent-sessions-refresh)
+                 #'ignore)
+                ((symbol-function 'omnigent-sessions-refresh-projects)
                  #'ignore)
                 ((symbol-function 'run-with-idle-timer) #'ignore))
         (omnigent-ui-start)
@@ -1101,7 +1108,8 @@
           (omnigent-ui-sessions-render)
           (should
            (equal
-            (get-text-property (+ (point-min) 2) 'face)
+            (get-text-property
+             (1- (search-forward "Title")) 'face)
             '(bold omnigent-ui-session-archived))))
       (kill-buffer "*omnigent-sessions*"))))
 
@@ -1151,6 +1159,7 @@
               (omnigent-ui-sessions)
               (select-window
                (get-buffer-window "*omnigent-sessions*"))
+              (forward-line 1)
               (omnigent-ui-sessions-open)
               (setq buffer (current-buffer))
               (should (derived-mode-p 'omnigent-conversation-mode))

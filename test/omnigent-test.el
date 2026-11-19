@@ -50,7 +50,7 @@
             (should
              (equal
               path
-              "/v1/sessions?limit=1000&include_archived=false&sort_by=updated_at&order=desc"))
+              "/v1/sessions?limit=20&include_archived=false&sort_by=updated_at&order=desc"))
             (should (eq callback #'ignore)))))
       (omnigent-transport-list-sessions #'ignore))))
 

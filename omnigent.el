@@ -265,7 +265,7 @@ With a prefix argument EDIT, open the session creation menu."
           (and id
                (cl-find
                 id
-                omnigent-sessions
+                (omnigent-sessions-visible)
                 :key (lambda (row) (alist-get 'id row))
                 :test #'equal)))
          (host
@@ -1155,7 +1155,7 @@ Use the current project root when the session workspace is unavailable."
   (let* ((session
           (cl-find
            id
-           omnigent-sessions
+           (omnigent-sessions-visible)
            :key (lambda (row) (alist-get 'id row))
            :test #'equal))
          (workspace (alist-get 'workspace session))
@@ -1184,7 +1184,7 @@ Use the current project root when the session workspace is unavailable."
           (let* ((session
                   (cl-find
                    (car entry)
-                   omnigent-sessions
+                   (omnigent-sessions-visible)
                    :key (lambda (row) (alist-get 'id row))
                    :test #'equal))
                  (workspace (alist-get 'workspace session))
@@ -1211,7 +1211,7 @@ Use the current project root when the session workspace is unavailable."
          (session
           (cl-find
            id
-           omnigent-sessions
+           (omnigent-sessions-visible)
            :key (lambda (row) (alist-get 'id row))
            :test #'equal))
          (workspace (alist-get 'workspace session))
@@ -1632,12 +1632,57 @@ When EFFORT is nil, prompt with the current model's supported levels."
          (session
           (cl-find
            id
-           omnigent-sessions
+           (omnigent-sessions-visible)
            :key (lambda (row) (alist-get 'id row))
            :test #'equal)))
     (unless session
       (user-error "No session at point"))
     (omnigent-ui-open id (alist-get 'title session))))
+
+(defun omnigent-ui--project-heading ()
+  "Return the position of the project heading for the current line."
+  (save-excursion
+    (beginning-of-line)
+    (when (omnigent-ui--session-id-at-point)
+      (while (and (not (bobp)) (not (omnigent-ui--project-at-point)))
+        (forward-line -1)))
+    (when (omnigent-ui--project-at-point)
+      (point))))
+
+(defun omnigent-ui-toggle-project ()
+  "Fold or unfold the project at point."
+  (interactive)
+  (let ((heading (omnigent-ui--project-heading)))
+    (unless heading
+      (user-error "No project at point"))
+    (goto-char heading)
+    (let ((key (omnigent-ui--project-at-point)))
+      (setq omnigent-ui--folded-projects
+            (if (member key omnigent-ui--folded-projects)
+                (delete key omnigent-ui--folded-projects)
+              (cons key omnigent-ui--folded-projects))))
+    (omnigent-ui-sessions-render)))
+
+(defun omnigent-ui-move-session ()
+  "Move the session at point to a server project."
+  (interactive)
+  (let ((id (omnigent-ui--session-id-at-point))
+        (generation omnigent-transport--generation))
+    (unless id
+      (user-error "No session at point"))
+    (let* ((choices
+            (cons
+             '("[Unassigned]" . "")
+             (mapcar
+              (lambda (row)
+                (cons (alist-get 'name row) (alist-get 'id row)))
+              omnigent-sessions-projects)))
+           (choice
+            (completing-read "Move session to: " choices nil t)))
+      (when-let* ((destination (assoc choice choices)))
+        (unless (= generation omnigent-transport--generation)
+          (user-error "Server changed during project selection"))
+        (omnigent-sessions-move id (cdr destination))))))
 
 (define-derived-mode
  omnigent-ui-sessions-mode
@@ -1652,7 +1697,8 @@ When EFFORT is nil, prompt with the current model's supported levels."
   (interactive)
   (let ((buffer (get-buffer-create "*omnigent-sessions*")))
     (with-current-buffer buffer
-      (omnigent-ui-sessions-mode))
+      (unless (derived-mode-p 'omnigent-ui-sessions-mode)
+        (omnigent-ui-sessions-mode)))
     (omnigent-ui-sessions-render)
     (if-let* ((window (get-buffer-window buffer)))
       (delete-window window)
@@ -1666,29 +1712,46 @@ When EFFORT is nil, prompt with the current model's supported levels."
 (defun omnigent-ui-refresh ()
   "Refresh the full root session list."
   (interactive)
+  (omnigent-sessions-refresh-projects)
   (omnigent-sessions-refresh))
 
+(defun omnigent-ui--adjust-project-limit (amount)
+  "Change the fetch limit for the project at point by AMOUNT."
+  (let* ((heading (omnigent-ui--project-heading))
+         (key
+          (and heading
+               (get-text-property heading 'omnigent-ui-project))))
+    (unless key
+      (user-error "No project at point"))
+    (unless (or (eq key 'unassigned)
+                (cl-find
+                 key
+                 omnigent-sessions-projects
+                 :key (lambda (row) (alist-get 'id row))
+                 :test #'equal))
+      (user-error "Project is unavailable"))
+    (let* ((current
+            (or (car
+                 (gethash key omnigent-sessions--project-lists))
+                (cl-count
+                 key
+                 (omnigent-sessions-visible)
+                 :key #'omnigent-sessions-project-key
+                 :test #'equal)))
+           (limit (max 0 (min 1000 (+ current amount)))))
+      (unless (= current limit)
+        (omnigent-sessions-fetch-project key limit))
+      (message "Project session limit: %d" limit))))
+
 (defun omnigent-ui-increase-session-limit (amount)
-  "Increase the fetched session limit by numeric prefix argument AMOUNT."
+  "Increase the current project's fetch limit by AMOUNT."
   (interactive "p")
-  (setq omnigent-transport-session-limit
-        (min 1000
-             (+ (max 1 (min 1000 omnigent-transport-session-limit))
-                (max 0 amount))))
-  (omnigent-ui-refresh)
-  (message "Fetching up to %d sessions"
-           omnigent-transport-session-limit))
+  (omnigent-ui--adjust-project-limit amount))
 
 (defun omnigent-ui-decrease-session-limit (amount)
-  "Decrease the fetched session limit by numeric prefix argument AMOUNT."
+  "Decrease the current project's fetch limit by AMOUNT."
   (interactive "p")
-  (setq omnigent-transport-session-limit
-        (max 1
-             (- (max 1 (min 1000 omnigent-transport-session-limit))
-                (max 0 amount))))
-  (omnigent-ui-refresh)
-  (message "Fetching up to %d sessions"
-           omnigent-transport-session-limit))
+  (omnigent-ui--adjust-project-limit (- amount)))
 
 (defun omnigent-ui-toggle-archived-sessions ()
   "Toggle archived sessions in the list and refresh the session list."
@@ -1709,7 +1772,7 @@ When EFFORT is nil, prompt with the current model's supported levels."
                (session
                 (cl-find
                  id
-                 omnigent-sessions
+                 (omnigent-sessions-visible)
                  :key (lambda (row) (alist-get 'id row))
                  :test #'equal))
                (next-id

@@ -19,26 +19,41 @@ Follow Emacs key binding conventions across all views.
 
 ## Session list
 
-Use `*omnigent-sessions*`, with a mode derived from `special-mode`. List all root
-sessions together without sections, most recently updated first. Create sessions with a
-keyboard command, not a list entry. Show each session's title and an attention marker
-for pending elicitations. Indicate status with a face. Preserve point by session ID on
+Use `*omnigent-sessions*`, with a mode derived from `special-mode`. Group root
+sessions by server project. Show sessions without a project under Unassigned.
+Within each group, show active sessions before archived sessions. Sort each
+set by most recent update first. Create sessions with a keyboard command. Show
+each session's title and an attention marker for pending
+elicitations. Indicate status with a face. Preserve point by session ID on
 refresh. Child sessions are deferred.
 
 Show each session on one line. Use faces, not glyphs, for session states. Show
-`!` in a separate column when an elicitation is pending; otherwise leave it blank.
-Truncate long titles rather than wrap lines, and keep the attention marker visible
-in narrow windows. Do not show a legend in the buffer. Use `g` for manual refresh.
-Refresh once after Emacs has been idle for 10 seconds, even if the side window is
-hidden; stop the idle timer on disconnect. If refresh fails, report the failure
-and keep the existing rows, which may be stale. If the server reports a truncated
-list, show a non-selectable warning line. `RET` opens the selected
-session's conversation buffer in the main window and keeps the session side window
-visible. Move point to the conversation buffer. Follow Treemacs or Neotree conventions for other
-bindings where applicable. Use `a` to toggle archive and `d` to delete the
-session at point. Archiving preserves history. Ask for confirmation before
-permanent deletion with `y-or-n-p`. The conversation commands use `C-c C-a` to
-toggle archive and `C-c C-d` for Delete.
+`!` in a separate column when an elicitation is pending; otherwise leave it
+blank.  Truncate long titles rather than wrap lines, and keep the attention
+marker visible in narrow windows. Do not show a legend in the buffer. Use `g`
+for manual refresh.  Refresh once after Emacs has been idle for 10 seconds,
+even if the side window is hidden; stop the idle timer on disconnect. If
+refresh fails, report the failure and keep the existing rows, which may be
+stale. If the server reports a truncated list, show a non-selectable warning
+line. `RET` opens the selected session's conversation buffer in the main
+window and keeps the session side window visible. Move point to the
+conversation buffer. Press `TAB` on a project heading to fold or unfold its
+sessions. Press `TAB` on a session to fold its project and move point to the
+heading. Preserve the fold state across refreshes. Press `m` on a session to
+select a destination with completion. Select `[Unassigned]` to remove the
+project assignment. Moving a session changes its server project
+membership. Its workspace stays the same. Follow Treemacs or Neotree
+conventions for other bindings where applicable. Use `a` to toggle archive and
+`d` to delete the session at point. Archiving preserves history. Ask for
+confirmation before permanent deletion with `y-or-n-p`. The conversation
+commands use `C-c C-a` to toggle archive and `C-c C-d` for Delete.
+
+On connection, fetch all project headings and the configured global session
+limit. The default is 20 sessions total. Press `+` or `-` on a project heading
+or session row to change only that group's limit. The commands start from the
+number of sessions shown in that group. A numeric prefix changes the limit by
+that amount. A limit of zero hides the group's session rows. Project fetches
+use the current archive setting.
 
 Use the session state face on the whole line, with a separate attention face on
 `!`. Provide faces for running, waiting, idle, failed, and archived sessions. Use

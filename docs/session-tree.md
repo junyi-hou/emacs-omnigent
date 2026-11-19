@@ -17,6 +17,8 @@ the WebSocket subscription has its own transport contract.
 | Operation | Server API | Client helper |
 |---|---|---|
 | List sessions | `GET /v1/sessions?limit=1000&include_archived={true|false}&sort_by=updated_at&order=desc` | `omnigent-transport-list-sessions` |
+| List projects | `GET /v1/projects` | `omnigent-sessions-refresh-projects` |
+| Move session | `PATCH /v1/sessions/{id}` with `project_id` | `omnigent-sessions-move` |
 | List agents | `GET /v1/agents` | `omnigent-transport-request` |
 | List execution hosts | `GET /v1/hosts` | `omnigent-transport-request` |
 | Browse host directories | `GET /v1/hosts/{host_id}/filesystem` or `/filesystem/{path}` | `omnigent-transport-request` |
@@ -25,6 +27,10 @@ the WebSocket subscription has its own transport contract.
 | Toggle archive | `GET /v1/sessions/{id}`, then `PATCH` with the opposite `archived` boolean | `omnigent-sessions-toggle-archive` |
 | Delete | `DELETE /v1/sessions/{id}` | `omnigent-transport-delete-session` |
 | List updates | `WS /v1/sessions/updates` | `omnigent-transport-start-session-updates`, `omnigent-transport-set-session-updates-watch`, `omnigent-transport-stop-session-updates` |
+
+Use the session row's `project_id` to identify its project. Send an empty
+`project_id` string to remove the assignment. Refresh sessions after a move
+succeeds.
 
 Toggle Archive reads the current server state and archives or unarchives the
 session. Both operations preserve history. Include archived sessions when

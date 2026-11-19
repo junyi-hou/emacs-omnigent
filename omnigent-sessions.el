@@ -15,6 +15,95 @@
 
 (defvar omnigent-sessions nil
   "List of root session alists from the server.")
+(defvar omnigent-sessions-projects nil
+  "List of project alists from the current server.")
+(defvar omnigent-sessions--project-lists
+  (make-hash-table :test 'equal)
+  "Map project keys to their requested limit and last fetched rows.")
+
+(defun omnigent-sessions-project-key (session)
+  "Return SESSION's project ID or the symbol unassigned."
+  (or (alist-get 'project_id session) 'unassigned))
+
+(defun omnigent-sessions-visible ()
+  "Return global session rows with project fetches applied."
+  (if (= 0 (hash-table-count omnigent-sessions--project-lists))
+      omnigent-sessions
+    (let (rows)
+      (maphash
+       (lambda (_key entry)
+         (when (cdr entry)
+           (setq rows (append (cdr entry) rows))))
+       omnigent-sessions--project-lists)
+      (setq rows
+            (append
+             rows
+             (cl-remove-if
+              (lambda (row)
+                (let ((entry
+                       (gethash
+                        (omnigent-sessions-project-key row)
+                        omnigent-sessions--project-lists)))
+                  (and entry (or (zerop (car entry)) (cdr entry)))))
+              omnigent-sessions)))
+      (cl-delete-duplicates
+       (if omnigent-fetch-archived-sessions
+           rows
+         (cl-remove-if
+          (lambda (row) (eq (alist-get 'archived row) t)) rows))
+       :key (lambda (row) (alist-get 'id row))
+       :test #'equal
+       :from-end t))))
+
+(defun omnigent-sessions-fetch-project (key limit)
+  "Fetch up to LIMIT sessions for project KEY and replace its displayed rows."
+  (let* ((name
+          (if (eq key 'unassigned)
+              ""
+            (alist-get
+             'name
+             (cl-find
+              key
+              omnigent-sessions-projects
+              :key (lambda (row) (alist-get 'id row))
+              :test #'equal))))
+         (old (gethash key omnigent-sessions--project-lists))
+         (entry (cons limit (and (> limit 0) (cdr old))))
+         (archived omnigent-fetch-archived-sessions))
+    (when name
+      (puthash key entry omnigent-sessions--project-lists)
+      (if (zerop limit)
+          (run-hooks 'omnigent-sessions-change-hook)
+        (omnigent-transport-list-sessions
+         (lambda (status body)
+           (when (and (eq
+                       entry
+                       (gethash key omnigent-sessions--project-lists))
+                      (eq archived omnigent-fetch-archived-sessions))
+             (cond
+              ((not (omnigent-transport-success-p status))
+               (omnigent-sessions--error
+                "List project sessions" status
+                body))
+              ((not (omnigent-sessions--rows-p body 'data 'id))
+               (omnigent-sessions--error
+                "List project sessions" nil
+                "Invalid session list response"))
+              (t
+               (setcdr
+                entry
+                (or
+                 (cl-remove-if-not
+                  (lambda (row)
+                    (equal key (omnigent-sessions-project-key row)))
+                  (append (alist-get 'data body) nil))
+                 ;; Distinguish an empty result from a pending request.
+                 []))
+               (run-hooks 'omnigent-sessions-change-hook)))))
+         name limit)))))
+
+(defvar omnigent-sessions--project-request 0)
+
 (defvar omnigent-sessions-truncated nil
   "Non-nil when the server reports more sessions than were fetched.")
 (defvar omnigent-sessions-updates nil
@@ -87,7 +176,12 @@
                rows)))
       (setq omnigent-sessions-truncated
             (eq (alist-get 'has_more body) t))
-      (run-hooks 'omnigent-sessions-change-hook)))))
+      (run-hooks 'omnigent-sessions-change-hook)
+      (maphash
+       (lambda (key entry)
+         (when (> (car entry) 0)
+           (omnigent-sessions-fetch-project key (car entry))))
+       omnigent-sessions--project-lists)))))
 
 (defun omnigent-sessions--frame (frame)
   "Apply session update FRAME and notify the session hooks.
@@ -188,9 +282,40 @@ Signal a user error if ID already has a different live buffer or the
         (kill-buffer-and-window))
       (kill-buffer buffer))))
 
+(defun omnigent-sessions-refresh-projects ()
+  "Fetch the project list and notify the session list on success."
+  (let ((number (cl-incf omnigent-sessions--project-request)))
+    (omnigent-transport-request
+     "GET" "/v1/projects"
+     (lambda (status body)
+       (when (= number omnigent-sessions--project-request)
+         (cond
+          ((not (omnigent-transport-success-p status))
+           (omnigent-sessions--error "List projects" status body))
+          ((not (omnigent-sessions--rows-p body 'data 'id 'name))
+           (omnigent-sessions--error "List projects" nil
+                                     "Invalid project list"))
+          (t
+           (setq omnigent-sessions-projects
+                 (append (alist-get 'data body) nil))
+           (run-hooks 'omnigent-sessions-change-hook))))))))
+
+(defun omnigent-sessions-move (id project-id)
+  "Move session ID to PROJECT-ID.  An empty string unassigns it."
+  (omnigent-transport--request
+   id "PATCH" (omnigent-transport--session-path id)
+   (lambda (status body)
+     (if (omnigent-transport-success-p status)
+         (omnigent-sessions-refresh)
+       (omnigent-sessions--error "Move session" status body)))
+   `(("project_id" . ,project-id))))
+
 (defun omnigent-sessions-reset ()
   "Forget state from the current server."
   (cl-incf omnigent-sessions--refresh-number)
+  (cl-incf omnigent-sessions--project-request)
+  (setq omnigent-sessions-projects nil)
+  (clrhash omnigent-sessions--project-lists)
   (when omnigent-sessions-updates
     (omnigent-transport-stop-session-updates
      omnigent-sessions-updates))
