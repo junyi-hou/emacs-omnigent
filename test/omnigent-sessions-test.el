@@ -51,7 +51,7 @@
   (let (opened
         options)
     (cl-letf (((symbol-function 'omnigent--create-read-profile)
-               (lambda (_draft callback &optional _edit)
+               (lambda (_draft callback &rest _options)
                  (funcall callback)))
               ((symbol-function 'omnigent-sessions-fork)
                (lambda (id data callback)
@@ -274,6 +274,34 @@
        (equal
         (cdr (assoc "sandbox_profile_revision" payload)) "revision"))
       (should-not (assoc "sandbox_provider" payload)))))
+
+(ert-deftest omnigent-sessions-create-canceled-location-restores-menu
+    ()
+  "Cancel host or workspace selection without changing the menu draft."
+  (dolist (hosts
+           '([((host_id . "one") (status . "online"))]
+             [((host_id . "one") (status . "online"))
+              ((host_id . "two") (status . "online"))]))
+    (let* ((draft
+            (list omnigent-transport--generation '(title . "Draft")))
+           (omnigent--create-draft draft)
+           restored)
+      (cl-letf (((symbol-function 'omnigent-transport-request)
+                 (lambda (method path callback &optional _data)
+                   (should (equal method "GET"))
+                   (should (equal path "/v1/hosts"))
+                   (funcall callback 200 (list (cons 'hosts hosts)))))
+                ((symbol-function
+                  'omnigent-sessions--workspace-directories)
+                 (lambda (_host _path callback &rest _args)
+                   (funcall callback 200 nil)))
+                ((symbol-function 'completing-read)
+                 (lambda (&rest _) (signal 'quit nil)))
+                ((symbol-function 'omnigent--create-menu)
+                 (lambda () (setq restored omnigent--create-draft))))
+        (omnigent--create-submit)
+        (should (eq restored draft))
+        (should (equal (cdr draft) '((title . "Draft"))))))))
 
 (ert-deftest omnigent-sessions-refreshes-after-reconnect ()
   (let (opened

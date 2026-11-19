@@ -301,6 +301,7 @@ When HOST-ID is non-nil, expand the path through its configured mapping."
 (defun omnigent-sessions--read-workspace
     (callback &optional session fixed-host fixed-workspace)
   "Select a host and workspace asynchronously, then call CALLBACK with their cons.
+Call CALLBACK with nil if the user cancels selection.
 Use the sole online host, or prompt when several hosts are online.
 Use SESSION as a workspace default when its host matches.
 Use FIXED-HOST or FIXED-WORKSPACE when already configured.
@@ -363,7 +364,8 @@ Use SESSION for context and retain FIXED-HOST and FIXED-WORKSPACE."
                        nil))
                   (caar choices)))
                (host-id (cdr (assoc choice choices))))
-          (when choice
+          (if (not choice)
+              (funcall callback nil)
             (unless (= generation omnigent-transport--generation)
               (user-error
                "Server changed during workspace selection"))
@@ -504,7 +506,8 @@ Continue through CALLBACK after validating the path on GENERATION's server."
              (quit
               nil)))
         (setq active nil))
-      (when workspace
+      (if (not workspace)
+          (funcall callback nil)
         (unless (= generation omnigent-transport--generation)
           (user-error "Server changed during workspace selection"))
         (message "Checking workspace %s..." workspace)

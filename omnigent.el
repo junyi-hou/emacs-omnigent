@@ -338,10 +338,13 @@ When MENU is non-nil, restore the draft after a failed request."
                  (alist-get 'workspace fields))))
       (omnigent--create-pick-location draft
                                       (lambda (target)
-                                        (when target
+                                        (cond
+                                         (target
                                           (omnigent--create-resolve
                                            draft
-                                           nil menu)))
+                                           nil menu))
+                                         (menu
+                                          (omnigent--create-menu))))
                                       session t))
      ((not (alist-get 'agent_id fields))
       (omnigent-sessions--read-agent
@@ -356,8 +359,13 @@ When MENU is non-nil, restore the draft after a failed request."
              (omnigent--create-menu)))))))
      ((and (omnigent--create-managed-p)
            (not (alist-get 'sandbox_profile_id fields)))
-      (omnigent--create-read-profile
-       draft (lambda () (omnigent--create-send draft menu))))
+      (omnigent--create-read-profile draft
+                                     (lambda ()
+                                       (omnigent--create-send
+                                        draft menu))
+                                     nil
+                                     (when menu
+                                       #'omnigent--create-menu)))
      (t
       (omnigent--create-send draft menu)))))
 
@@ -495,12 +503,15 @@ When MENU is non-nil, restore the draft after a failed request."
        (omnigent-sessions--error "List sandbox providers" status body)
        (omnigent--create-menu)))))
 
-(defun omnigent--create-read-profile (draft callback &optional edit)
+(defun omnigent--create-read-profile
+    (draft callback &optional edit cancel)
   "Resolve the sandbox profile for DRAFT, then call CALLBACK on success.
-With EDIT, prompt even if the provider does not require a profile."
+With EDIT, prompt even if the provider does not require a profile.
+Call CANCEL on cancellation during required profile selection."
   (let ((provider (alist-get 'sandbox_provider (cdr draft))))
     (if provider
-        (omnigent--create-profiles draft provider callback edit)
+        (omnigent--create-profiles
+         draft provider callback edit cancel)
       (omnigent--create-discover
        draft "/v1/info"
        (lambda (status body)
@@ -509,7 +520,7 @@ With EDIT, prompt even if the provider does not require a profile."
                 (alist-get 'sandbox_provider body))
            (omnigent--create-profiles
             draft
-            (alist-get 'sandbox_provider body) callback edit))
+            (alist-get 'sandbox_provider body) callback edit cancel))
           ((not edit)
            (funcall callback))
           (t
@@ -517,9 +528,10 @@ With EDIT, prompt even if the provider does not require a profile."
             "Discover default sandbox provider" status body)
            (funcall callback))))))))
 
-(defun omnigent--create-profiles (draft provider callback edit)
+(defun omnigent--create-profiles (draft provider callback edit cancel)
   "Resolve a PROVIDER profile for DRAFT and call CALLBACK.
-When EDIT is non-nil, allow clearing the selection."
+When EDIT is non-nil, allow clearing the selection.
+Call CANCEL when required selection does not complete."
   (omnigent--create-discover
    draft
    (concat
@@ -573,8 +585,10 @@ When EDIT is non-nil, allow clearing the selection."
             (alist-get 'sandbox_profile_id (cdr draft))
             (alist-get 'id profile)
             (alist-get 'sandbox_profile_revision (cdr draft)) (alist-get 'revision profile)))
-         (when (or edit profile)
-           (funcall callback))))))))
+         (if (or edit profile)
+             (funcall callback)
+           (when cancel
+             (funcall cancel)))))))))
 
 (defun omnigent--create-profile ()
   "Choose an authorized sandbox profile."
@@ -746,16 +760,22 @@ When EDIT is non-nil, allow clearing the selection."
   "Return non-nil when the active fork requests a managed sandbox."
   (equal (alist-get 'host_type omnigent--fork-draft) "managed"))
 
-(defun omnigent--fork-send (draft)
-  "Resolve and create the fork described by DRAFT."
+(defun omnigent--fork-send (draft &optional menu)
+  "Resolve and create the fork described by DRAFT.
+When MENU is non-nil, return to it if profile selection is canceled."
   (unless (= (alist-get 'generation draft)
              omnigent-transport--generation)
     (user-error "Server changed during fork setup"))
   (let ((sandbox (alist-get 'sandbox draft)))
     (if (and (equal (alist-get 'host_type draft) "managed")
              (not (alist-get 'sandbox_profile_id (cdr sandbox))))
-        (omnigent--create-read-profile
-         sandbox (lambda () (omnigent--fork-request draft)))
+        (omnigent--create-read-profile sandbox
+                                       (lambda ()
+                                         (omnigent--fork-request
+                                          draft))
+                                       nil
+                                       (when menu
+                                         #'omnigent--fork-menu))
       (omnigent--fork-request draft))))
 
 (defun omnigent--fork-request (draft)
@@ -843,7 +863,7 @@ With prefix argument EDIT, open the fork menu."
 (defun omnigent--fork-submit ()
   "Submit the connected-host fork draft."
   (interactive)
-  (omnigent--fork-send omnigent--fork-draft))
+  (omnigent--fork-send omnigent--fork-draft t))
 
 (defun omnigent--fork-location ()
   "Choose a connected host and workspace for the fork."
@@ -854,17 +874,18 @@ With prefix argument EDIT, open the fork menu."
       (user-error "Server changed during fork setup"))
     (omnigent-sessions--read-workspace
      (lambda (target)
-       (when (and target
-                  (eq draft omnigent--fork-draft)
+       (when (and (eq draft omnigent--fork-draft)
                   (= (alist-get 'generation draft)
                      omnigent-transport--generation))
-         (unless (and (equal (car target) (alist-get 'host_id draft))
-                      (equal
-                       (cdr target) (alist-get 'workspace draft)))
-           (setf (alist-get 'branch omnigent--fork-draft) nil))
-         (setf
-          (alist-get 'host_id omnigent--fork-draft) (car target)
-          (alist-get 'workspace omnigent--fork-draft) (cdr target))
+         (when target
+           (unless (and (equal
+                         (car target) (alist-get 'host_id draft))
+                        (equal
+                         (cdr target) (alist-get 'workspace draft)))
+             (setf (alist-get 'branch omnigent--fork-draft) nil))
+           (setf
+            (alist-get 'host_id omnigent--fork-draft) (car target)
+            (alist-get 'workspace omnigent--fork-draft) (cdr target)))
          (omnigent--fork-menu)))
      draft)))
 

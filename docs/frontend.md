@@ -59,6 +59,9 @@ visible by merging the fetched list with watched sessions.
 Run `omnigent-sessions-create` for quick creation. With a prefix argument,
 open a Transient that displays the draft values. Use `RET` to submit.
 The Transient edits only this draft and does not save user options.
+Cancel a picker with `C-g` to return to the menu with the same draft.
+Cancel at the menu to leave the creation flow. In quick creation,
+canceling a required picker ends the command.
 
 Use `h` to set the execution host type. For an external host, show host,
 workspace, and worktree controls. For a managed sandbox, show provider,
