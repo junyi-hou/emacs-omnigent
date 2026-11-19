@@ -133,6 +133,8 @@ A URL can include a #branch fragment.  Nil uses an empty workspace."
     (set-keymap-parent map special-mode-map)
     (define-key map (kbd "RET") #'omnigent-ui-sessions-open)
     (define-key map (kbd "g") #'omnigent-ui-refresh)
+    (define-key map (kbd "+") #'omnigent-ui-increase-session-limit)
+    (define-key map (kbd "-") #'omnigent-ui-decrease-session-limit)
     (define-key map (kbd "A") #'omnigent-ui-toggle-archived-sessions)
     (define-key map (kbd "c") #'omnigent-sessions-create)
     (define-key map (kbd "a") #'omnigent-ui-archive)
@@ -239,8 +241,8 @@ A nil return value omits the header.  Authentication headers take precedence."
      (string :tag "constant header value")))
   :group 'omnigent-transport)
 
-(defcustom omnigent-transport-session-limit 1000
-  "Maximum number of sessions to fetch, between 1 and 1000."
+(defcustom omnigent-transport-session-limit 20
+  "Number of sessions to fetch initially, between 1 and 1000."
   :type 'integer
   :group 'omnigent-transport)
 

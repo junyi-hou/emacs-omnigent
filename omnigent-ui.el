@@ -195,12 +195,11 @@
 (defun omnigent-ui-start ()
   "Load server data and open the session list after connection."
   (unless omnigent-sessions-updates
-    (let ((omnigent-transport-session-limit 1000))
-      (omnigent-sessions-start
-       (lambda ()
-         (when (and omnigent-open-session-list-on-connect
-                    (not (get-buffer-window "*omnigent-sessions*")))
-           (omnigent-ui-sessions))))))
+    (omnigent-sessions-start
+     (lambda ()
+       (when (and omnigent-open-session-list-on-connect
+                  (not (get-buffer-window "*omnigent-sessions*")))
+         (omnigent-ui-sessions)))))
   (unless omnigent-ui--idle-timer
     (setq omnigent-ui--idle-timer
           (run-with-idle-timer 10 t #'omnigent-ui-refresh))))

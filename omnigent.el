@@ -1666,8 +1666,29 @@ When EFFORT is nil, prompt with the current model's supported levels."
 (defun omnigent-ui-refresh ()
   "Refresh the full root session list."
   (interactive)
-  (let ((omnigent-transport-session-limit 1000))
-    (omnigent-sessions-refresh)))
+  (omnigent-sessions-refresh))
+
+(defun omnigent-ui-increase-session-limit (amount)
+  "Increase the fetched session limit by numeric prefix argument AMOUNT."
+  (interactive "p")
+  (setq omnigent-transport-session-limit
+        (min 1000
+             (+ (max 1 (min 1000 omnigent-transport-session-limit))
+                (max 0 amount))))
+  (omnigent-ui-refresh)
+  (message "Fetching up to %d sessions"
+           omnigent-transport-session-limit))
+
+(defun omnigent-ui-decrease-session-limit (amount)
+  "Decrease the fetched session limit by numeric prefix argument AMOUNT."
+  (interactive "p")
+  (setq omnigent-transport-session-limit
+        (max 1
+             (- (max 1 (min 1000 omnigent-transport-session-limit))
+                (max 0 amount))))
+  (omnigent-ui-refresh)
+  (message "Fetching up to %d sessions"
+           omnigent-transport-session-limit))
 
 (defun omnigent-ui-toggle-archived-sessions ()
   "Toggle archived sessions in the list and refresh the session list."
