@@ -140,9 +140,9 @@ A URL can include a #branch fragment.  Nil uses an empty workspace."
     (define-key map (kbd "+") #'omnigent-ui-increase-session-limit)
     (define-key map (kbd "-") #'omnigent-ui-decrease-session-limit)
     (define-key map (kbd "A") #'omnigent-ui-toggle-archived-sessions)
-    (define-key map (kbd "c") #'omnigent-sessions-create)
-    (define-key map (kbd "a") #'omnigent-ui-archive)
-    (define-key map (kbd "d") #'omnigent-ui-delete)
+    (define-key map (kbd "c") #'omnigent-ui-create-at-point)
+    (define-key map (kbd "a") #'omnigent-ui-archive-at-point)
+    (define-key map (kbd "d") #'omnigent-ui-delete-at-point)
     (define-key map (kbd "C-c C-n") #'omnigent-sessions-create)
     map)
   "Keymap for `omnigent-ui-sessions-mode'."

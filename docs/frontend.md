@@ -58,6 +58,12 @@ number of sessions shown in that group. A numeric prefix changes the limit by
 that amount. A limit of zero hides the group's session rows. Project fetches
 use the current archive setting.
 
+On a session row, `c` creates a session, `d` deletes it, and `a` toggles
+archive. On a project heading, `c` creates a project and `d` deletes the
+project after confirmation. The server keeps its sessions. The server has no
+project archive action. In an empty list, use `c` to create a project or
+`C-c C-n` to create a session.
+
 Use the session state face on the whole line, with a separate attention face on
 `!`. Provide faces for running, waiting, idle, failed, and archived sessions. Use
 the archived face for archived sessions regardless of their reported status. Make

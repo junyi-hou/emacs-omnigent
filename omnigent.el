@@ -1853,6 +1853,62 @@ When UNASSIGN is non-nil, offer to remove the project assignment."
                "enabled"
              "disabled")))
 
+(defun omnigent-ui-create-project ()
+  "Prompt for a name and create a server project."
+  (interactive)
+  (let ((generation omnigent-transport--generation)
+        (name (string-trim (read-string "New project name: "))))
+    (when (string-empty-p name)
+      (user-error "Project name is empty"))
+    (unless (= generation omnigent-transport--generation)
+      (user-error "Server changed during project creation"))
+    (omnigent-sessions-create-project name)))
+
+(defun omnigent-ui-create-at-point ()
+  "Create a session on a session row or a project on a heading."
+  (interactive)
+  (call-interactively
+   (if (omnigent-ui--session-id-at-point)
+       #'omnigent-sessions-create
+     #'omnigent-ui-create-project)))
+
+(defun omnigent-ui-delete-project ()
+  "Delete the project heading at point after confirmation."
+  (interactive)
+  (let ((id (omnigent-ui--project-at-point))
+        (generation omnigent-transport--generation))
+    (unless (stringp id)
+      (user-error "No server project at point"))
+    (let ((name
+           (alist-get
+            'name
+            (cl-find
+             id
+             omnigent-sessions-projects
+             :key (lambda (row) (alist-get 'id row))
+             :test #'equal))))
+      (when (y-or-n-p
+             (format "Delete project %s and keep its sessions? "
+                     (or name id)))
+        (unless (= generation omnigent-transport--generation)
+          (user-error "Server changed during project deletion"))
+        (omnigent-sessions-delete-project id)))))
+
+(defun omnigent-ui-delete-at-point ()
+  "Delete the project or session at point."
+  (interactive)
+  (call-interactively
+   (if (omnigent-ui--project-at-point)
+       #'omnigent-ui-delete-project
+     #'omnigent-ui-delete)))
+
+(defun omnigent-ui-archive-at-point ()
+  "Toggle archive on the session at point."
+  (interactive)
+  (when (omnigent-ui--project-at-point)
+    (user-error "The server does not support archiving projects"))
+  (omnigent-ui-archive))
+
 (defun omnigent-ui-archive ()
   "Toggle the selected session's archived state without deleting its history."
   (interactive)

@@ -21,9 +21,16 @@
   (make-hash-table :test 'equal)
   "Map project keys to a list of limit, fetched rows, and whether more exist.")
 
+(defvar omnigent-sessions--missing-projects
+  (make-hash-table :test 'equal))
+
 (defun omnigent-sessions-project-key (session)
   "Return SESSION's project ID or the symbol unassigned."
-  (or (alist-get 'project_id session) 'unassigned))
+  (let ((id (alist-get 'project_id session)))
+    (if (and id
+             (not (gethash id omnigent-sessions--missing-projects)))
+        id
+      'unassigned)))
 
 (defun omnigent-sessions-visible ()
   "Return global session rows with project fetches applied."
@@ -302,6 +309,50 @@ Signal a user error if ID already has a different live buffer or the
             (append omnigent-sessions-projects (list project)))
       (run-hooks 'omnigent-sessions-change-hook))))
 
+(defun omnigent-sessions-create-project (name)
+  "Create a server project named NAME and reveal it in the session list."
+  (omnigent-transport-request
+   "POST" "/v1/projects"
+   (lambda (status body)
+     (cond
+      ((not (omnigent-transport-success-p status))
+       (omnigent-sessions--error "Create project" status body))
+      ((not
+        (and (listp body)
+             (stringp (alist-get 'id body))
+             (stringp (alist-get 'name body))))
+       (omnigent-sessions--error "Create project" nil
+                                 "Invalid project response"))
+      (t
+       (setq omnigent-sessions--project-catalog nil)
+       (omnigent-sessions-show-project body)
+       (omnigent-sessions-fetch-project
+        (alist-get 'id body)
+        (max 1 (min 1000 omnigent-transport-session-limit)))
+       (run-hooks 'omnigent-sessions-change-hook))))
+   `(("name" . ,name))))
+
+(defun omnigent-sessions-delete-project (id)
+  "Delete server project ID and refresh the session list."
+  (omnigent-transport-request
+   "DELETE" (concat "/v1/projects/" (url-hexify-string id))
+   (lambda (status body)
+     (if (omnigent-transport-success-p status)
+         (progn
+           (setq
+            omnigent-sessions--project-catalog nil
+            omnigent-sessions-projects
+            (cl-remove
+             id
+             omnigent-sessions-projects
+             :key (lambda (row) (alist-get 'id row))
+             :test #'equal))
+           (puthash id t omnigent-sessions--missing-projects)
+           (remhash id omnigent-sessions--project-lists)
+           (run-hooks 'omnigent-sessions-change-hook)
+           (omnigent-sessions-refresh))
+       (omnigent-sessions--error "Delete project" status body)))))
+
 (defun omnigent-sessions-refresh-projects ()
   "Fetch details for projects represented in the global session list."
   (dolist (session omnigent-sessions)
@@ -361,6 +412,7 @@ Signal a user error if ID already has a different live buffer or the
   "Forget state from the current server."
   (cl-incf omnigent-sessions--refresh-number)
   (clrhash omnigent-sessions--pending-projects)
+  (clrhash omnigent-sessions--missing-projects)
   (setq
    omnigent-sessions-projects nil
    omnigent-sessions--project-catalog nil)
