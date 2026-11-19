@@ -271,10 +271,10 @@ only formats text; the caller decides how to present it."
    "GET"
    (format
     "/v1/sessions?limit=%d&include_archived=%s&sort_by=updated_at&order=desc"
+    (max 1 (min 1000 omnigent-transport-session-limit))
     (if omnigent-fetch-archived-sessions
         "true"
-      "false")
-    (max 1 (min 1000 omnigent-transport-session-limit)))
+      "false"))
    callback))
 
 (defun omnigent-transport-set-session-archived
