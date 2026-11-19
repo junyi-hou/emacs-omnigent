@@ -21,6 +21,12 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
   "Agent display name from the latest successful session snapshot.")
 (defvar-local omnigent-conversation-header-data nil
   "Session settings and context usage from snapshots and stream events.")
+(defvar omnigent-conversation--initial-sandbox-status nil
+  "Sandbox launch status supplied while opening a newly created session.")
+(defvar-local omnigent-conversation--sandbox-status nil
+  "Current sandbox launch status, or nil after launch succeeds.")
+(defvar-local omnigent-conversation--managed nil
+  "Non-nil once this buffer identifies a managed sandbox session.")
 (defvar-local omnigent-conversation--permission-read-only nil)
 (defvar-local omnigent-conversation--elicitations nil)
 (defvar-local omnigent-conversation--elicitation-drafts nil)
@@ -380,6 +386,18 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
               omnigent-conversation--event-handlers)
         (`(,_ . ,handler) (funcall handler data)))
       (pcase name
+        ("session.sandbox_status"
+         (when (stringp (alist-get 'stage data))
+           (setq
+            omnigent-conversation--managed t
+            omnigent-conversation--sandbox-status
+            (unless (equal (alist-get 'stage data) "ready")
+              data))
+           (omnigent-conversation--read-only)
+           (when (and (equal (alist-get 'stage data) "ready")
+                      omnigent-conversation--stream)
+             (omnigent-transport-refresh-session-stream
+              omnigent-conversation--stream))))
         ("session.model" (setf (alist-get
                 'llm_model omnigent-conversation-header-data)
                (alist-get 'model data)))
@@ -441,7 +459,8 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
           (or omnigent-conversation--invalid
               omnigent-conversation--loading
               (not omnigent-conversation--connected)
-              omnigent-conversation--permission-read-only))
+              omnigent-conversation--permission-read-only
+              (and omnigent-conversation--sandbox-status t)))
     (unless (eq previous buffer-read-only)
       (omnigent-conversation--notify-submission-change))))
 
@@ -574,6 +593,37 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
          omnigent-conversation--pending-event-bytes 0)
         (setq omnigent-conversation--permission-read-only
               (equal (alist-get 'permission_level body) 1))
+        (let* ((status (alist-get 'sandbox_status body))
+               (stage (alist-get 'stage status)))
+          (when (or stage
+                    (alist-get 'sandbox_profile body)
+                    (assq
+                     'omnigent.sandbox.repo (alist-get 'labels body))
+                    (assq
+                     'omnigent.sandbox.repo.0
+                     (alist-get 'labels body))
+                    (assq
+                     'omnigent.sandbox.requested_host_id
+                     (alist-get 'labels body)))
+            (setq omnigent-conversation--managed t))
+          (setq omnigent-conversation--sandbox-status
+                (cond
+                 ((equal stage "ready")
+                  nil)
+                 (stage
+                  status)
+                 ((and omnigent-conversation--sandbox-status
+                       (equal (alist-get 'status body) "failed"))
+                  (if (equal
+                       (alist-get
+                        'stage omnigent-conversation--sandbox-status)
+                       "failed")
+                      omnigent-conversation--sandbox-status
+                    '((stage . "failed"))))
+                 ((alist-get 'host_id body)
+                  nil)
+                 (t
+                  omnigent-conversation--sandbox-status))))
         (setq
          omnigent-conversation-host-id (alist-get 'host_id body)
          omnigent-conversation-agent-name (alist-get 'agent_name body)

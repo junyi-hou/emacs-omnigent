@@ -466,12 +466,17 @@ When MENU is non-nil, restore the draft after a failed request."
                                  "external"
                                  "managed")))
 
+(defvar omnigent--fork-draft nil
+  "Active fork settings, including the sandbox draft for a managed fork.")
+
 (defun omnigent--create-discover (draft path callback)
   "Fetch PATH for DRAFT and call CALLBACK with status and data."
   (omnigent-transport-request
    "GET" path
    (lambda (status body)
-     (when (and (eq draft omnigent--create-draft)
+     (when (and (or (eq draft omnigent--create-draft)
+                    (eq
+                     draft (alist-get 'sandbox omnigent--fork-draft)))
                 (= (car draft) omnigent-transport--generation))
        (funcall callback status body)))))
 
@@ -510,7 +515,7 @@ With EDIT, prompt even if the provider does not require a profile."
           (t
            (omnigent-sessions--error
             "Discover default sandbox provider" status body)
-           (omnigent--create-menu))))))))
+           (funcall callback))))))))
 
 (defun omnigent--create-profiles (draft provider callback edit)
   "Resolve a PROVIDER profile for DRAFT and call CALLBACK.
@@ -533,7 +538,7 @@ When EDIT is non-nil, allow clearing the selection."
       ((not (omnigent-transport-success-p status))
        (omnigent-sessions--error "List sandbox profiles" status body)
        (when edit
-         (omnigent--create-menu)))
+         (funcall callback)))
       (t
        (let* ((choices
                (mapcar
@@ -568,7 +573,7 @@ When EDIT is non-nil, allow clearing the selection."
             (alist-get 'sandbox_profile_id (cdr draft))
             (alist-get 'id profile)
             (alist-get 'sandbox_profile_revision (cdr draft)) (alist-get 'revision profile)))
-         (when (or edit selection)
+         (when (or edit profile)
            (funcall callback))))))))
 
 (defun omnigent--create-profile ()
@@ -737,40 +742,74 @@ When EDIT is non-nil, allow clearing the selection."
      branch
      (apply-partially #'omnigent--fork-launched session)))))
 
-(defvar omnigent--fork-draft nil
-  "Active connected-host fork settings.")
+(defun omnigent--fork-managed-p ()
+  "Return non-nil when the active fork requests a managed sandbox."
+  (equal (alist-get 'host_type omnigent--fork-draft) "managed"))
 
 (defun omnigent--fork-send (draft)
-  "Create the fork described by DRAFT and launch its runner."
-  (let ((generation (alist-get 'generation draft))
-        (host (alist-get 'host_id draft))
-        (workspace (alist-get 'workspace draft))
-        (branch (alist-get 'branch draft))
-        options)
+  "Resolve and create the fork described by DRAFT."
+  (unless (= (alist-get 'generation draft)
+             omnigent-transport--generation)
+    (user-error "Server changed during fork setup"))
+  (let ((sandbox (alist-get 'sandbox draft)))
+    (if (and (equal (alist-get 'host_type draft) "managed")
+             (not (alist-get 'sandbox_profile_id (cdr sandbox))))
+        (omnigent--create-read-profile
+         sandbox (lambda () (omnigent--fork-request draft)))
+      (omnigent--fork-request draft))))
+
+(defun omnigent--fork-request (draft)
+  "Create the fork in DRAFT and attach an external runner when required."
+  (let* ((generation (alist-get 'generation draft))
+         (host (alist-get 'host_id draft))
+         (workspace (alist-get 'workspace draft))
+         (branch (alist-get 'branch draft))
+         (managed (equal (alist-get 'host_type draft) "managed"))
+         (fields
+          (if managed
+              (append (cdr (alist-get 'sandbox draft)) draft)
+            draft))
+         options)
     (unless (= generation omnigent-transport--generation)
       (user-error "Server changed during fork setup"))
-    (unless (and (stringp host)
-                 (not (string-empty-p host))
-                 (stringp workspace)
-                 (not (string-empty-p workspace)))
+    (unless (or managed
+                (and (stringp host)
+                     (not (string-empty-p host))
+                     (stringp workspace)
+                     (not (string-empty-p workspace))))
       (user-error "Choose an execution host and workspace"))
     (dolist (field
-             '(agent_id
-               up_to_response_id model_override reasoning_effort))
-      (when-let* ((value (alist-get field draft)))
+             (append
+              '(agent_id
+                up_to_response_id model_override reasoning_effort)
+              (when managed
+                '(host_type
+                  sandbox_provider
+                  sandbox_profile_id
+                  sandbox_profile_revision))))
+      (when-let* ((value (alist-get field fields)))
         (push (cons (symbol-name field) value) options)))
     (message "Forking session...")
     (omnigent-sessions-fork
      (alist-get 'source draft) options
      (lambda (status session)
        (when (= generation omnigent-transport--generation)
-         (omnigent--fork-created
-          host workspace branch status session))))))
+         (if (and managed
+                  (omnigent-transport-success-p status)
+                  (listp session)
+                  (stringp (alist-get 'id session))
+                  (not (string-empty-p (alist-get 'id session))))
+             (omnigent--fork-launched
+              (omnigent-sessions--seed-sandbox-status session)
+              status
+              nil)
+           (omnigent--fork-created
+            host workspace branch status session)))))))
 
 ;;;###autoload
 (defun omnigent-conversation-fork (edit)
-  "Fork the current session on its host and workspace.
-With prefix argument EDIT, open the connected-host fork menu."
+  "Fork the current session using its execution host type.
+With prefix argument EDIT, open the fork menu."
   (interactive "P")
   (unless (derived-mode-p 'omnigent-conversation-mode)
     (user-error "No Omnigent conversation in this buffer"))
@@ -785,16 +824,20 @@ With prefix argument EDIT, open the connected-host fork menu."
     (let ((draft
            `((source . ,omnigent-conversation-session-id)
              (generation . ,omnigent-transport--generation)
+             (host_type
+              .
+              ,(when omnigent-conversation--managed
+                 "managed"))
+             (sandbox . ,(list omnigent-transport--generation))
              (host_id . ,omnigent-conversation-host-id)
              (workspace
               .
               ,(alist-get
                 'workspace omnigent-conversation-header-data))
              (responses . ,(delete-dups responses)))))
+      (setq omnigent--fork-draft draft)
       (if edit
-          (progn
-            (setq omnigent--fork-draft draft)
-            (omnigent--fork-menu))
+          (omnigent--fork-menu)
         (omnigent--fork-send draft)))))
 
 (defun omnigent--fork-submit ()
@@ -908,6 +951,55 @@ With prefix argument EDIT, open the connected-host fork menu."
                                "ultra")
                              "Inherit"))
 
+(defun omnigent--fork-host-type ()
+  "Choose a connected execution host or a new managed sandbox."
+  (interactive)
+  (omnigent--fork-read-field 'host_type "Execution host type: "
+                             '("external" "managed")
+                             "external"))
+
+(defun omnigent--fork-provider ()
+  "Choose a provider for the new fork sandbox."
+  (interactive)
+  (let* ((draft (alist-get 'sandbox omnigent--fork-draft))
+         (fields (cdr draft)))
+    (omnigent--create-discover
+     draft "/v1/info"
+     (lambda (status body)
+       (if (omnigent-transport-success-p status)
+           (condition-case nil
+               (let* ((selection
+                       (completing-read
+                        "Sandbox provider: "
+                        (cons
+                         "Server default"
+                         (append
+                          (alist-get 'sandbox_providers body) nil))
+                        nil t nil nil "Server default"))
+                      (provider
+                       (unless (equal selection "Server default")
+                         selection)))
+                 (unless (equal
+                          provider
+                          (alist-get 'sandbox_provider fields))
+                   (setf
+                    (alist-get 'sandbox_provider (cdr draft)) provider
+                    (alist-get 'sandbox_profile_id (cdr draft)) nil
+                    (alist-get 'sandbox_profile_revision (cdr draft)) nil)))
+             (quit
+              nil))
+         (omnigent-sessions--error
+          "List sandbox providers" status body))
+       (omnigent--fork-menu)))))
+
+(defun omnigent--fork-profile ()
+  "Choose an authorized profile for the new fork sandbox."
+  (interactive)
+  (omnigent--create-read-profile (alist-get
+                                  'sandbox omnigent--fork-draft)
+                                 #'omnigent--fork-menu
+                                 t))
+
 (defun omnigent--fork-label (field label default)
   "Show fork FIELD under LABEL, with DEFAULT when unset."
   (format "%s (%s)"
@@ -915,8 +1007,14 @@ With prefix argument EDIT, open the connected-host fork menu."
           (or (alist-get field omnigent--fork-draft) default)))
 
 (transient-define-prefix
- omnigent--fork-menu () "Review a fork on a connected execution host."
- ["Location" ("w" omnigent--fork-location
+ omnigent--fork-menu () "Review the location and settings for a fork."
+ ["Location" ("h" omnigent--fork-host-type
+   :description
+   (lambda ()
+     (omnigent--fork-label
+      'host_type "Execution host type" "external")))
+  ("w" omnigent--fork-location
+   :if-not omnigent--fork-managed-p
    :description
    (lambda ()
      (format "Host and workspace (%s %s)"
@@ -925,8 +1023,14 @@ With prefix argument EDIT, open the connected-host fork menu."
              (or (alist-get 'workspace omnigent--fork-draft) ""))))
   ("g"
    omnigent--fork-branch
+   :if-not omnigent--fork-managed-p
    :description
    (lambda () (omnigent--fork-label 'branch "Worktree" "In place")))]
+ ["Managed sandbox"
+  :if
+  omnigent--fork-managed-p
+  ("s" "Sandbox provider" omnigent--fork-provider)
+  ("i" "Sandbox profile" omnigent--fork-profile)]
  ["Session" ("a" omnigent--fork-agent
    :description
    (lambda ()
@@ -973,6 +1077,8 @@ Use `omnigent-conversation-open' to create a conversation buffer."
    (error "A session ID is required"))
  (setq
   omnigent-conversation-session-id omnigent-conversation--session-id
+  omnigent-conversation--sandbox-status omnigent-conversation--initial-sandbox-status
+  omnigent-conversation--managed (and omnigent-conversation--initial-sandbox-status t)
   omnigent-conversation--items (make-hash-table :test 'equal)
   omnigent-conversation--elicitations (make-hash-table :test 'equal)
   omnigent-conversation--elicitation-drafts (make-hash-table :test 'equal)

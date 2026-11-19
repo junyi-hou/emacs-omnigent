@@ -121,9 +121,6 @@ deleted file. Omnigent does not distinguish that failure from a new file.
 - [ ] Fetch sessions incrementally: load 20 first, then let the user fetch more.
 - [ ] Fetch older conversation items on demand.
 - [ ] Support side chat.
-- [ ] Add managed sandbox provisioning feedback for session creation and forks.
-      Show an animated “Provisioning sandbox…” message while waiting. Open the
-      conversation when its runner is ready. Report failures with the session ID.
 
 ## Sources
 

@@ -236,8 +236,10 @@
 
 (defun omnigent-ui-created (session)
   "Open the newly created SESSION."
-  (omnigent-ui-open (alist-get 'id session)
-                    (alist-get 'title session)))
+  (let ((omnigent-conversation--initial-sandbox-status
+         (alist-get 'sandbox_status session)))
+    (omnigent-ui-open (alist-get 'id session)
+                      (alist-get 'title session))))
 
 (defun omnigent-ui--selection (&rest _ignored)
   "Track the most recently selected conversation, ignoring other buffers."
@@ -1201,47 +1203,100 @@ Signal an error if point is not in a foldable block."
     (force-mode-line-update)))
 
 (defvar-local omnigent-ui--busy-overlay nil)
+(defvar-local omnigent-ui--sandbox-overlay nil
+  "Overlay for the sandbox status block before the composer.")
 (defvar-local omnigent-ui--busy-timer nil)
 (defvar-local omnigent-ui--busy-frame 0)
 (defvar-local omnigent-ui--transcript-timer nil)
 
+(defun omnigent-ui--sandbox-animating-p ()
+  "Return non-nil when the sandbox status needs an animated spinner."
+  (and omnigent-conversation--sandbox-status
+       (not omnigent-conversation--invalid)
+       (not
+        (member
+         (alist-get
+          'stage omnigent-conversation--sandbox-status)
+         '("failed" "action_required")))))
+
+(defun omnigent-ui--sandbox-render (frame)
+  "Render the sandbox status block with spinner FRAME."
+  (when (overlayp omnigent-ui--sandbox-overlay)
+    (let* ((status omnigent-conversation--sandbox-status)
+           (stage (alist-get 'stage status))
+           (text
+            (pcase stage
+              ("failed" (format "Sandbox provisioning failed%s"
+                       (if-let* ((err (alist-get 'error status)))
+                         (format " (%s)" err)
+                         "")))
+              ("ready" nil)
+              ("action_required" (or (alist-get 'details status)
+                   "Sandbox provisioning needs your attention"))
+              ("cloning" "Cloning repositories…")
+              ("starting" "Connecting host…")
+              ("connecting" "Starting agent…")
+              ((pred stringp) "Provisioning sandbox…"))))
+      (move-overlay
+       omnigent-ui--sandbox-overlay
+       omnigent-ui--request-start
+       omnigent-ui--request-start)
+      (overlay-put
+       omnigent-ui--sandbox-overlay 'before-string
+       (when text
+         (propertize (format "   %s%s\n\n"
+                             (if (omnigent-ui--sandbox-animating-p)
+                                 (concat frame " ")
+                               "")
+                             text)
+                     'face
+                     (if (equal stage "failed")
+                         'omnigent-ui-error
+                       'shadow)))))))
+
 (defun omnigent-ui--busy-tick (buffer)
-  "Advance the busy indicator in BUFFER."
+  "Advance busy indicators in BUFFER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
-      (when (and omnigent-conversation--invalid
-                 omnigent-ui--busy-timer)
-        (cancel-timer omnigent-ui--busy-timer)
-        (setq omnigent-ui--busy-timer nil))
-      (when (overlayp omnigent-ui--busy-overlay)
-        (let ((frame
-               (if (and omnigent-conversation--response-id
-                        (not omnigent-conversation--invalid))
-                   (prog1 (aref
-                           ["|" "/" "-" "\\"]
-                           (% omnigent-ui--busy-frame 4))
-                     (cl-incf omnigent-ui--busy-frame))
-                 " ")))
-          (unless (equal
-                   (overlay-get
-                    omnigent-ui--busy-overlay 'before-string)
-                   frame)
-            (overlay-put
-             omnigent-ui--busy-overlay 'before-string frame)))))))
+      (let* ((responding
+              (and omnigent-conversation--response-id
+                   (not omnigent-conversation--invalid)))
+             (frame
+              (aref
+               ["|" "/" "-" "\\"] (mod omnigent-ui--busy-frame 4))))
+        (when (or responding (omnigent-ui--sandbox-animating-p))
+          (cl-incf omnigent-ui--busy-frame))
+        (when (overlayp omnigent-ui--busy-overlay)
+          (overlay-put
+           omnigent-ui--busy-overlay 'before-string
+           (if responding
+               frame
+             " ")))
+        (omnigent-ui--sandbox-render frame)))))
 
 (defun omnigent-ui--busy-update ()
-  "Start or stop the prompt animation for the active response."
-  (if (and omnigent-conversation--response-id
-           (not omnigent-conversation--invalid))
-      (unless omnigent-ui--busy-timer
-        (omnigent-ui--busy-tick (current-buffer))
-        (setq omnigent-ui--busy-timer
-              (run-at-time 0.15 0.15 #'omnigent-ui--busy-tick
-                           (current-buffer))))
+  "Update the transcript and prompt busy indicators."
+  (cond
+   ((and (not omnigent-conversation--invalid)
+         (or omnigent-conversation--response-id
+             (omnigent-ui--sandbox-animating-p)))
+    (if omnigent-ui--busy-timer
+        (progn
+          (unless omnigent-conversation--response-id
+            (overlay-put
+             omnigent-ui--busy-overlay 'before-string " "))
+          (omnigent-ui--sandbox-render
+           (aref
+            ["|" "/" "-" "\\"] (mod (1- omnigent-ui--busy-frame) 4))))
+      (omnigent-ui--busy-tick (current-buffer))
+      (setq omnigent-ui--busy-timer
+            (run-at-time 0.15 0.15 #'omnigent-ui--busy-tick
+                         (current-buffer)))))
+   (t
     (when omnigent-ui--busy-timer
       (cancel-timer omnigent-ui--busy-timer)
       (setq omnigent-ui--busy-timer nil))
-    (omnigent-ui--busy-tick (current-buffer))))
+    (omnigent-ui--busy-tick (current-buffer)))))
 
 (defun omnigent-ui--busy-stop ()
   "Stop the prompt animation when the conversation closes."
@@ -1294,6 +1349,9 @@ Signal an error if point is not in a foldable block."
   (setq omnigent-ui--busy-overlay
         (make-overlay
          omnigent-ui--composer-label omnigent-ui--composer-label))
+  (setq omnigent-ui--sandbox-overlay
+        (make-overlay
+         omnigent-ui--request-start omnigent-ui--request-start))
   (omnigent-ui--busy-update)
   (add-hook 'kill-buffer-hook #'omnigent-ui--busy-stop nil t)
   (add-hook

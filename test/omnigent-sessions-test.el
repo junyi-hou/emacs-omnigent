@@ -45,6 +45,39 @@
           ("git" ("branch_name" . "feature")))))
       (should (equal (alist-get 'id opened) "fork")))))
 
+(ert-deftest omnigent-sessions-managed-fork-opens-during-provisioning
+    ()
+  "A managed fork opens by ID and lets the server launch its runner."
+  (let (opened
+        options)
+    (cl-letf (((symbol-function 'omnigent--create-read-profile)
+               (lambda (_draft callback &optional _edit)
+                 (funcall callback)))
+              ((symbol-function 'omnigent-sessions-fork)
+               (lambda (id data callback)
+                 (should (equal id "source"))
+                 (setq options data)
+                 (funcall callback 201 '((id . "fork")))))
+              ((symbol-function 'omnigent-sessions-launch-fork)
+               (lambda (&rest _)
+                 (ert-fail "Managed fork launched a host runner")))
+              ((symbol-function 'omnigent-sessions-refresh) #'ignore)
+              ((symbol-function 'omnigent-ui-created)
+               (lambda (session) (setq opened session))))
+      (with-temp-buffer
+        (setq
+         major-mode 'omnigent-conversation-mode
+         omnigent-conversation-session-id "source"
+         omnigent-conversation--managed t)
+        (omnigent-conversation-fork nil))
+      (should (equal options '(("host_type" . "managed"))))
+      (should (equal (alist-get 'id opened) "fork"))
+      (should
+       (equal
+        (alist-get
+         'stage (alist-get 'sandbox_status opened))
+        "provisioning")))))
+
 (ert-deftest omnigent-sessions-fork-launch-failure ()
   "Report the created fork ID when runner launch fails."
   (let (reported)

@@ -73,6 +73,19 @@ belongs to the active server. Do not resubmit automatically. See
 [session-tree.md](session-tree.md#session-creation) for defaults and
 request behavior.
 
+### Managed sandbox provisioning
+
+Open a managed session or fork when the server returns its ID. Show an
+animated status block before the composer while the agent starts. Keep
+the status outside the saved transcript and preserve any composer text.
+The composer is read-only while provisioning.
+
+Use the snapshot's `sandbox_status` on open and after reconnect. Update
+the block from `session.sandbox_status` events. On `ready`, remove the
+block and refresh session metadata. Show server instructions if the
+provider needs user action. On failure, stop the spinner and show the
+error in the session buffer.
+
 ## Conversation
 
 Use one buffer per session, named `*omnigent: TITLE [conv_XXXX]*`: the session

@@ -83,9 +83,9 @@ profile. Send the selected profile ID and revision.
 Managed requests omit the connected host and worktree settings. Optional
 Git repository URLs go in `workspaces`. A URL can include a
 `#branch` fragment. The server provisions the sandbox after creating
-the session. The current create flow opens the conversation as soon as
-it receives the session ID. Provisioning feedback and waiting for the
-runner are tracked in the [README TODO list](../README.md#todo).
+the session. Open the conversation as soon as the server returns its ID.
+Apply the same provisioning status rules to creation and forks. See
+[frontend.md](frontend.md#managed-sandbox-provisioning).
 
 For example, configure quick creation with a registered agent and the
 server's default sandbox provider.
@@ -172,9 +172,9 @@ archived sessions.
 client launches a new runner on the source host in the source workspace
 and opens the fork after launch succeeds.
 
-### Connected-host fork menu
+### Fork menu
 
-Keep the quick fork on the source host and workspace. Use
+For a connected host, keep the quick fork on the source host and workspace. Use
 `C-u C-c C-f` to open a Fork Transient with those values filled in.
 Use the same async host and workspace picker as session creation.
 Allow the user to choose a new worktree branch. Use the source agent
@@ -188,6 +188,13 @@ creates the fork, launch its runner on the selected host. If launch
 fails, report the fork ID so the user can find the session that
 already exists. Keep the fork request separate from runner launch
 so side chat can reuse it.
+
+For a managed fork, choose the managed host type in the menu. When the
+source is known to use a managed sandbox, the quick fork uses a new
+sandbox. The server inherits the source repositories. The client can
+select a provider and profile through the same discovery requests as
+creation. The fork request leaves host and workspace binding to the
+server.
 
 ## References
 

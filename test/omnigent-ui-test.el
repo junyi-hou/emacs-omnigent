@@ -309,6 +309,43 @@
           (should-not omnigent-ui--busy-timer))
       (omnigent-ui--busy-stop))))
 
+(ert-deftest omnigent-ui-sandbox-progress-recovers-and-clears ()
+  "Render snapshot and live sandbox progress without writing transcript items."
+  (omnigent-ui-test--conversation
+    (let ((snapshot
+           '((items . [])
+             (pending_inputs . [])
+             (pending_elicitations . []))))
+      (insert "draft")
+      (omnigent-conversation--snapshot
+       200 (cons '(sandbox_status (stage . "cloning")) snapshot))
+      (should buffer-read-only)
+      (should (timerp omnigent-ui--busy-timer))
+      (should
+       (string-match-p
+        "Cloning repositories"
+        (overlay-get omnigent-ui--sandbox-overlay 'before-string)))
+      (omnigent-conversation--event
+       "session.sandbox_status"
+       '((stage . "failed") (error . "Provider unavailable")))
+      (should buffer-read-only)
+      (should-not omnigent-ui--busy-timer)
+      (should
+       (string-match-p
+        "Provider unavailable"
+        (overlay-get omnigent-ui--sandbox-overlay 'before-string)))
+      (omnigent-conversation--event
+       "session.sandbox_status" '((stage . "ready")))
+      (should-not buffer-read-only)
+      (should-not
+       (overlay-get omnigent-ui--sandbox-overlay 'before-string))
+      (should-not omnigent-conversation--order)
+      (should
+       (equal
+        (buffer-substring-no-properties
+         omnigent-conversation--prompt-start (point-max))
+        "draft")))))
+
 (ert-deftest omnigent-ui-session-archive-and-delete-commands ()
   "Archive the selected session and require confirmation for permanent deletion."
   (dolist (conversation '(nil t))

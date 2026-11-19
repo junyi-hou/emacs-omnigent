@@ -595,7 +595,23 @@ When INHERIT is a label, offer it and pass the symbol inherit if selected."
         (push (cons (symbol-name (car field)) (cdr field)) payload)))
     (omnigent-transport-request
      "POST" "/v1/sessions"
-     (or callback #'omnigent-sessions--created) payload)))
+     (lambda (status body)
+       (funcall (or callback #'omnigent-sessions--created)
+                status
+                (if (and managed
+                         (omnigent-transport-success-p status))
+                    (omnigent-sessions--seed-sandbox-status body)
+                  body)))
+     payload)))
+
+(defun omnigent-sessions--seed-sandbox-status (session)
+  "Return a managed SESSION with initial provisioning status."
+  (if (and (listp session)
+           (stringp (alist-get 'id session))
+           (not (alist-get 'sandbox_status session))
+           (not (eq (alist-get 'runner_online session) t)))
+      (cons '(sandbox_status (stage . "provisioning")) session)
+    session))
 
 (defun omnigent-sessions--created (status session)
   "Refresh sessions and open SESSION after successful creation STATUS."
