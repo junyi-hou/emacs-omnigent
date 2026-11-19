@@ -1325,6 +1325,17 @@
               (puthash "window-a" data omnigent-ui--workspace-cache)
               (omnigent-ui--workspace-render "window-a" data))
             (omnigent-ui--workspace-display)
+            (let ((workspace
+                   (get-buffer-window
+                    (omnigent-ui--workspace-buffer "window-a"))))
+              (select-window workspace)
+              (omnigent-ui--workspace-display)
+              (should (eq workspace (selected-window)))
+              (should
+               (eq
+                workspace
+                (get-buffer-window
+                 (omnigent-ui--workspace-buffer "window-a")))))
             (let ((sessions (get-buffer-window "*omnigent-sessions*"))
                   (workspace
                    (get-buffer-window

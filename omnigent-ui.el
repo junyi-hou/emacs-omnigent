@@ -333,17 +333,21 @@
         (omnigent-ui--workspace-hide)
       (when (or omnigent-ui--workspace-visible
                 (and data (not omnigent-ui--workspace-closed)))
-        (let ((omnigent-ui--changing-windows t))
-          (omnigent-ui--workspace-hide)
-          (display-buffer-in-side-window
-           (omnigent-ui--workspace-buffer id)
-           (append
-            '((side . left) (slot . 1))
-            (when omnigent-side-window-width
-              `((window-width . ,omnigent-side-window-width)))
-            (when omnigent-workspace-window-height
-              `((window-height
-                 . ,omnigent-workspace-window-height)))))
+        (let* ((buffer (omnigent-ui--workspace-buffer id))
+               (visible-window
+                (get-buffer-window buffer (selected-frame))))
+          (unless visible-window
+            (let ((omnigent-ui--changing-windows t))
+              (omnigent-ui--workspace-hide)
+              (display-buffer-in-side-window
+               buffer
+               (append
+                '((side . left) (slot . 1))
+                (when omnigent-side-window-width
+                  `((window-width . ,omnigent-side-window-width)))
+                (when omnigent-workspace-window-height
+                  `((window-height
+                     . ,omnigent-workspace-window-height)))))))
           (setq omnigent-ui--workspace-visible t))))))
 
 (defun omnigent-ui--windows-changed (&rest _ignored)
