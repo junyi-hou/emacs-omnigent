@@ -1685,22 +1685,32 @@
              transient-mark-mode t)
             (cl-letf (((symbol-function 'omnigent-sessions-visible)
                        (lambda () rows))
+                      ((symbol-function 'current-time)
+                       (lambda () (seconds-to-time 121)))
                       ((symbol-function
                         'omnigent-workspace-host-mapping)
                        (lambda (_) 'local))
                       ((symbol-function 'completing-read)
                        (lambda (_prompt collection &rest _)
-                         (setq choices collection)
-                         (caar collection)))
+                         (let* ((metadata
+                                 (completion-metadata
+                                  "" collection nil))
+                                (sorter
+                                 (completion-metadata-get
+                                  metadata 'display-sort-function)))
+                           (setq choices
+                                 (funcall sorter
+                                          (all-completions
+                                           "" collection)))
+                           (car choices))))
                       ((symbol-function
                         'omnigent--conversation-buffer)
                        (lambda (id _title &optional _)
                          (should (equal id "new"))
                          target)))
               (omnigent-attach-file-to-session))
-            (should
-             (equal
-              (mapcar #'car choices) '("New [new]" "Old [old]")))
+            (should (equal (car choices) "New (1m ago) [new]"))
+            (should (equal (cadr choices) "Old (2m ago) [old]"))
             (should (eq (window-buffer (selected-window)) target))
             (should
              (equal (omnigent--attachment-paths) '("src/a.el:2-2")))

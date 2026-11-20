@@ -1678,15 +1678,29 @@ When SIDE-CHAT is non-nil, skip skill completion discovery."
                (let* ((session (car match))
                       (id (alist-get 'id session)))
                  (cons
-                  (format "%s [%s]"
+                  (format "%s (%s) [%s]"
                           (or (alist-get 'title session) "Untitled")
+                          (let ((age
+                                 (omnigent-ui--session-age
+                                  (alist-get 'updated_at session))))
+                            (if (and age (not (equal age "n/a")))
+                                (concat age " ago")
+                              "unknown"))
                           id)
                   match)))
              matches))
+           (table
+            (lambda (string predicate action)
+              (if (eq action 'metadata)
+                  '(metadata
+                    (display-sort-function . identity)
+                    (cycle-sort-function . identity))
+                (complete-with-action
+                 action choices string predicate))))
            (selected
             (cdr
              (assoc
-              (completing-read "Attach to session: " choices
+              (completing-read "Attach to session: " table
                                nil t)
               choices)))
            (session (car selected))
