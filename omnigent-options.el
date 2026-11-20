@@ -19,6 +19,12 @@
   "Defaults shared by quick session creation and the creation menu."
   :group 'omnigent)
 
+(defcustom omnigent-completion-frontend nil
+  "Completion frontend used in conversation buffers.
+When set to `corfu', enable Corfu in conversation buffers."
+  :type '(choice (const :tag "None" nil) (const corfu))
+  :group 'omnigent)
+
 (defcustom omnigent-session-default-host-type nil
   "Execution host type for new sessions.  Nil uses the server default."
   :type

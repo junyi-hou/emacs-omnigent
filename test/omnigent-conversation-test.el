@@ -1550,6 +1550,70 @@
         (funcall callback 200 nil)
         (should (equal (buffer-string) ""))))))
 
+(ert-deftest
+    omnigent-file-completion-fetches-directories-and-paginates
+    ()
+  "Complete files from the requested directory and follow listing pages."
+  (with-temp-buffer
+    (let ((omnigent-conversation--prompt-start
+           (copy-marker (point-min)))
+          (omnigent-conversation-session-id "test")
+          (omnigent--file-completion-cache
+           (make-hash-table :test 'equal))
+          (omnigent-completion-frontend nil)
+          requests)
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_id _method path callback &optional _data)
+                   (push (cons path callback) requests))))
+        (insert "look @src/ma")
+        (should-not
+         (all-completions "@src/ma" #'omnigent--file-candidates))
+        (should (string-match-p "filesystem/src?" (caar requests)))
+        (funcall (cdar requests)
+                 200
+                 '((data . [((name . "main.el") (type . "file"))])
+                   (has_more . t)
+                   (last_id . "src/main.el")))
+        (should (= (length requests) 2))
+        (funcall (cdar requests)
+                 200
+                 '((data . [((name . "map.el") (type . "file"))])))
+        (should
+         (equal
+          (all-completions
+           "@src/ma" #'omnigent--file-candidates)
+          '("@src/main.el" "@src/map.el")))))))
+
+(ert-deftest omnigent-file-attachments-send-and-delete ()
+  "Attach multiple files, delete one, and send the remaining path."
+  (with-temp-buffer
+    (let ((omnigent-conversation--prompt-start
+           (copy-marker (point-min)))
+          (omnigent-conversation-header-data
+           '((harness . "codex-native")))
+          (omnigent-conversation--sending nil)
+          sent
+          draft)
+      (insert "Review @src/a.el")
+      (omnigent--file-completion-exit "@src/a.el" 'finished)
+      (insert " and @src/b.el")
+      (omnigent--file-completion-exit "@src/b.el" 'finished)
+      (should
+       (equal (omnigent--attachment-paths) '("src/a.el" "src/b.el")))
+      (goto-char (point-max))
+      (search-backward "src/a.el")
+      (forward-char (length "src/a.el"))
+      (omnigent-conversation-delete-backward 1)
+      (should (equal (omnigent--attachment-paths) '("src/b.el")))
+      (cl-letf (((symbol-function 'omnigent--conversation-message)
+                 (lambda (text)
+                   (setq
+                    sent text
+                    draft omnigent--conversation-submitted-draft))))
+        (omnigent-conversation-send))
+      (should (string-prefix-p "[Attached file: src/b.el]\n\n" sent))
+      (should (equal draft (buffer-string))))))
+
 (provide 'omnigent-conversation-test)
 ;;; omnigent-conversation-test.el ends here
 (ert-deftest

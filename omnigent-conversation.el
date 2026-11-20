@@ -717,7 +717,9 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
              (accepted
               (and (omnigent-transport-success-p status)
                    (not (eq (alist-get 'denied data) t))))
-             (text (omnigent-conversation--text entry)))
+             (text
+              (or (alist-get 'draft entry)
+                  (omnigent-conversation--text entry))))
         (if accepted
             (progn
               (let ((draft

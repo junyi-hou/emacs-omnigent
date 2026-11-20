@@ -1116,7 +1116,236 @@ Use `omnigent-conversation-open' to create a conversation buffer."
  (add-hook
   'completion-at-point-functions #'omnigent--conversation-command-capf
   nil t)
+ (setq-local omnigent--file-completion-cache
+             (make-hash-table :test 'equal))
+ (add-hook 'completion-at-point-functions #'omnigent--file-capf nil t)
+ (when (eq omnigent-completion-frontend 'corfu)
+   (require 'omnigent-corfu)
+   (omnigent-corfu-setup))
  (omnigent--conversation-connect))
+
+(defvar-local omnigent--file-completion-cache nil)
+
+(defun omnigent--file-completion-result
+    (buffer directory after entries status body)
+  "Store ENTRIES and results from STATUS and BODY for BUFFER and DIRECTORY.
+AFTER is the cursor used for the current page."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (if (and (omnigent-transport-success-p status)
+               (vectorp (alist-get 'data body)))
+          (let ((entries
+                 (append entries (append (alist-get 'data body) nil)))
+                (cursor (alist-get 'last_id body)))
+            (if (eq (alist-get 'has_more body) t)
+                (if (and (stringp cursor) (not (equal cursor after)))
+                    (omnigent--file-completion-request directory
+                                                       cursor
+                                                       entries)
+                  (remhash directory omnigent--file-completion-cache)
+                  (message "Invalid workspace directory pagination"))
+              (puthash
+               directory entries omnigent--file-completion-cache)
+              (when (eq omnigent-completion-frontend 'corfu)
+                (omnigent-corfu-refresh directory))))
+        (remhash directory omnigent--file-completion-cache)
+        (message "Could not load workspace directory: %s"
+                 (omnigent-transport-error-message
+                  "List files" status body))))))
+
+(defun omnigent--file-completion-request
+    (directory &optional after entries)
+  "Request direct children of DIRECTORY after AFTER, accumulating ENTRIES."
+  (puthash directory 'loading omnigent--file-completion-cache)
+  (condition-case err
+      (omnigent-transport--request
+       omnigent-conversation-session-id "GET"
+       (concat
+        (omnigent-workspace--path
+         omnigent-conversation-session-id "filesystem")
+        (unless (string-empty-p directory)
+          (concat
+           "/"
+           (mapconcat
+            #'url-hexify-string (split-string directory "/" t)
+            "/")))
+        "?limit=1000&order=asc"
+        (when after
+          (concat "&after=" (url-hexify-string after))))
+       (apply-partially #'omnigent--file-completion-result
+                        (current-buffer)
+                        directory
+                        after
+                        entries))
+    (error
+     (remhash directory omnigent--file-completion-cache)
+     (message "Could not load workspace directory: %s"
+              (error-message-string err)))))
+
+(defun omnigent--file-completion-context ()
+  "Return the bounds and directory of the file mention at point."
+  (when (and omnigent-conversation--prompt-start
+             (>= (point) omnigent-conversation--prompt-start))
+    (save-excursion
+      (let ((end (point)))
+        (skip-chars-backward "^ \t\n@"
+                             omnigent-conversation--prompt-start)
+        (when (and (eq (char-before) ?@)
+                   (or (= (1- (point))
+                          omnigent-conversation--prompt-start)
+                       (memq
+                        (char-before (1- (point))) '(?\s ?\t ?\n))))
+          (let* ((start (1- (point)))
+                 (query (buffer-substring-no-properties (point) end))
+                 (directory (or (file-name-directory query) "")))
+            (list start end (directory-file-name directory))))))))
+
+(defun omnigent--file-candidates (string predicate action)
+  "Complete STRING with PREDICATE and ACTION using the directory cache."
+  (when-let* ((context (omnigent--file-completion-context)))
+    (let* ((directory (nth 2 context))
+           (directory
+            (if (equal directory ".")
+                ""
+              directory))
+           (entries
+            (gethash directory omnigent--file-completion-cache
+                     'missing)))
+      (when (eq entries 'missing)
+        (omnigent--file-completion-request directory))
+      (complete-with-action
+       action
+       (mapcar
+        (lambda (entry)
+          (concat
+           "@"
+           (unless (string-empty-p directory)
+             (concat directory "/"))
+           (alist-get 'name entry)
+           (when (equal (alist-get 'type entry) "directory")
+             "/")))
+        (if (listp entries)
+            entries
+          nil))
+       string predicate))))
+
+(defun omnigent--file-capf ()
+  "Complete workspace files after an at sign in the composer."
+  (when-let* ((context (omnigent--file-completion-context)))
+    (list
+     (car context)
+     (cadr context)
+     #'omnigent--file-candidates
+     :exit-function #'omnigent--file-completion-exit
+     :company-prefix-length t)))
+
+(defun omnigent--attachment-bounds ()
+  "Return the bounds of the attachment block in the composer."
+  (let ((start
+         (text-property-any
+          omnigent-conversation--prompt-start
+          (point-max)
+          'omnigent-attachment-block
+          t)))
+    (when start
+      (cons
+       start
+       (or (next-single-property-change
+            start 'omnigent-attachment-block
+            nil (point-max))
+           (point-max))))))
+
+(defun omnigent--attachment-paths ()
+  "Return the file paths in the composer attachment block."
+  (when-let* ((bounds (omnigent--attachment-bounds)))
+    (let ((pos (car bounds))
+          paths)
+      (while (< pos (cdr bounds))
+        (let* ((path
+                (get-text-property pos 'omnigent-attachment-path))
+               (end
+                (next-single-property-change
+                 pos 'omnigent-attachment-path
+                 nil (cdr bounds))))
+          (when path
+            (push (buffer-substring-no-properties pos end) paths))
+          (setq pos end)))
+      (nreverse paths))))
+
+(defun omnigent--attachment-set (paths)
+  "Replace the composer attachment block with PATHS."
+  (let ((bounds (omnigent--attachment-bounds)))
+    (save-excursion
+      (when bounds
+        (delete-region (car bounds) (cdr bounds)))
+      (when paths
+        (goto-char (point-max))
+        (let ((start (point)))
+          (insert "\n\n[Attached (files): ")
+          (let ((first t))
+            (dolist (path paths)
+              (unless first
+                (insert ", "))
+              (setq first nil)
+              (insert
+               (propertize path
+                           'omnigent-attachment-path
+                           t
+                           'rear-nonsticky
+                           '(omnigent-attachment-path)))))
+          (insert "]")
+          (add-text-properties
+           start
+           (point)
+           '(omnigent-attachment-block t rear-nonsticky t)))))))
+
+(defun omnigent--file-completion-exit (candidate status)
+  "Attach file CANDIDATE after completion STATUS."
+  (when (and (memq status '(finished exact))
+             (string-prefix-p "@" candidate)
+             (not (string-suffix-p "/" candidate)))
+    (let ((start (- (point) (length candidate)))
+          (path (substring-no-properties candidate 1)))
+      (when (and (>= start omnigent-conversation--prompt-start)
+                 (equal
+                  (buffer-substring-no-properties start (point))
+                  candidate))
+        (delete-region start (point))
+        (let ((position (copy-marker (point))))
+          (omnigent--attachment-set
+           (delete-dups
+            (append (omnigent--attachment-paths) (list path))))
+          (goto-char position)
+          (set-marker position nil))))))
+
+(defun omnigent-conversation-delete-backward (arg)
+  "Delete the previous attachment or ARG characters."
+  (interactive "p")
+  (let ((path
+         (and (= arg 1)
+              (> (point) (point-min))
+              (get-text-property
+               (1- (point)) 'omnigent-attachment-path))))
+    (if (and path
+             (not
+              (get-text-property (point) 'omnigent-attachment-path)))
+        (let* ((end (point))
+               (start
+                (or (previous-single-property-change
+                     end 'omnigent-attachment-path
+                     nil omnigent-conversation--prompt-start)
+                    omnigent-conversation--prompt-start))
+               (name (buffer-substring-no-properties start end))
+               (paths (omnigent--attachment-paths)))
+          (omnigent--attachment-set (delete name paths)))
+      (backward-delete-char-untabify arg))))
+
+(define-key
+ omnigent-conversation-mode-map
+ (kbd "DEL")
+ #'omnigent-conversation-delete-backward)
+
+(defvar omnigent--conversation-submitted-draft nil)
 
 (defvar-local omnigent--conversation-command-catalog-requested nil)
 (defvar-local omnigent--conversation-command-skills nil)
@@ -1392,6 +1621,7 @@ in the echo area."
          (copy-tree
           `((state . submitting)
             (content . ,text)
+            (draft . ,omnigent--conversation-submitted-draft)
             (pending_id . nil)
             (consumed-pending-ids . nil))))
         (buffer (current-buffer)))
@@ -1685,12 +1915,34 @@ in the echo area."
     (user-error "This session is read-only"))
   (when omnigent-conversation--sending
     (user-error "A message is being sent"))
-  (let ((text
-         (buffer-substring-no-properties
-          omnigent-conversation--prompt-start (point-max))))
+  (let* ((text
+          (buffer-substring-no-properties
+           omnigent-conversation--prompt-start (point-max)))
+         (paths (omnigent--attachment-paths))
+         (bounds (omnigent--attachment-bounds))
+         (omnigent--conversation-submitted-draft (and paths text)))
     (when (string-blank-p text)
       (user-error "The message is empty"))
-    (omnigent--conversation-dispatch text)))
+    (if paths
+        (let* ((harness
+                (alist-get
+                 'harness omnigent-conversation-header-data))
+               (label
+                (if (and (stringp harness)
+                         (string-match-p "codex" harness))
+                    "Attached file"
+                  "Attached"))
+               (message-text
+                (concat
+                 (mapconcat (lambda (path)
+                              (format "[%s: %s]" label path))
+                            paths
+                            "\n")
+                 "\n\n"
+                 (buffer-substring-no-properties
+                  omnigent-conversation--prompt-start (car bounds)))))
+          (omnigent--conversation-message message-text))
+      (omnigent--conversation-dispatch text))))
 
 (defun omnigent--conversation-select-setting (setting)
   "Fetch choices for SETTING and prompt in the current conversation."
