@@ -302,7 +302,7 @@ With a prefix argument EDIT, open the session creation menu."
   "Update DRAFT location using SESSION context, then call CALLBACK.
 When KEEP is non-nil, retain any location settings already in DRAFT."
   (let* ((fields (cdr draft))
-         (host (and keep (alist-get 'host_id fields)))
+         (host (alist-get 'host_id fields))
          (workspace (and keep (alist-get 'workspace fields)))
          (selected
           (lambda (target)
@@ -394,8 +394,25 @@ When MENU is non-nil, restore the draft after a failed request."
   (interactive)
   (omnigent--create-resolve omnigent--create-draft nil t))
 
-(defun omnigent--create-location ()
-  "Choose a connected host and workspace."
+(defun omnigent--create-host ()
+  "Choose a connected execution host for this draft."
+  (interactive)
+  (let ((draft omnigent--create-draft))
+    (omnigent-sessions--read-host
+     (lambda (host)
+       (when (and (eq draft omnigent--create-draft)
+                  (= (car draft) omnigent-transport--generation))
+         (when (and host
+                    (not
+                     (equal host (alist-get 'host_id (cdr draft)))))
+           (setf
+            (alist-get 'host_id (cdr draft)) host
+            (alist-get 'workspace (cdr draft)) nil
+            (alist-get 'git (cdr draft)) nil))
+         (omnigent--create-menu))))))
+
+(defun omnigent--create-workspace ()
+  "Choose a workspace on the draft's execution host."
   (interactive)
   (omnigent--create-pick-location
    omnigent--create-draft (lambda (_) (omnigent--create-menu))
@@ -679,18 +696,26 @@ Call CANCEL when required selection does not complete."
  omnigent--create-menu
  ()
  "Review and edit the session creation draft."
- ["Location" ("h" omnigent--create-host-type
+ ["Location" ("t" omnigent--create-host-type
    :description
    (lambda ()
      (omnigent--create-label 'host_type "Execution host type")))
-  ("w" omnigent--create-location
+  ("h" omnigent--create-host
    :description
    (lambda ()
-     (format "Host and workspace (%s %s)"
+     (format "Host ID (%s)"
              (or (alist-get 'host_id (cdr omnigent--create-draft))
-                 "Choose host")
+                 "Choose host")))
+   :if-not omnigent--create-managed-p)
+  ("w"
+   omnigent--create-workspace
+   :description
+   (lambda ()
+     (format "Workspace (%s)"
              (or (alist-get 'workspace (cdr omnigent--create-draft))
-                 "")))
+                 "Choose workspace")))
+   :inapt-if
+   (lambda () (not (alist-get 'host_id (cdr omnigent--create-draft))))
    :if-not omnigent--create-managed-p)
   ("g" omnigent--create-worktree
    :if-not omnigent--create-managed-p
@@ -727,7 +752,7 @@ Call CANCEL when required selection does not complete."
    :description
    (lambda ()
      (omnigent--create-label 'reasoning_effort "Reasoning effort")))
-  ("t"
+  ("T"
    omnigent--create-title
    :description
    (lambda () (omnigent--create-label 'title "Title")))

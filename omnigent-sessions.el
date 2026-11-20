@@ -614,6 +614,17 @@ Report discovery failures through `omnigent-sessions-error-hook'."
         generation callback session status body
         fixed-host fixed-workspace)))))
 
+(defun omnigent-sessions--read-host (callback)
+  "Call CALLBACK with the selected online host ID, or nil on cancellation."
+  (message "Reading execution hosts...")
+  (let ((generation omnigent-transport--generation))
+    (omnigent-transport-request
+     "GET" "/v1/hosts"
+     (lambda (status body)
+       (omnigent-sessions--select-host
+        generation callback nil status body
+        nil nil t)))))
+
 (defun omnigent-sessions--select-host
     (generation
      callback
@@ -622,9 +633,11 @@ Report discovery failures through `omnigent-sessions-error-hook'."
      body
      &optional
      fixed-host
-     fixed-workspace)
+     fixed-workspace
+     host-only)
   "Present hosts from BODY after STATUS and call CALLBACK on GENERATION.
-Use SESSION for context and retain FIXED-HOST and FIXED-WORKSPACE."
+Use SESSION for context and retain FIXED-HOST and FIXED-WORKSPACE.
+When HOST-ONLY is non-nil, call CALLBACK with the host ID alone."
   (cond
    ((not (omnigent-transport-success-p status))
     (omnigent-sessions--error "List hosts" status body))
@@ -652,7 +665,10 @@ Use SESSION for context and retain FIXED-HOST and FIXED-WORKSPACE."
              hosts)))
       (if (null choices)
           (omnigent-sessions--error
-           "Select workspace" "No online execution hosts")
+           (if host-only
+               "Select host"
+             "Select workspace")
+           "No online execution hosts")
         (let* ((choice
                 (if (cdr choices)
                     (condition-case nil
@@ -668,8 +684,12 @@ Use SESSION for context and retain FIXED-HOST and FIXED-WORKSPACE."
             (unless (= generation omnigent-transport--generation)
               (user-error
                "Server changed during workspace selection"))
-            (if fixed-workspace
-                (funcall callback (cons host-id fixed-workspace))
+            (cond
+             (host-only
+              (funcall callback host-id))
+             (fixed-workspace
+              (funcall callback (cons host-id fixed-workspace)))
+             (t
               (message "Reading workspaces on %s..." choice)
               (omnigent-sessions--workspace-directories
                host-id ""
@@ -677,7 +697,7 @@ Use SESSION for context and retain FIXED-HOST and FIXED-WORKSPACE."
                 #'omnigent-sessions--select-workspace
                 generation host-id choice callback
                 (and (equal host-id (alist-get 'host_id session))
-                     (alist-get 'workspace session))))))))))))
+                     (alist-get 'workspace session)))))))))))))
 
 (defun omnigent-sessions--select-workspace
     (generation host-id choice callback default status directories)

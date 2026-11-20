@@ -639,6 +639,47 @@
            (equal
             errors '("Create session: 500 (Create denied)"))))))))
 
+(ert-deftest
+    omnigent-sessions-create-selects-host-and-workspace-separately
+    ()
+  "Change the host without opening a workspace prompt, then use that host."
+  (let ((omnigent--create-draft
+         (list
+          omnigent-transport--generation
+          (cons 'host_id "old")
+          (cons 'workspace "/old")
+          (list 'git (cons 'branch_name "feature"))))
+        (menu-count 0))
+    (cl-letf (((symbol-function 'omnigent--create-menu)
+               (lambda () (cl-incf menu-count)))
+              ((symbol-function 'omnigent-transport-request)
+               (lambda (method path callback)
+                 (should
+                  (equal (list method path) '("GET" "/v1/hosts")))
+                 (funcall callback
+                          200
+                          '((hosts
+                             .
+                             [((host_id . "new")
+                               (status . "online"))]))))))
+      (omnigent--create-host)
+      (should
+       (equal
+        (alist-get 'host_id (cdr omnigent--create-draft)) "new"))
+      (should-not (alist-get 'workspace (cdr omnigent--create-draft)))
+      (should-not (alist-get 'git (cdr omnigent--create-draft)))
+      (should (= menu-count 1))
+      (cl-letf (((symbol-function 'omnigent-sessions--read-workspace)
+                 (lambda (callback _session host workspace)
+                   (should (equal host "new"))
+                   (should-not workspace)
+                   (funcall callback '("new" . "/new")))))
+        (omnigent--create-workspace))
+      (should
+       (equal
+        (alist-get 'workspace (cdr omnigent--create-draft)) "/new"))
+      (should (= menu-count 2)))))
+
 (ert-deftest omnigent-sessions-create-aborts-after-server-change ()
   "Do not send a selected host and workspace to a different server."
   (let ((omnigent-transport--generation 0)
