@@ -47,7 +47,9 @@ Nil allows the current session or the workspace picker to supply the path."
   :group 'omnigent-session-creation)
 
 (defcustom omnigent-session-default-agent nil
-  "Registered agent ID for new sessions.  Nil prompts for an agent."
+  "Registered agent name or ID for new sessions.
+Use the ID if multiple agents share the name.
+Nil prompts for an agent."
   :type '(choice (const :tag "Use default" nil) string)
   :group 'omnigent-session-creation)
 

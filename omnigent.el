@@ -227,7 +227,7 @@ Run `omnigent-sessions-change-hook' on success, or the error hook on failure."
   `((host_type . ,omnigent-session-default-host-type)
     (host_id . ,omnigent-session-default-host)
     (workspace . ,omnigent-session-default-workspace)
-    (agent_id . ,omnigent-session-default-agent)
+    (agent_reference . ,omnigent-session-default-agent)
     (model_override . ,omnigent-session-default-model)
     (reasoning_effort . ,omnigent-session-default-reasoning-effort)
     (title . ,omnigent-session-default-title)
@@ -358,10 +358,13 @@ When MENU is non-nil, restore the draft after a failed request."
          (when (eq draft omnigent--create-draft)
            (cond
             (agent
-             (setf (alist-get 'agent_id (cdr draft)) agent)
+             (setf
+              (alist-get 'agent_id (cdr draft)) agent
+              (alist-get 'agent_reference (cdr draft)) nil)
              (omnigent--create-resolve draft nil menu))
             (menu
-             (omnigent--create-menu)))))))
+             (omnigent--create-menu)))))
+       nil (alist-get 'agent_reference fields)))
      ((and (omnigent--create-managed-p)
            (not (alist-get 'sandbox_profile_id fields)))
       (omnigent--create-read-profile draft
@@ -413,7 +416,9 @@ When MENU is non-nil, restore the draft after a failed request."
                     '(model_override
                       reasoning_effort terminal_launch_args))
              (setf (alist-get field (cdr draft)) nil))
-           (setf (alist-get 'agent_id (cdr draft)) agent))
+           (setf
+            (alist-get 'agent_id (cdr draft)) agent
+            (alist-get 'agent_reference (cdr draft)) nil))
          (omnigent--create-menu))))))
 
 (defun omnigent--create-edit-field
@@ -469,6 +474,9 @@ When MENU is non-nil, restore the draft after a failed request."
   (format "%s (%s)"
           label
           (or (alist-get field (cdr omnigent--create-draft))
+              (and (eq field 'agent_id)
+                   (alist-get
+                    'agent_reference (cdr omnigent--create-draft)))
               "Server default")))
 
 (defun omnigent--create-host-type ()

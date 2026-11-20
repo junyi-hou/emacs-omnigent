@@ -243,7 +243,9 @@
                    (setq post-data data)
                    (funcall callback 201 '((id . "new"))))))
               ((symbol-function 'completing-read)
-               (lambda (&rest _) "Agent [agent]"))
+               (lambda (_prompt choices &rest _)
+                 (should (equal choices '(("Agent" . "agent"))))
+                 "Agent"))
               ((symbol-function 'read-string) (lambda (&rest _) "")))
       (setq omnigent-sessions-open-hook
             (list (lambda (session) (setq created session))))
@@ -262,12 +264,26 @@
   (let ((omnigent-session-default-host-type "external")
         (omnigent-session-default-host "host")
         (omnigent-session-default-workspace "/repo")
-        (omnigent-session-default-agent "agent")
+        (omnigent-session-default-agent "Agent")
         payload
         menu)
     (cl-letf (((symbol-function 'omnigent-transport-request)
-               (lambda (_method _path _callback data)
-                 (setq payload data)))
+               (lambda (_method path callback &optional data)
+                 (cond
+                  ((equal path "/v1/agents")
+                   (funcall callback
+                            200
+                            '((data . [])
+                              (has_more . t)
+                              (last_id . "cursor"))))
+                  ((equal path "/v1/agents?after=cursor")
+                   (funcall callback
+                            200
+                            '((data
+                               .
+                               [((id . "agent") (name . "Agent"))]))))
+                  (t
+                   (setq payload data)))))
               ((symbol-function 'omnigent--create-menu)
                (lambda () (setq menu omnigent--create-draft))))
       (with-temp-buffer
@@ -278,6 +294,8 @@
         (omnigent-sessions-create)
         (should
          (equal (cdr (assoc "project_id" payload)) "project-1"))
+        (should (equal (cdr (assoc "agent_id" payload)) "agent"))
+        (should-not (assoc "agent_reference" payload))
         (omnigent-sessions-create '(4))
         (should
          (equal (alist-get 'project_id (cdr menu)) "project-1"))
@@ -310,7 +328,8 @@
         (should (equal (alist-get 'host_id (cdr menu)) "host-a"))
         (should (equal (alist-get 'workspace (cdr menu)) "/repo"))
         (should
-         (equal (alist-get 'agent_id (cdr menu)) "configured"))))))
+         (equal
+          (alist-get 'agent_reference (cdr menu)) "configured"))))))
 
 (ert-deftest omnigent-sessions-create-managed-uses-configured-defaults
     ()
@@ -322,6 +341,12 @@
     (cl-letf (((symbol-function 'omnigent-transport-request)
                (lambda (method path callback &optional payload)
                  (cond
+                  ((equal path "/v1/agents")
+                   (funcall callback
+                            200
+                            '((data
+                               .
+                               [((id . "agent") (name . "Agent"))]))))
                   ((equal path "/v1/info")
                    (funcall callback
                             200
@@ -345,11 +370,17 @@
     ()
   "Use completion for a required profile and send its exact revision."
   (let ((omnigent-session-default-host-type "managed")
-        (omnigent-session-default-agent "agent")
+        (omnigent-session-default-agent "Agent")
         payload)
     (cl-letf (((symbol-function 'omnigent-transport-request)
                (lambda (_method path callback &optional data)
                  (cond
+                  ((equal path "/v1/agents")
+                   (funcall callback
+                            200
+                            '((data
+                               .
+                               [((id . "agent") (name . "Agent"))]))))
                   ((equal path "/v1/info")
                    (funcall callback
                             200
@@ -482,15 +513,26 @@
        (equal (alist-get 'title (car omnigent-sessions)) "fresh")))))
 
 (ert-deftest omnigent-sessions-create-reports-agent-list-failure ()
-  "Do not prompt for an agent or create a session if agents cannot be listed."
-  (dolist (case
-           '((500 nil "List agents: 500")
-             (200
-              ((data . []))
-              "Create session: No agents available")))
-    (pcase-let ((`(,status ,body ,expected-error) case))
-      (let (errors
+  "Do not prompt or create a session if agent lookup fails."
+  (dolist
+      (case
+       '((nil 500 nil "List agents: 500")
+         (nil 200 ((data . [])) "Create session: No agents available")
+         ("Agent"
+          200
+          ((data . []))
+          "Create session: client error (No agent matches the configured default \"Agent\".)")
+         ("Agent" 200
+          ((data
+            .
+            [((id . "a") (name . "Agent"))
+             ((id . "b") (name . "Agent"))]))
+          "Create session: client error (Multiple agents named \"Agent\". Set the default to an agent ID.)")))
+    (pcase-let ((`(,reference ,status ,body ,expected-error) case))
+      (let ((omnigent-session-default-agent reference)
+            errors
             requests
+            menu
             (omnigent-sessions-error-hook nil))
         (setq omnigent-sessions-error-hook
               (list (lambda (error) (push error errors))))
@@ -506,6 +548,8 @@
                   ((symbol-function 'completing-read)
                    (lambda (&rest _)
                      (ert-fail "Unexpected agent prompt")))
+                  ((symbol-function 'omnigent--create-menu)
+                   (lambda () (setq menu t)))
                   ((symbol-function 'read-string)
                    (lambda (&rest _)
                      (ert-fail "Unexpected title prompt")))
@@ -513,7 +557,8 @@
                    (lambda () (ert-fail "Unexpected refresh"))))
           (omnigent-sessions-create)
           (should (equal requests '(("GET" "/v1/agents"))))
-          (should (equal errors (list expected-error))))))))
+          (should (equal errors (list expected-error)))
+          (should (eq menu (and reference t))))))))
 
 (ert-deftest
     omnigent-sessions-create-includes-title-and-handles-result
@@ -608,7 +653,7 @@
               ((symbol-function 'completing-read)
                (lambda (&rest _)
                  (cl-incf omnigent-transport--generation)
-                 "Agent [agent]")))
+                 "Agent")))
       (should-error (omnigent-sessions-create) :type 'user-error)
       (should-not posted))))
 
@@ -983,7 +1028,7 @@
                  (cl-incf prompts)
                  (if (string-prefix-p "Workspace on " prompt)
                      "repo"
-                   "Agent [agent]")))
+                   "Agent")))
               ((symbol-function 'read-string)
                (lambda (&rest _) "Async selection"))
               ((symbol-function 'omnigent-sessions-refresh)
@@ -1225,11 +1270,16 @@
         errors)
     (setq omnigent-sessions-error-hook
           (list (lambda (error) (push error errors))))
-    (cl-letf (((symbol-function 'omnigent-sessions-refresh) #'ignore))
+    (cl-letf (((symbol-function 'omnigent-sessions-refresh) #'ignore)
+              ((symbol-function 'omnigent-transport-request)
+               (lambda (_method _path callback)
+                 (funcall callback
+                          403
+                          '((detail . "Access denied"))))))
       (omnigent-sessions--refreshed
        0 0 403 '((detail . "Access denied")))
-      (omnigent-sessions--select-agent
-       0 #'ignore nil 403 '((detail . "Access denied")))
+      (omnigent-sessions--read-agent
+       omnigent-transport--generation #'ignore)
       (omnigent-sessions--created 403 '((detail . "Access denied"))))
     (should
      (equal
@@ -1305,8 +1355,8 @@
                    (funcall cb 200 body))))
         (omnigent-sessions--select-host
          omnigent-transport--generation #'ignore nil 200 body)
-        (omnigent-sessions--select-agent
-         omnigent-transport--generation #'ignore nil 200 body)
+        (omnigent-sessions--read-agent
+         omnigent-transport--generation #'ignore)
         (omnigent-sessions--workspace-directories
          "host"
          "/repo"

@@ -830,50 +830,103 @@ Continue through CALLBACK after validating the path on GENERATION's server."
              (funcall callback (cons host-id workspace))))))))))
 
 (defun omnigent-sessions--read-agent
-    (generation callback &optional inherit)
-  "Read an agent on GENERATION and pass its ID to CALLBACK.
-When INHERIT is a label, offer it and pass the symbol inherit if selected."
+    (generation callback &optional inherit reference after agents)
+  "Pass the selected agent ID on GENERATION to CALLBACK.
+When INHERIT is a label, offer it and return the symbol inherit if selected.
+Resolve REFERENCE as an ID or name when it is non-nil.
+AFTER and AGENTS track the cursor and rows across pages."
   (omnigent-transport-request
-   "GET" "/v1/agents"
-   (apply-partially #'omnigent-sessions--select-agent
-                    generation callback inherit)))
+   "GET"
+   (if after
+       (concat "/v1/agents?after=" (url-hexify-string after))
+     "/v1/agents")
+   (lambda (status body)
+     (unless (= generation omnigent-transport--generation)
+       (user-error "Server changed during agent selection"))
+     (cond
+      ((not (omnigent-transport-success-p status))
+       (omnigent-sessions--error "List agents" status body))
+      ((not (omnigent-sessions--rows-p body 'data 'id 'name))
+       (omnigent-sessions--error "List agents" nil
+                                 "Invalid agent list response"))
+      (t
+       (let ((rows (append agents (alist-get 'data body) nil)))
+         (if (eq (alist-get 'has_more body) t)
+             (let ((next (alist-get 'last_id body)))
+               (if (and (stringp next)
+                        (not (string-empty-p next))
+                        (not (equal after next)))
+                   (omnigent-sessions--read-agent generation callback
+                                                  inherit
+                                                  reference
+                                                  next
+                                                  rows)
+                 (omnigent-sessions--error
+                  "List agents" nil
+                  "Invalid agent list cursor")))
+           (omnigent-sessions--select-agent
+            callback inherit reference rows))))))))
 
 (defun omnigent-sessions--select-agent
-    (generation callback inherit status body)
-  "Read an agent from BODY after STATUS on GENERATION, with optional INHERIT choice."
-  (unless (= generation omnigent-transport--generation)
-    (user-error "Server changed during session creation"))
-  (cond
-   ((not (omnigent-transport-success-p status))
-    (omnigent-sessions--error "List agents" status body))
-   ((not (omnigent-sessions--rows-p body 'data 'id 'name))
-    (omnigent-sessions--error "List agents" nil
-                              "Invalid agent list response"))
-   ((and (not inherit) (zerop (length (alist-get 'data body))))
-    (omnigent-sessions--error "Create session" "No agents available"))
-   (t
-    (let ((choices
-           (mapcar
-            (lambda (agent)
-              (let ((id (alist-get 'id agent)))
-                (cons
-                 (format "%s [%s]" (alist-get 'name agent) id) id)))
-            (alist-get 'data body))))
-      (when inherit
-        (push (cons inherit 'inherit) choices))
-      (funcall callback
-               (condition-case nil
-                   (cdr
-                    (assoc
-                     (completing-read "Agent: " choices
-                                      nil
-                                      t
-                                      nil
-                                      nil
-                                      inherit)
-                     choices))
-                 (quit
-                  nil)))))))
+    (callback inherit reference agents)
+  "Pass the ID selected from AGENTS to CALLBACK.
+Offer INHERIT when non-nil, or resolve a configured REFERENCE."
+  (let ((names (make-hash-table :test #'equal)))
+    (dolist (agent agents)
+      (let ((name (alist-get 'name agent)))
+        (push agent (gethash name names))))
+    (cond
+     (reference
+      (let* ((matches (gethash reference names))
+             (id
+              (or (and (seq-find
+                        (lambda (agent)
+                          (equal (alist-get 'id agent) reference))
+                        agents)
+                       reference)
+                  (and (= (length matches) 1)
+                       (alist-get 'id (car matches))))))
+        (unless id
+          (omnigent-sessions--error
+           "Create session" nil
+           (if matches
+               (format
+                "Multiple agents named %S. Set the default to an agent ID."
+                reference)
+             (format "No agent matches the configured default %S."
+                     reference))))
+        (funcall callback id)))
+     ((and (not inherit) (not agents))
+      (omnigent-sessions--error
+       "Create session" "No agents available"))
+     (t
+      (let ((choices
+             (mapcar
+              (lambda (agent)
+                (let ((name (alist-get 'name agent))
+                      (id (alist-get 'id agent)))
+                  (cons
+                   (if (or (equal name inherit)
+                           (cdr (gethash name names)))
+                       (format "%s [%s]" name id)
+                     name)
+                   id)))
+              agents)))
+        (when inherit
+          (push (cons inherit 'inherit) choices))
+        (funcall callback
+                 (condition-case nil
+                     (cdr
+                      (assoc
+                       (completing-read "Agent: " choices
+                                        nil
+                                        t
+                                        nil
+                                        nil
+                                        inherit)
+                       choices))
+                   (quit
+                    nil))))))))
 
 (defun omnigent-sessions--submit-create
     (generation fields &optional callback)

@@ -53,8 +53,10 @@ the corresponding option for one request. Clearing an
 optional field leaves it out of the request so the server can apply its
 default. Quick creation has no draft edits and prompts only for required
 values that it cannot resolve. The server requires an agent ID for
-ordinary creation. Fetch the agent list and use completion if the draft
-has no agent ID. An omitted title lets the server derive one.
+ordinary creation. Fetch the agent list to resolve a configured agent
+name or ID, or use completion if the draft has neither. Show agent names
+in completion and add IDs when names are shared. An omitted title lets
+the server derive one.
 
 #### Execution host and workspace
 
@@ -98,7 +100,7 @@ server's default sandbox provider.
 
 ```elisp
 (setq omnigent-session-default-host-type "managed"
-      omnigent-session-default-agent "ag_example")
+      omnigent-session-default-agent "codex-native-ui")
 ```
 
 #### Requests and results
