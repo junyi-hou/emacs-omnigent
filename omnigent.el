@@ -1272,6 +1272,29 @@ AFTER is the cursor used for the current page."
           (setq pos end)))
       (nreverse paths))))
 
+(defun omnigent--attachment-open-result (buffer path status body)
+  "Open PATH for BUFFER using workspace root STATUS and BODY."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (let ((root (alist-get 'base body)))
+        (if (and (omnigent-transport-success-p status) (stringp root))
+            (find-file
+             (omnigent-workspace-local-filename
+              root path
+              (omnigent-workspace-host-mapping
+               omnigent-conversation-host-id)))
+          (message "%s"
+                   (omnigent-transport-error-message
+                    "Open attached file" status body)))))))
+
+(defun omnigent--attachment-open (button)
+  "Open the file named by BUTTON in the session workspace."
+  (let ((path (button-label button)))
+    (omnigent-workspace--root
+     omnigent-conversation-session-id
+     (apply-partially #'omnigent--attachment-open-result
+                      (current-buffer) path))))
+
 (defun omnigent--attachment-set (paths)
   "Replace the composer attachment block with PATHS."
   (let ((bounds (omnigent--attachment-bounds)))
@@ -1287,17 +1310,32 @@ AFTER is the cursor used for the current page."
               (unless first
                 (insert ", "))
               (setq first nil)
-              (insert
-               (propertize path
-                           'omnigent-attachment-path
-                           t
-                           'rear-nonsticky
-                           '(omnigent-attachment-path)))))
+              (insert-text-button path
+                                  'action
+                                  #'omnigent--attachment-open
+                                  'follow-link
+                                  t
+                                  'omnigent-attachment-path
+                                  t
+                                  'rear-nonsticky
+                                  t)))
           (insert "]")
           (add-text-properties
            start
            (point)
-           '(omnigent-attachment-block t rear-nonsticky t)))))))
+           '(omnigent-attachment-block t rear-nonsticky t))
+          (put-text-property
+           start (point) 'font-lock-face 'omnigent-ui-attachment)
+          (let ((pos start))
+            (while (< pos (point))
+              (let ((next
+                     (next-single-property-change
+                      pos 'omnigent-attachment-path
+                      nil (point))))
+                (when (get-text-property
+                       pos 'omnigent-attachment-path)
+                  (put-text-property pos next 'font-lock-face 'link))
+                (setq pos next)))))))))
 
 (defun omnigent--file-completion-exit (candidate status)
   "Attach file CANDIDATE after completion STATUS."

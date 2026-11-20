@@ -567,6 +567,9 @@
 (defface omnigent-ui-prompt '((t :inherit comint-highlight-prompt))
   "Face for conversation prompts and message labels."
   :group 'omnigent-ui)
+(defface omnigent-ui-attachment '((t :inherit shadow))
+  "Face for the attachment block in the composer."
+  :group 'omnigent-ui)
 (defface omnigent-ui-fold-marker
   '((t :inherit font-lock-builtin-face :underline nil))
   "Face for fold buttons without underlining."
@@ -943,6 +946,22 @@ Signal an error if point is not in a foldable block."
              property
              (get-text-property offset property text)))
           (setq offset next))))
+    (let ((pos begin))
+      (while (< pos end)
+        (let ((next
+               (min (next-single-property-change
+                     pos 'omnigent-attachment-path
+                     nil end)
+                    (next-single-property-change
+                     pos 'omnigent-attachment-block
+                     nil end))))
+          (when (get-text-property pos 'omnigent-attachment-block)
+            (put-text-property
+             pos next 'font-lock-face
+             (if (get-text-property pos 'omnigent-attachment-path)
+                 'link
+               'omnigent-ui-attachment)))
+          (setq pos next))))
     (put-text-property begin end 'omnigent-ui-markdown-done t)))
 
 (defun omnigent-ui--markdown-fontify (start end &optional _loudly)

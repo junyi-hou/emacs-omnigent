@@ -1614,6 +1614,34 @@
       (should (string-prefix-p "[Attached file: src/b.el]\n\n" sent))
       (should (equal draft (buffer-string))))))
 
+(ert-deftest omnigent-attachment-button-opens-session-file ()
+  "Keep attachment buttons active after Markdown fontification."
+  (with-temp-buffer
+    (let ((omnigent-conversation--prompt-start
+           (copy-marker (point-min)))
+          (omnigent-conversation-session-id "session")
+          (omnigent-conversation-host-id "host")
+          opened)
+      (insert "Review")
+      (omnigent--attachment-set '("src/a.el"))
+      (omnigent-ui--markdown-apply (point-min) (point-max) nil)
+      (goto-char (point-min))
+      (search-forward "src/a.el")
+      (let ((button (button-at (1- (point)))))
+        (should button)
+        (should
+         (eq (get-text-property (1- (point)) 'font-lock-face) 'link))
+        (cl-letf (((symbol-function 'omnigent-workspace--root)
+                   (lambda (_id callback)
+                     (funcall callback 200 '((base . "/workspace")))))
+                  ((symbol-function 'omnigent-workspace-host-mapping)
+                   (lambda (_host) 'local))
+                  ((symbol-function 'find-file)
+                   (lambda (filename &rest _)
+                     (setq opened filename))))
+          (button-activate button))
+        (should (equal opened "/workspace/src/a.el"))))))
+
 (provide 'omnigent-conversation-test)
 ;;; omnigent-conversation-test.el ends here
 (ert-deftest
