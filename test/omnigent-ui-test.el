@@ -64,11 +64,10 @@
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 
-(ert-deftest omnigent-ui-session-render-shows-global-ellipsis ()
-  "Show a separate line with the archive face only after an archived row."
+(ert-deftest omnigent-ui-session-render-shows-only-project-ellipsis ()
+  "Show one marker when only the project fetch identifies more rows."
   (let ((omnigent-sessions '(((id . "a") (title . "First"))))
         (omnigent-sessions-projects nil)
-        (omnigent-fetch-archived-sessions t)
         (omnigent-sessions-truncated t)
         (omnigent-sessions--project-lists
          (make-hash-table :test 'equal)))
@@ -76,18 +75,16 @@
         (with-current-buffer (get-buffer-create "*omnigent-sessions*")
           (omnigent-ui-sessions-mode)
           (omnigent-ui-sessions-render)
-          (should (string-suffix-p "\n...\n" (buffer-string)))
-          (should-not (get-text-property (- (point-max) 4) 'face))
-          (setq omnigent-sessions
-                '(((id . "a") (title . "First") (archived . t))))
+          (should-not (string-match-p "[.][.][.]" (buffer-string)))
+          (puthash
+           'unassigned
+           (list 1 omnigent-sessions t)
+           omnigent-sessions--project-lists)
           (omnigent-ui-sessions-render)
+          (should (string-suffix-p "\n  ...\n" (buffer-string)))
           (should
-           (eq
-            (get-text-property (- (point-max) 4) 'face)
-            'omnigent-ui-session-archived))
-          (setq omnigent-sessions-truncated nil)
-          (omnigent-ui-sessions-render)
-          (should-not (string-suffix-p "\n...\n" (buffer-string))))
+           (= (how-many "^ *[.][.][.]$" (point-min) (point-max)) 1))
+          (should-not (get-text-property (- (point-max) 4) 'face)))
       (kill-buffer "*omnigent-sessions*"))))
 
 (ert-deftest omnigent-ui-session-render-preserves-selection ()

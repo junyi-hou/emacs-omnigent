@@ -108,7 +108,6 @@
                   (line-beginning-position)
                   'omnigent-ui-session-project)))
             (inhibit-read-only t)
-            last-session
             (sessions
              (sort (copy-sequence (omnigent-sessions-visible))
                    (lambda (a b)
@@ -154,7 +153,7 @@
                                  omnigent-sessions--project-lists))
                         '(unassigned))))
               (let ((folded (member key omnigent-ui--folded-projects))
-                    (rows (gethash key groups))
+                    last-session
                     (name
                      (if (eq key 'unassigned)
                          "Unassigned"
@@ -180,7 +179,7 @@
                              'face
                              'omnigent-ui-project))
                 (unless folded
-                  (dolist (session (nreverse rows))
+                  (dolist (session (nreverse (gethash key groups)))
                     (setq last-session session)
                     (omnigent-ui--insert-session-row
                      session line-width))
@@ -192,18 +191,8 @@
                      (propertize
                       "  ...\n"
                       'face
-                      (when (and rows
-                                 (eq
-                                  (alist-get
-                                   'archived last-session)
-                                  t))
+                      (when (eq (alist-get 'archived last-session) t)
                         'omnigent-ui-session-archived)))))))))
-        (when omnigent-sessions-truncated
-          (insert
-           (propertize "...\n"
-                       'face
-                       (when (eq (alist-get 'archived last-session) t)
-                         'omnigent-ui-session-archived))))
         (goto-char (point-min))
         (when (or id project)
           (while (and (not (eobp))
