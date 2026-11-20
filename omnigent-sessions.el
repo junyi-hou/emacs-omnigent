@@ -20,6 +20,8 @@
 (defvar omnigent-sessions--project-lists
   (make-hash-table :test 'equal)
   "Map project keys to a list of limit, fetched rows, and whether more exist.")
+(defvar omnigent-sessions--project-more (make-hash-table :test 'equal)
+  "Map project keys to pagination check states.")
 
 (defvar omnigent-sessions--missing-projects
   (make-hash-table :test 'equal))
@@ -134,6 +136,38 @@
 (defvar omnigent-sessions--buffers nil)
 (defvar omnigent-sessions--revision 0)
 
+(defun omnigent-sessions--check-project-more (key name)
+  "Check whether project KEY, queried as NAME, has more sessions."
+  (when (and omnigent-sessions-truncated
+             (not (gethash key omnigent-sessions--project-lists))
+             (not (gethash key omnigent-sessions--project-more)))
+    (let ((limit
+           (cl-count
+            key
+            omnigent-sessions
+            :key #'omnigent-sessions-project-key
+            :test #'equal))
+          (number omnigent-sessions--refresh-number)
+          (checks omnigent-sessions--project-more)
+          (archived omnigent-fetch-archived-sessions))
+      (when (> limit 0)
+        (puthash key 'pending omnigent-sessions--project-more)
+        (omnigent-transport-list-sessions
+         (lambda (status body)
+           (when (and (= number omnigent-sessions--refresh-number)
+                      (eq checks omnigent-sessions--project-more)
+                      (eq archived omnigent-fetch-archived-sessions))
+             (if (and (omnigent-transport-success-p status)
+                      (eq (alist-get 'has_more body) t))
+                 (progn
+                   (puthash key t omnigent-sessions--project-more)
+                   (unless (gethash
+                            key omnigent-sessions--project-lists)
+                     (run-hooks 'omnigent-sessions-change-hook)))
+               (puthash
+                key 'complete omnigent-sessions--project-more))))
+         name limit)))))
+
 (defun omnigent-sessions--error (action status &optional body)
   "Report ACTION's failure STATUS and any server detail in BODY to the error hook."
   (run-hook-with-args 'omnigent-sessions-error-hook
@@ -190,8 +224,14 @@
                rows)))
       (setq omnigent-sessions-truncated
             (eq (alist-get 'has_more body) t))
+      (setq omnigent-sessions--project-more
+            (make-hash-table :test 'equal))
       (omnigent-sessions-refresh-projects)
       (run-hooks 'omnigent-sessions-change-hook)
+      (omnigent-sessions--check-project-more 'unassigned "")
+      (dolist (project omnigent-sessions-projects)
+        (omnigent-sessions--check-project-more
+         (alist-get 'id project) (alist-get 'name project)))
       (maphash
        (lambda (key entry)
          (when (> (car entry) 0)
@@ -448,7 +488,9 @@ Signal a user error if ID already has a different live buffer or the
                       (listp body)
                       (equal id (alist-get 'id body))
                       (stringp (alist-get 'name body)))
-             (omnigent-sessions-show-project body))))))))
+             (omnigent-sessions-show-project body)
+             (omnigent-sessions--check-project-more
+              id (alist-get 'name body)))))))))
 
 (defun omnigent-sessions-read-projects (callback)
   "Pass the cached or newly fetched project catalog to CALLBACK."
@@ -490,6 +532,7 @@ Signal a user error if ID already has a different live buffer or the
    omnigent-sessions-projects nil
    omnigent-sessions--project-catalog nil)
   (clrhash omnigent-sessions--project-lists)
+  (clrhash omnigent-sessions--project-more)
   (when omnigent-sessions-updates
     (omnigent-transport-stop-session-updates
      omnigent-sessions-updates))

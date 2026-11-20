@@ -228,15 +228,17 @@
                (lambda (callback)
                  (funcall callback '("host-b" . "/srv/project"))))
               ((symbol-function 'omnigent-transport-list-sessions)
-               (lambda (callback)
+               (lambda (callback &optional project _limit)
                  (funcall callback
                           200
-                          '((data
-                             .
-                             [((id . "root"))
-                              ((id . "child")
-                               (parent_session_id . "root"))])
-                            (has_more . t)))))
+                          (if project
+                              '((has_more . :json-false))
+                            '((data
+                               .
+                               [((id . "root"))
+                                ((id . "child")
+                                 (parent_session_id . "root"))])
+                              (has_more . t))))))
               ((symbol-function 'omnigent-transport--request)
                (lambda (_session-id
                         method _path callback &optional data)

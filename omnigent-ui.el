@@ -183,10 +183,15 @@
                     (setq last-session session)
                     (omnigent-ui--insert-session-row
                      session line-width))
-                  (when (nth
-                         2
-                         (gethash
-                          key omnigent-sessions--project-lists))
+                  (when (if-let*
+                            ((entry
+                              (gethash
+                               key omnigent-sessions--project-lists)))
+                          (nth 2 entry)
+                          (eq
+                           (gethash
+                            key omnigent-sessions--project-more)
+                           t))
                     (insert
                      (propertize
                       "  ...\n"

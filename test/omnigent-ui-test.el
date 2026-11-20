@@ -87,6 +87,40 @@
           (should-not (get-text-property (- (point-max) 4) 'face)))
       (kill-buffer "*omnigent-sessions*"))))
 
+(ert-deftest omnigent-ui-session-render-checks-unassigned-pagination
+    ()
+  "Show the Unassigned marker after its initial pagination check."
+  (let ((omnigent-sessions nil)
+        (omnigent-sessions-projects nil)
+        (omnigent-sessions-truncated nil)
+        (omnigent-sessions--project-lists
+         (make-hash-table :test 'equal))
+        (omnigent-sessions--project-more
+         (make-hash-table :test 'equal))
+        (omnigent-sessions--buffers nil)
+        (omnigent-sessions-change-hook '(omnigent-ui-sessions-render))
+        callback)
+    (unwind-protect
+        (with-current-buffer (get-buffer-create "*omnigent-sessions*")
+          (omnigent-ui-sessions-mode)
+          (cl-letf (((symbol-function
+                      'omnigent-transport-list-sessions)
+                     (lambda (fn project limit)
+                       (should (equal project ""))
+                       (should (= limit 1))
+                       (setq callback fn))))
+            (omnigent-sessions--refreshed
+             omnigent-sessions--refresh-number
+             omnigent-sessions--revision
+             200
+             '((data . [((id . "a") (title . "First"))])
+               (has_more . t)))
+            (should callback)
+            (should-not (string-suffix-p "\n  ...\n" (buffer-string)))
+            (funcall callback 200 '((has_more . t)))
+            (should (string-suffix-p "\n  ...\n" (buffer-string)))))
+      (kill-buffer "*omnigent-sessions*"))))
+
 (ert-deftest omnigent-ui-session-render-preserves-selection ()
   "Render statuses and attention while preserving the selected session."
   (let ((omnigent-sessions
