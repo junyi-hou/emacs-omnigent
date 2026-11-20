@@ -217,10 +217,11 @@ supported harness before implementation.
 
 ## Side chat
 
-`omnigent-conversation-side-chat` opens a separate conversation buffer with
-the source history. Use `/side` or `/btw` in the composer. Add a question to
-send it in the new chat once its buffer becomes writable. See [slash
-commands](slash-commands.md) for draft behavior.
+`omnigent-conversation-side-chat` opens a separate conversation buffer. The
+server forks the source history for the agent. The buffer loads session
+metadata and displays items from the live stream. Use `/side` or `/btw` in
+the composer. Add a question to send it in the new chat once its buffer
+becomes writable. See [slash commands](slash-commands.md) for draft behavior.
 
 `omnigent-sessions-side-chat` creates the private fork with `side_chat:
 true` and attaches it to the source runner. The source runner must be
@@ -236,8 +237,9 @@ calling `omnigent-conversation-send`.
 
 For a caller that only needs the answer, use `omnigent-sessions-side-chat`
 to get a session ID. Start the stream with
-`omnigent-transport-start-session-stream`. Wait for the initial snapshot and
-live connection. Then post the question with
+`omnigent-transport-start-session-stream` with `skip-history` set to
+non-nil. Wait for the initial snapshot and live connection. Then post the
+question with
 `omnigent-transport-post-session-event`. The POST callback reports
 acceptance. Read assistant items from `response.output_item.done` and match
 them to the new turn to exclude inherited history. For native harnesses,

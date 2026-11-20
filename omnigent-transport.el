@@ -64,6 +64,7 @@
  last-activity
  last-check
  watchdog
+ skip-history
  snapshot-active
  snapshot-timer
  snapshot-again)
@@ -595,6 +596,11 @@ REMAINING limits items; BEFORE is the cursor and ITEMS is chronological."
                  (omnigent-transport--stream-snapshot
                   stream attempt nil "Invalid session metadata"
                   operation))
+                ((omnigent-stream-skip-history stream)
+                 (setf (alist-get 'items body) [])
+                 (omnigent-transport--stream-snapshot
+                  stream attempt status body
+                  operation))
                 (t
                  (condition-case setup-error
                      (omnigent-transport--stream-load-items
@@ -754,7 +760,13 @@ Ignore _EVENT."
 
 (defun omnigent-transport-start-session-stream
     (session-id
-     on-event on-snapshot &optional on-error on-connect on-state)
+     on-event
+     on-snapshot
+     &optional
+     on-error
+     on-connect
+     on-state
+     skip-history)
   "Start the SSE stream for SESSION-ID.
 
 ON-EVENT receives (EVENT-NAME DATA).  ON-SNAPSHOT receives (STATUS BODY)
@@ -762,6 +774,7 @@ after each stream connection starts.  ON-ERROR, when non-nil, receives an
 error string.  ON-CONNECT runs before each snapshot request.
 ON-STATE receives `connecting', `connected', or `disconnected'.  Connected
 means live traffic arrived, not that the snapshot/event handoff is gap-free.
+When SKIP-HISTORY is non-nil, load metadata without fetching history.
 Return a stream handle for `omnigent-transport-stop-session-stream'."
   (unless (executable-find "curl")
     (user-error "Omnigent session streams require curl"))
@@ -773,6 +786,7 @@ Return a stream handle for `omnigent-transport-stop-session-stream'."
           :error-callback on-error
           :connect-callback on-connect
           :state-callback on-state
+          :skip-history skip-history
           :stopped nil
           :failures 0
           :attempt 0)))

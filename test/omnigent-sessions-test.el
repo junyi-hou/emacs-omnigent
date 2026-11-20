@@ -108,7 +108,7 @@
     (should
      (equal
       (nreverse requests)
-      '(("GET" "/v1/sessions/source" nil)
+      '(("GET" "/v1/sessions/source?include_items=false" nil)
         ("POST"
          "/v1/sessions/source/fork"
          (("side_chat" . t) ("title" . "Side chat")))
@@ -148,7 +148,14 @@
           requested)
       (cl-letf (((symbol-function
                   'omnigent-transport-start-session-stream)
-                 (lambda (_id _event _snapshot _error _connect state)
+                 (lambda (_id
+                          _event
+                          _snapshot
+                          _error
+                          _connect
+                          state
+                          skip-history)
+                   (should (eq skip-history side-chat))
                    (funcall state 'connected)
                    nil))
                 ((symbol-function 'omnigent-transport--request)

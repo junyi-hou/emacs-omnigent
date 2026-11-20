@@ -552,6 +552,33 @@ Call the user's token function separately for each request."
         (omnigent-transport-stop-session-stream stream)
         (mapc #'kill-buffer properties)))))
 
+(ert-deftest omnigent-transport-stream-skips-history ()
+  "Load only metadata on each snapshot when history is disabled."
+  (let* (snapshots
+         (stream
+          (omnigent-transport--make-stream
+           :session-id "side"
+           :attempt 1
+           :skip-history t
+           :snapshot-callback
+           (lambda (status body)
+             (push (cons status body) snapshots)))))
+    (cl-letf (((symbol-function 'omnigent-transport--request)
+               (lambda (_id method path callback)
+                 (should (equal method "GET"))
+                 (should
+                  (equal
+                   path "/v1/sessions/side?include_items=false"))
+                 (funcall callback 200 '((pending_inputs . []))))))
+      (omnigent-transport-refresh-session-stream stream)
+      (omnigent-transport-refresh-session-stream stream))
+    (should (= (length snapshots) 2))
+    (dolist (snapshot snapshots)
+      (should (= (car snapshot) 200))
+      (should (equal (alist-get 'items (cdr snapshot)) []))
+      (should
+       (equal (alist-get 'pending_inputs (cdr snapshot)) [])))))
+
 (ert-deftest omnigent-transport-stream-loads-bounded-history ()
   "Load the configured history window in chronological order across pages."
   (let* ((omnigent-transport-history-limit 1001)

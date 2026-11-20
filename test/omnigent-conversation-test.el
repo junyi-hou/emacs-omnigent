@@ -121,7 +121,8 @@
                         &optional
                         _error
                         on-connect
-                        on-state)
+                        on-state
+                        _skip-history)
                  (setq
                   event on-event
                   snapshot on-snapshot)
@@ -1222,7 +1223,12 @@
     (cl-letf (((symbol-function
                 'omnigent-transport-start-session-stream)
                (lambda (_id
-                        on-event on-snapshot _error on-begin on-state)
+                        on-event
+                        on-snapshot
+                        _error
+                        on-begin
+                        on-state
+                        _skip-history)
                  (setq
                   event on-event
                   snapshot on-snapshot

@@ -1010,8 +1010,10 @@ When BRANCH is non-nil, create a worktree with that new branch."
   "Fork a private side chat from ID and attach it to the source runner.
 Call CALLBACK with (STATUS BODY).  On success, BODY is the forked session.
 The source session must have a connected runner."
-  (omnigent-transport-get-session
-   id
+  (omnigent-transport--request
+   id "GET"
+   (concat
+    (omnigent-transport--session-path id) "?include_items=false")
    (lambda (status source)
      (let ((runner
             (and (listp source) (alist-get 'runner_id source))))

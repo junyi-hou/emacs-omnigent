@@ -1104,9 +1104,6 @@ Close this conversation buffer after the session becomes archived."
 (defvar omnigent--conversation-opening-side-chat nil
   "Non-nil while initializing a side chat buffer.")
 
-(defvar-local omnigent--conversation-side-chat-p nil
-  "Non-nil when this conversation buffer is a side chat.")
-
 (define-derived-mode
  omnigent-conversation-mode text-mode "Omnigent"
  "Major mode for a conversation transcript and composer.
@@ -1505,7 +1502,8 @@ AFTER is the cursor used for the current page."
                     buffer))
                 (error
                  (message "Could not load skills for completion: %s"
-                          (error-message-string err))))))))))
+                          (error-message-string err))))))))
+      omnigent--conversation-side-chat-p))
     ;; A synchronous snapshot setup failure can arrive before the handle is assigned.
     (when omnigent-conversation--invalid
       (omnigent-transport-stop-session-stream

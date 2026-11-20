@@ -33,6 +33,9 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 (defvar-local omnigent-conversation--elicitation-submitting nil)
 (defvar-local omnigent-conversation--stream nil)
 (defvar-local omnigent-conversation--items nil)
+(defvar-local omnigent--conversation-side-chat-p nil
+  "Non-nil when this conversation buffer is a side chat.")
+
 (defvar-local omnigent-conversation--order nil)
 (defvar-local omnigent-conversation--order-tail nil)
 (defvar-local omnigent-conversation--pending-events nil)
@@ -646,7 +649,11 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
                   (alist-get 'labels body))))
            (last_total_tokens . ,(alist-get 'last_total_tokens body))
            (context_window . ,(alist-get 'context_window body))))
-        (clrhash omnigent-conversation--items)
+        (unless omnigent--conversation-side-chat-p
+          (clrhash omnigent-conversation--items)
+          (setq
+           omnigent-conversation--order nil
+           omnigent-conversation--order-tail nil))
         (clrhash omnigent-conversation--elicitations)
         (setq omnigent-conversation--elicitation-order nil)
         (dolist (request
@@ -663,9 +670,8 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
                  (copy-tree (cons '(state . queued) input) t))
                (append (alist-get 'pending_inputs body) nil)))
         (setq
-         omnigent-conversation--order nil
-         omnigent-conversation--order-tail nil
-         omnigent-conversation--response-id (alist-get 'active_response_id body)
+         omnigent-conversation--response-id
+         (alist-get 'active_response_id body)
          omnigent-conversation--section-id nil
          omnigent-conversation--loading nil)
         (dolist (item (append (alist-get 'items body) nil))
