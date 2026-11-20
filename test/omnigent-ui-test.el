@@ -1463,6 +1463,28 @@
         (should (equal omnigent-conversation--order '("committed")))
         (should (= (how-many "You:" (point-min) (point-max)) 1))))))
 
+(ert-deftest omnigent-ui-snapshot-hides-resource-events ()
+  "Do not render resource events as empty agent messages after refresh."
+  (omnigent-ui-test--conversation
+    (omnigent-conversation--snapshot
+     200
+     '((items
+        .
+        [((id . "resource")
+          (type . "resource_event")
+          (event_type . "session.resource.created"))
+         ((id . "user")
+          (type . "message")
+          (role . "user")
+          (content . "Hello"))])
+       (pending_inputs . []) (pending_elicitations . [])))
+    (omnigent-ui--transcript-render)
+    (should
+     (equal
+      (buffer-substring-no-properties
+       (point-min) omnigent-ui--request-start)
+      "You:\nHello\n\n"))))
+
 (ert-deftest omnigent-ui-scrolled-transcript-keeps-reading-position ()
   "Preserve point by item ID when transcript output is refreshed above the composer."
   (omnigent-ui-test--conversation

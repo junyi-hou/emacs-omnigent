@@ -857,7 +857,7 @@ Signal an error if point is not in a foldable block."
       (puthash id t omnigent-ui--folds)
       (remhash previous omnigent-ui--folds))
     (pcase type
-      ("function_call_output" nil)
+      ((or "function_call_output" "resource_event") nil)
       ((guard (eq (alist-get 'is_meta item) t)) nil)
       ("reasoning"
        (omnigent-ui--fold id "Thinking" text 'omnigent-ui-reasoning))
