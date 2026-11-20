@@ -1297,6 +1297,8 @@ AFTER is the cursor used for the current page."
 (defun omnigent--attachment-open (button)
   "Open the file named by BUTTON in the session workspace."
   (let ((path (button-label button)))
+    (when (string-match "\\`\\(.*\\):[0-9]+-[0-9]+\\'" path)
+      (setq path (match-string 1 path)))
     (omnigent-workspace--root
      omnigent-conversation-session-id
      (apply-partially #'omnigent--attachment-open-result
@@ -1603,6 +1605,108 @@ When SIDE-CHAT is non-nil, skip skill completion discovery."
   "Open the conversation for session ID, with optional TITLE."
   (interactive "sSession ID: ")
   (pop-to-buffer (omnigent--conversation-buffer id title)))
+
+;;;###autoload
+(defun omnigent-attach-file-to-session ()
+  "Attach the visited file or active region to a matching session composer."
+  (interactive)
+  (unless buffer-file-name
+    (user-error "This buffer does not visit a file"))
+  (let* ((file (expand-file-name buffer-file-name))
+         (region-start
+          (when (use-region-p)
+            (region-beginning)))
+         (region-end
+          (when region-start
+            (region-end)))
+         (range
+          (when region-start
+            (format ":%d-%d"
+                    (line-number-at-pos region-start t)
+                    (line-number-at-pos
+                     (max region-start (1- region-end)) t))))
+         matches)
+    (dolist (session (omnigent-sessions-visible))
+      (let* ((id (alist-get 'id session))
+             (root
+              (or (alist-get
+                   'root
+                   (gethash id omnigent-ui--workspace-cache))
+                  (alist-get 'workspace session)))
+             (host (alist-get 'host_id session)))
+        (when (and (stringp root) (stringp host) (stringp id))
+          (let ((mapped
+                 (condition-case nil
+                     (omnigent-workspace-local-filename
+                      root "" (omnigent-workspace-host-mapping host))
+                   (error
+                    nil))))
+            (when (and mapped
+                       (string-prefix-p
+                        (file-name-as-directory mapped) file))
+              (push (cons
+                     session
+                     (concat
+                      (substring file
+                                 (length
+                                  (file-name-as-directory mapped)))
+                      range))
+                    matches))))))
+    (unless matches
+      (user-error "No session workspace contains this file"))
+    (setq matches
+          (sort matches
+                (lambda (a b)
+                  (let ((left (alist-get 'updated_at (car a)))
+                        (right (alist-get 'updated_at (car b))))
+                    (if (and (numberp left) (numberp right))
+                        (> left right)
+                      (string>
+                       (format "%s" (or left ""))
+                       (format "%s" (or right ""))))))))
+    (let* ((choices
+            (mapcar
+             (lambda (match)
+               (let* ((session (car match))
+                      (id (alist-get 'id session)))
+                 (cons
+                  (format "%s [%s]"
+                          (or (alist-get 'title session) "Untitled")
+                          id)
+                  match)))
+             matches))
+           (selected
+            (cdr
+             (assoc
+              (completing-read "Attach to session: " choices
+                               nil t)
+              choices)))
+           (session (car selected))
+           (buffer
+            (omnigent--conversation-buffer
+             (alist-get 'id session) (alist-get 'title session)))
+           (window
+            (or (get-buffer-window buffer t)
+                (display-buffer buffer
+                                '(display-buffer-pop-up-window)))))
+      (unless (window-live-p window)
+        (user-error "Could not display the session"))
+      (with-current-buffer buffer
+        (when (or omnigent-conversation--invalid
+                  omnigent-conversation--permission-read-only)
+          (user-error "This session is unavailable or read-only"))
+        (let ((inhibit-read-only t))
+          (omnigent--attachment-set
+           (delete-dups
+            (append
+             (omnigent--attachment-paths) (list (cdr selected))))))
+        (goto-char
+         (or (car (omnigent--attachment-bounds)) (point-max))))
+      (select-window window)
+      (set-window-point
+       window
+       (with-current-buffer buffer
+         (point))))))
 
 ;;;###autoload
 (defun omnigent-conversation-side-chat (&optional callback)

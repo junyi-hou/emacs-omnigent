@@ -1642,6 +1642,72 @@
           (button-activate button))
         (should (equal opened "/workspace/src/a.el"))))))
 
+(ert-deftest omnigent-attach-file-to-session-selects-region-and-window
+    ()
+  "Attach the selected lines to the newest matching session's composer."
+  (save-window-excursion
+    (let* ((source (generate-new-buffer " *omnigent-file-test*"))
+           (target (generate-new-buffer " *omnigent-target-test*"))
+           (rows
+            '(((id . "old")
+               (title . "Old")
+               (host_id . "host")
+               (workspace . "/repo")
+               (updated_at . 1))
+              ((id . "new")
+               (title . "New")
+               (host_id . "host")
+               (workspace . "/repo")
+               (updated_at . 2))
+              ((id . "other")
+               (host_id . "host")
+               (workspace . "/repo-other")
+               (updated_at . 3))))
+           choices)
+      (unwind-protect
+          (progn
+            (with-current-buffer target
+              (setq-local omnigent-conversation--prompt-start
+                          (copy-marker (point-min)))
+              (insert "draft"))
+            (switch-to-buffer source)
+            (setq buffer-file-name "/repo/src/a.el")
+            (insert "first\nsecond\nthird\n")
+            (goto-char (point-min))
+            (forward-line 1)
+            (push-mark
+             (save-excursion
+               (forward-line 1)
+               (point))
+             t t)
+            (setq
+             mark-active t
+             transient-mark-mode t)
+            (cl-letf (((symbol-function 'omnigent-sessions-visible)
+                       (lambda () rows))
+                      ((symbol-function
+                        'omnigent-workspace-host-mapping)
+                       (lambda (_) 'local))
+                      ((symbol-function 'completing-read)
+                       (lambda (_prompt collection &rest _)
+                         (setq choices collection)
+                         (caar collection)))
+                      ((symbol-function
+                        'omnigent--conversation-buffer)
+                       (lambda (id _title &optional _)
+                         (should (equal id "new"))
+                         target)))
+              (omnigent-attach-file-to-session))
+            (should
+             (equal
+              (mapcar #'car choices) '("New [new]" "Old [old]")))
+            (should (eq (window-buffer (selected-window)) target))
+            (should
+             (equal (omnigent--attachment-paths) '("src/a.el:2-2")))
+            (should (string-prefix-p "draft" (buffer-string))))
+        (kill-buffer source)
+        (kill-buffer target)))))
+
 (provide 'omnigent-conversation-test)
 ;;; omnigent-conversation-test.el ends here
 (ert-deftest
