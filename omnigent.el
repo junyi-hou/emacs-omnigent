@@ -1094,9 +1094,7 @@ Close this conversation buffer after the session becomes archived."
          (kill-buffer buffer))))))
 
 (define-derived-mode
- omnigent-conversation-mode
- text-mode
- "Omnigent"
+ omnigent-conversation-mode text-mode "Omnigent"
  "Major mode for a conversation transcript and composer.
 Use `omnigent-conversation-open' to create a conversation buffer."
  (unless omnigent-conversation--session-id
@@ -1115,7 +1113,61 @@ Use `omnigent-conversation-open' to create a conversation buffer."
   omnigent-conversation--prompt-start (copy-marker (point-min))
   omnigent-conversation--prompt-end (copy-marker (point-max) t))
  (add-hook 'kill-buffer-hook #'omnigent-conversation--close nil t)
+ (add-hook
+  'completion-at-point-functions #'omnigent--conversation-command-capf
+  nil t)
  (omnigent--conversation-connect))
+
+(defvar-local omnigent--conversation-command-catalog-requested nil)
+(defvar-local omnigent--conversation-command-skills nil)
+
+(defun omnigent--conversation-command-catalog-result
+    (buffer status body)
+  "Cache skill names from STATUS and BODY in BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (if (and (omnigent-transport-success-p status)
+               (vectorp (alist-get 'skills body))
+               (vectorp (alist-get 'warnings body))
+               (cl-every
+                (lambda (skill)
+                  (stringp (alist-get 'name skill)))
+                (alist-get 'skills body)))
+          (progn
+            (setq omnigent--conversation-command-skills
+                  (mapcar
+                   (lambda (skill) (alist-get 'name skill))
+                   (append (alist-get 'skills body) nil)))
+            (when (> (length (alist-get 'warnings body)) 0)
+              (message "Skill discovery incomplete: %s"
+                       (mapconcat #'identity
+                                  (append
+                                   (alist-get 'warnings body) nil)
+                                  "; "))))
+        (message "Could not load skills for completion")))))
+
+(defun omnigent--conversation-command-capf ()
+  "Complete slash commands at the start of the composer."
+  (let ((start (marker-position omnigent-conversation--prompt-start)))
+    (when (and start
+               (>= (point) (1+ start)) (eq (char-after start) ?/)
+               (string-match-p
+                "\\`/[^[:space:]/]*\\'"
+                (buffer-substring-no-properties start (point))))
+      (list
+       start (point)
+       (mapcar
+        (lambda (name) (concat "/" name))
+        (append
+         '("model"
+           "effort"
+           "new"
+           "clear"
+           "compact"
+           "btw"
+           "side")
+         omnigent--conversation-command-skills))
+       :exclusive 'no))))
 
 (define-key
  omnigent-conversation-mode-map
@@ -1129,26 +1181,46 @@ Use `omnigent-conversation-open' to create a conversation buffer."
 (defun omnigent--conversation-connect ()
   "Start the current conversation stream without replacing its draft."
   (let ((buffer (current-buffer)))
-    (setq omnigent-conversation--stream
-          (omnigent-transport-start-session-stream
-           omnigent-conversation-session-id
-           (lambda (name data)
-             (when (buffer-live-p buffer)
-               (with-current-buffer buffer
-                 (omnigent-conversation--event name data))))
-           (lambda (status body)
-             (when (buffer-live-p buffer)
-               (with-current-buffer buffer
-                 (omnigent-conversation--snapshot status body))))
-           (lambda (err) (message "Omnigent stream: %s" err))
-           (lambda ()
-             (when (buffer-live-p buffer)
-               (with-current-buffer buffer
-                 (omnigent-conversation--begin-snapshot))))
-           (lambda (state)
-             (when (buffer-live-p buffer)
-               (with-current-buffer buffer
-                 (omnigent-conversation--connection-state state))))))
+    (setq
+     omnigent-conversation--stream
+     (omnigent-transport-start-session-stream
+      omnigent-conversation-session-id
+      (lambda (name data)
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (omnigent-conversation--event name data))))
+      (lambda (status body)
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (omnigent-conversation--snapshot status body))))
+      (lambda (err) (message "Omnigent stream: %s" err))
+      (lambda ()
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (omnigent-conversation--begin-snapshot))))
+      (lambda (state)
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (omnigent-conversation--connection-state state)
+            (when (and
+                   (eq state 'connected)
+                   (not
+                    omnigent--conversation-command-catalog-requested))
+              (setq
+               omnigent--conversation-command-catalog-requested t)
+              (condition-case err
+                  (omnigent-transport--request
+                   omnigent-conversation-session-id "GET"
+                   (concat
+                    "/v1/skills?session_id="
+                    (url-hexify-string
+                     omnigent-conversation-session-id))
+                   (apply-partially
+                    #'omnigent--conversation-command-catalog-result
+                    buffer))
+                (error
+                 (message "Could not load skills for completion: %s"
+                          (error-message-string err))))))))))
     ;; A synchronous snapshot setup failure can arrive before the handle is assigned.
     (when omnigent-conversation--invalid
       (omnigent-transport-stop-session-stream

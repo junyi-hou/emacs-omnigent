@@ -1552,3 +1552,16 @@
 
 (provide 'omnigent-conversation-test)
 ;;; omnigent-conversation-test.el ends here
+(ert-deftest
+    omnigent-conversation-command-completion-at-composer-start
+    ()
+  "Complete local commands and cached skills only at the composer start."
+  (with-temp-buffer
+    (insert "transcript\n/re")
+    (let ((omnigent-conversation--prompt-start (copy-marker 12))
+          (omnigent--conversation-command-skills '("review")))
+      (let ((capf (omnigent--conversation-command-capf)))
+        (should (member "/review" (nth 2 capf)))
+        (should (member "/model" (nth 2 capf))))
+      (insert " ")
+      (should-not (omnigent--conversation-command-capf)))))

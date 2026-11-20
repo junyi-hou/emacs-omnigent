@@ -42,7 +42,7 @@ permission controls are deferred.
 | `/new` | Call `omnigent-sessions-create` interactively and clear the composer. |
 | `/btw [question]` | Alias for `/side [question]`. |
 | `/side [question]` | Open a private side chat on the source runner. Send the optional question in the side chat. |
-| `/help` | No-op. Slash completion via `completion-at-point-functions` is planned. |
+| `/help` | No-op. |
 
 The clear command starts a session with no title or prior context on the same host
 and workspace. The server handles session creation. The client opens and selects
@@ -99,11 +99,10 @@ an empty catalog. If the client cannot determine whether a slash command names a
 skill, preserve the draft and report the discovery problem instead of sending it
 as plain text. This prevents a missed skill from bypassing the structured route.
 
-Fetch the catalog asynchronously when a slash command needs skill matching.
-Refresh it before later skill dispatches. When future completion support fetches a
-very recent catalog while the user types, reuse that cached result for dispatch.
-Preserve the distinction between a complete empty catalog and an unavailable or
-incomplete catalog when caching results.
+Fetch the catalog asynchronously when the session stream first connects. Cache its
+skill names for completion at the start of the composer, alongside supported local
+commands. Report discovery warnings. Fetch a fresh catalog when a slash command
+needs skill matching, so dispatch does not rely on stale or incomplete results.
 
 ## Draft and request behavior
 
