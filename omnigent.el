@@ -297,6 +297,40 @@ With a prefix argument EDIT, open the session creation menu."
         (omnigent--create-menu)
       (omnigent--create-submit))))
 
+;;;###autoload
+(defun omnigent-sessions-create-from-file ()
+  "Create an unassigned session from the current file buffer.
+Use the Emacs project root or, outside a project, `default-directory'
+as the workspace on a local execution host."
+  (interactive)
+  (unless buffer-file-name
+    (user-error "Current buffer does not visit a file"))
+  (let* ((project (project-current nil))
+         (workspace
+          (omnigent-sessions--native-workspace
+           (if project
+               (project-root project)
+             default-directory)))
+         (fields (omnigent--create-default-fields))
+         (draft (cons omnigent-transport--generation fields)))
+    (setf
+     (alist-get 'host_type fields) "external"
+     (alist-get 'workspace fields) workspace
+     (alist-get 'git fields) nil)
+    (setq omnigent--create-draft draft)
+    (omnigent--create-pick-location
+     draft
+     (lambda (target)
+       (when target
+         (unless
+             (eq
+              (omnigent-workspace-host-mapping (car target)) 'local)
+           (user-error
+            "Select a local execution host for the file buffer"))
+         (omnigent--create-submit)))
+     nil
+     t)))
+
 (defun omnigent--create-pick-location
     (draft callback &optional session keep)
   "Update DRAFT location using SESSION context, then call CALLBACK.
@@ -1644,8 +1678,6 @@ When SIDE-CHAT is non-nil, skip skill completion discovery."
 (defun omnigent-attach-file-to-session ()
   "Attach the visited file or active region to a matching session composer."
   (interactive)
-  (unless buffer-file-name
-    (user-error "This buffer does not visit a file"))
   (let* ((file (expand-file-name buffer-file-name))
          (region-start
           (when (use-region-p)

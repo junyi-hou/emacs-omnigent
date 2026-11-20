@@ -314,6 +314,45 @@
         (omnigent-sessions-create)
         (should-not (assoc "project_id" payload))))))
 
+(ert-deftest omnigent-sessions-create-from-file-uses-buffer-workspace
+    ()
+  "Send the project root or buffer directory without a server project."
+  (let ((omnigent-session-default-host-type "managed")
+        (omnigent-session-default-host nil)
+        (omnigent-session-default-workspace "/configured")
+        (omnigent-session-default-worktree-branch "new-branch")
+        root)
+    (cl-letf (((symbol-function 'project-current)
+               (lambda (&rest _) (and root (cons 'transient root))))
+              ((symbol-function 'omnigent-sessions--read-workspace)
+               (lambda (callback _session _host workspace)
+                 (funcall callback (cons "host" workspace))))
+              ((symbol-function 'omnigent-workspace-host-mapping)
+               (lambda (_host) 'local))
+              ((symbol-function 'omnigent--create-resolve)
+               (lambda (draft &rest _)
+                 (let ((fields (cdr draft)))
+                   (should
+                    (equal (alist-get 'host_type fields) "external"))
+                   (should (equal (alist-get 'host_id fields) "host"))
+                   (should
+                    (equal
+                     (alist-get 'workspace fields)
+                     (or root default-directory)))
+                   (should-not (assq 'project_id fields))
+                   (should-not (alist-get 'git fields))))))
+      (with-temp-buffer
+        (setq default-directory "/repo/subdir/")
+        (should-error
+         (omnigent-sessions-create-from-file)
+         :type 'user-error)
+        (setq
+         buffer-file-name "/repo/subdir/file"
+         root "/repo/")
+        (omnigent-sessions-create-from-file)
+        (setq root nil)
+        (omnigent-sessions-create-from-file)))))
+
 (ert-deftest omnigent-sessions-create-prefix-uses-same-defaults ()
   "Use the same draft for quick creation and the menu."
   (let ((omnigent-session-default-agent "configured")
