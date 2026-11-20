@@ -1365,6 +1365,8 @@ AFTER is the cursor used for the current page."
            '(omnigent-attachment-block t rear-nonsticky t))
           (put-text-property
            start (point) 'font-lock-face 'omnigent-ui-attachment)
+          (put-text-property
+           start (point) 'face 'omnigent-ui-attachment)
           (let ((pos start))
             (while (< pos (point))
               (let ((next
@@ -1373,6 +1375,7 @@ AFTER is the cursor used for the current page."
                       nil (point))))
                 (when (get-text-property
                        pos 'omnigent-attachment-path)
+                  (put-text-property pos next 'face 'link)
                   (put-text-property pos next 'font-lock-face 'link))
                 (setq pos next)))))))))
 

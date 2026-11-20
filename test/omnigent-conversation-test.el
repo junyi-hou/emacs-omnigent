@@ -1632,9 +1632,15 @@
       (omnigent--attachment-set '("src/a.el"))
       (omnigent-ui--markdown-apply (point-min) (point-max) nil)
       (goto-char (point-min))
+      (search-forward "Attached (files)")
+      (should
+       (eq
+        (get-text-property (1- (point)) 'face)
+        'omnigent-ui-attachment))
       (search-forward "src/a.el")
       (let ((button (button-at (1- (point)))))
         (should button)
+        (should (eq (get-text-property (1- (point)) 'face) 'link))
         (should
          (eq (get-text-property (1- (point)) 'font-lock-face) 'link))
         (cl-letf (((symbol-function 'omnigent-workspace--root)
