@@ -277,8 +277,13 @@ With a prefix argument EDIT, open the session creation menu."
               (and (derived-mode-p 'omnigent-conversation-mode)
                    (alist-get
                     'workspace omnigent-conversation-header-data))))
+         (project
+          (and (derived-mode-p 'omnigent-ui-sessions-mode)
+               (omnigent-ui--project-at-point)))
          (fields (omnigent--create-default-fields))
          (configured-host (alist-get 'host_id fields)))
+    (when (stringp project)
+      (setf (alist-get 'project_id fields) project))
     (unless (equal (alist-get 'host_type fields) "managed")
       (unless configured-host
         (setf (alist-get 'host_id fields) host))
@@ -1863,14 +1868,6 @@ When UNASSIGN is non-nil, offer to remove the project assignment."
     (unless (= generation omnigent-transport--generation)
       (user-error "Server changed during project creation"))
     (omnigent-sessions-create-project name)))
-
-(defun omnigent-ui-create-at-point ()
-  "Create a session on a session row or a project on a heading."
-  (interactive)
-  (call-interactively
-   (if (omnigent-ui--session-id-at-point)
-       #'omnigent-sessions-create
-     #'omnigent-ui-create-project)))
 
 (defun omnigent-ui-rename-project ()
   "Rename the project heading at point in the session buffer."

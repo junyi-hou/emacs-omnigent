@@ -185,6 +185,36 @@
        (equal (cdr (assoc "workspace" post-data)) "/srv/project"))
       (should (equal (alist-get 'id created) "new")))))
 
+(ert-deftest omnigent-sessions-create-from-project-heading ()
+  "Send the project at point with a new session in both creation paths."
+  (let ((omnigent-session-default-host-type "external")
+        (omnigent-session-default-host "host")
+        (omnigent-session-default-workspace "/repo")
+        (omnigent-session-default-agent "agent")
+        payload
+        menu)
+    (cl-letf (((symbol-function 'omnigent-transport-request)
+               (lambda (_method _path _callback data)
+                 (setq payload data)))
+              ((symbol-function 'omnigent--create-menu)
+               (lambda () (setq menu omnigent--create-draft))))
+      (with-temp-buffer
+        (setq major-mode 'omnigent-ui-sessions-mode)
+        (insert
+         (propertize "Project" 'omnigent-ui-project "project-1"))
+        (goto-char (point-min))
+        (omnigent-sessions-create)
+        (should
+         (equal (cdr (assoc "project_id" payload)) "project-1"))
+        (omnigent-sessions-create '(4))
+        (should
+         (equal (alist-get 'project_id (cdr menu)) "project-1"))
+        (put-text-property
+         (point-min) (point-max) 'omnigent-ui-project 'unassigned)
+        (setq payload nil)
+        (omnigent-sessions-create)
+        (should-not (assoc "project_id" payload))))))
+
 (ert-deftest omnigent-sessions-create-prefix-uses-same-defaults ()
   "Use the same draft for quick creation and the menu."
   (let ((omnigent-session-default-agent "configured")
