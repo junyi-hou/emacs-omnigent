@@ -213,18 +213,20 @@ Refresh the list if FRAME contains a session that is not in the list."
                  omnigent-sessions
                  :key (lambda (row) (alist-get 'id row))
                  :test #'equal)))
-          (if old
-              (setq omnigent-sessions
-                    (mapcar
-                     (lambda (row)
-                       (if (eq row old)
-                           item
-                         row))
-                     omnigent-sessions))
-            (when (and (omnigent-sessions-buffer id)
-                       (not (alist-get 'parent_session_id item)))
-              (push item omnigent-sessions))
-            (setq unknown t)))))
+          (unless (alist-get
+                   'omnigent.side_chat (alist-get 'labels item))
+            (if old
+                (setq omnigent-sessions
+                      (mapcar
+                       (lambda (row)
+                         (if (eq row old)
+                             item
+                           row))
+                       omnigent-sessions))
+              (when (and (omnigent-sessions-buffer id)
+                         (not (alist-get 'parent_session_id item)))
+                (push item omnigent-sessions))
+              (setq unknown t))))))
      ((equal type "removed")
       (let ((ids (append (alist-get 'ids frame) nil)))
         (setq omnigent-sessions
@@ -950,6 +952,48 @@ When BRANCH is non-nil, create a worktree with that new branch."
     `(("session_id" . ,id) ("workspace" . ,workspace))
     (when branch
       `(("git" . (("branch_name" . ,branch))))))))
+
+(defun omnigent-sessions-side-chat (id callback)
+  "Fork a private side chat from ID and attach it to the source runner.
+Call CALLBACK with (STATUS BODY).  On success, BODY is the forked session.
+The source session must have a connected runner."
+  (omnigent-transport-get-session
+   id
+   (lambda (status source)
+     (let ((runner
+            (and (listp source) (alist-get 'runner_id source))))
+       (cond
+        ((not (omnigent-transport-success-p status))
+         (funcall callback status source))
+        ((or (eq (alist-get 'runner_online source) :json-false)
+             (not
+              (and (stringp runner) (not (string-empty-p runner)))))
+         (funcall callback nil "Reconnect the source session first"))
+        (t
+         (omnigent-sessions-fork
+          id '(("side_chat" . t) ("title" . "Side chat"))
+          (lambda (fork-status session)
+            (let ((child
+                   (and (listp session) (alist-get 'id session))))
+              (cond
+               ((not (omnigent-transport-success-p fork-status))
+                (funcall callback fork-status session))
+               ((not
+                 (and (stringp child) (not (string-empty-p child))))
+                (funcall callback nil "Invalid side chat response"))
+               (t
+                (omnigent-transport--request
+                 child
+                 "PATCH"
+                 (omnigent-transport--session-path child)
+                 (lambda (bind-status body)
+                   (funcall callback
+                            bind-status
+                            (if (omnigent-transport-success-p
+                                 bind-status)
+                                session
+                              body)))
+                 `(("runner_id" . ,runner))))))))))))))
 
 (defun omnigent-sessions-toggle-archive (id callback)
   "Toggle ID's current server archive state and invoke CALLBACK with the result.

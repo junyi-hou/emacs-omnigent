@@ -765,6 +765,51 @@ Return the marked prompt that was sent."
     (omnigent-functional-send
      buffer (omnigent-mock-configure-fixture name marker))))
 
+(ert-deftest omnigent-mock-side-chat ()
+  "Fork the source history and send a slash question only to the side chat."
+  (let* ((id (omnigent-integration-create-session t))
+         (prompt (omnigent-functional-marker))
+         (question (omnigent-functional-marker))
+         (omnigent-side-chat-display-action nil)
+         source
+         side)
+    (unwind-protect
+        (save-window-excursion
+          (omnigent-mock-configure
+           prompt [((text . "source answer"))])
+          (omnigent-mock-configure
+           question [((text . "side answer"))])
+          (setq source (omnigent-functional-open id))
+          (omnigent-functional-send source prompt)
+          (omnigent-functional-wait "Source turn did not finish"
+            (omnigent-functional-exchange-stored-p
+             id prompt "source answer"))
+          (omnigent-functional-send source (concat "/side " question))
+          (setq side
+                (cdr
+                 (cl-find-if
+                  (lambda (entry)
+                    (not (equal (car entry) id)))
+                  omnigent-sessions--buffers)))
+          (should (buffer-live-p side))
+          (should-not (get-buffer-window side))
+          (let ((child
+                 (buffer-local-value
+                  'omnigent-conversation-session-id side)))
+            (omnigent-functional-wait "Side chat did not answer"
+              (omnigent-functional-exchange-stored-p
+               child question "side answer"))
+            (should
+             (omnigent-functional-exchange-stored-p
+              child prompt "source answer"))
+            (should-not
+             (omnigent-functional-exchange-stored-p
+              id question "side answer"))))
+      (when (buffer-live-p side)
+        (kill-buffer side))
+      (when (buffer-live-p source)
+        (kill-buffer source)))))
+
 (ert-deftest omnigent-mock-acp-follow-up-visible-and-recovered ()
   "Keep a follow-up visible while busy and recover only server state on reopen."
   (let* ((id (omnigent-integration-create-session t))

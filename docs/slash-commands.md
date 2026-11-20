@@ -26,9 +26,9 @@ messages and skill commands.
 ## Omnigent commands
 
 The following names belong to Omnigent. Unsupported commands call one shared
-no-op handler. It reports that the command is not supported and preserves the
-draft. It does not send the text to the harness. Side-chat support, MCP controls,
-and permission controls are deferred.
+no-op handler. It reports that the command is not supported and preserves
+the draft. It does not send the text to the harness. MCP controls and
+permission controls are deferred.
 
 | Command | Emacs behavior |
 |---|---|
@@ -40,8 +40,8 @@ and permission controls are deferred.
 | `/mcp` | No-op. MCP controls are deferred. |
 | `/permissions` | No-op. A permission setting command is planned; harness-specific handling is deferred. |
 | `/new` | Call `omnigent-sessions-create` interactively and clear the composer. |
-| `/btw [question]` | No-op. Side questions are deferred. |
-| `/side [question]` | No-op. Side-chat design is deferred. |
+| `/btw [question]` | Alias for `/side [question]`. |
+| `/side [question]` | Open a private side chat on the source runner. Send the optional question in the side chat. |
 | `/help` | No-op. Slash completion via `completion-at-point-functions` is planned. |
 
 The clear command starts a session with no title or prior context on the same host
@@ -128,6 +128,12 @@ submission of the same local command while its selection or request is pending.
 Report the pending state when the user attempts another submission. Normal message
 submission remains governed by the existing sending state.
 
+For `/side` and `/btw`, clear the original command after the side chat
+opens. Preserve any edits to the source draft. If there is a question, put
+it in the side chat composer and send it when the buffer becomes writable.
+If the send fails, the side chat composer keeps the question. See [side
+chat](conversation-buffer.md#side-chat).
+
 ## Source and open decisions
 
 The inventory comes from the installed Omnigent web frontend bundle
@@ -138,8 +144,8 @@ command for every session. Its `/compact` and `/clear` behavior depends on the
 harness; the server also defines `compact` and `clear` session events.
 
 Confirm the compact dispatch and clear replacement event for each harness before
-implementation. Side chats, MCP presentation, and permission controls need their
-own design. The draft and request rules above apply to setting mutations; other
+implementation. MCP presentation and permission controls need their own design.
+The draft and request rules above apply to setting mutations; other
 commands need outcome and cancellation rules appropriate to their action.
 
 ## Checks for implementation

@@ -163,7 +163,7 @@ a potentially accepted message automatically.
 - **Send** posts `{"type":"message",...}` through
   `omnigent-transport-post-session-event` without checking session status. The server
   accepts or rejects the request and owns the queue. Report a rejection and keep the
-  draft. Forking is deferred.
+  draft.
 - **Accepted messages** remain visible after the server confirms acceptance. Trust the
   server response and its identifiers: render a committed item as history, or show a
   pending input with a `[queued]` label. A `queued: true` response can also include an
@@ -214,6 +214,37 @@ stream and includes pending inputs in snapshots. The stream has no history repla
 refresh the snapshot after reconnect and after interrupt; buffer live events during the
 snapshot as described above. Check the exact identifiers and interrupt behavior for each
 supported harness before implementation.
+
+## Side chat
+
+`omnigent-conversation-side-chat` opens a separate conversation buffer with
+the source history. Use `/side` or `/btw` in the composer. Add a question to
+send it in the new chat once its buffer becomes writable. See [slash
+commands](slash-commands.md) for draft behavior.
+
+`omnigent-sessions-side-chat` creates the private fork with `side_chat:
+true` and attaches it to the source runner. The source runner must be
+connected. The server excludes side chats from session listings. The client
+also excludes them when it processes list updates. Killing the buffer closes
+its stream. The server retains the chat and its history.
+
+Lisp callers can bind `omnigent-side-chat-display-action` to nil to keep the
+buffer hidden. The command captures the option before the request. Its
+optional callback receives the HTTP status and buffer on success. Wait for
+the buffer to become writable before inserting text at `point-max` and
+calling `omnigent-conversation-send`.
+
+For a caller that only needs the answer, use `omnigent-sessions-side-chat`
+to get a session ID. Start the stream with
+`omnigent-transport-start-session-stream`. Wait for the initial snapshot and
+live connection. Then post the question with
+`omnigent-transport-post-session-event`. The POST callback reports
+acceptance. Read assistant items from `response.output_item.done` and match
+them to the new turn to exclude inherited history. For native harnesses,
+track the new response ID from `session.status`. An empty
+`response.completed` can acknowledge input delivery before the turn
+finishes. Recover committed items from a snapshot after a disconnect. The
+client has no single callback for the final answer.
 
 ## Harness and session errors
 

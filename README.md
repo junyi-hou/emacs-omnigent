@@ -85,6 +85,59 @@ Session lists refresh after ten seconds of idle time, including when hidden.
 Workspace refresh failures retain the previous view without a notification.
 Transcript text uses plain text, not Markdown rendering.
 
+### Side chat
+
+Run `M-x omnigent-conversation-side-chat` or submit `/side` to open a
+private fork with the current conversation's history. Use `/side QUESTION`
+to send a question in the side chat. The source session must have a
+connected runner. Customize `omnigent-side-chat-display-action` to change
+where Emacs opens the chat. `/btw` and `/btw QUESTION` work the same way.
+
+#### Ask for a one-shot answer from Lisp
+
+Call this example from the source conversation with lexical binding enabled.
+It opens a hidden side chat and sends one question. The open callback
+receives the HTTP status and the new buffer on success.
+
+```elisp
+(defun my-side-chat-send (question observe)
+  "Send QUESTION in a hidden side chat and pass its events to OBSERVE."
+  (let ((omnigent-side-chat-display-action nil))
+    (omnigent-conversation-side-chat
+     (lambda (status body)
+       (if (omnigent-transport-success-p status)
+           (with-current-buffer body
+             (add-hook 'omnigent-conversation-event-hook observe nil t)
+             (letrec ((send-when-ready
+                       (lambda ()
+                         (unless buffer-read-only
+                           (remove-hook 'omnigent-conversation-change-hook
+                                        send-when-ready t)
+                           (goto-char (point-max))
+                           (insert question)
+                           (omnigent-conversation-send)))))
+               (add-hook 'omnigent-conversation-change-hook
+                         send-when-ready t t)
+               (funcall send-when-ready)))
+         (message "%s" (omnigent-transport-error-message
+                        "Open side chat" status body)))))))
+```
+
+`send-when-ready` checks the composer immediately and after each
+conversation change. Once the composer is writable, the function removes
+itself before sending. `letrec` lets the function refer to itself for that
+removal.  The send command treats a leading slash as a possible slash
+command.
+
+Your `observe` function receives `(EVENT-NAME DATA)` in the side chat
+buffer.  Collect the assistant messages for the new turn from
+`response.output_item.done` events. Use the answer when that turn finishes.
+An empty `response.completed` can acknowledge native input delivery before
+the agent answers. Handle failures and set a timeout for the exchange.  Kill
+the buffer when you finish or give up. The server retains the side chat and
+its history. See [Side chat](docs/conversation-buffer.md#side-chat) for turn
+tracking and the bufferless API.
+
 Run unit tests and both native integration suites separately:
 
 ```sh
@@ -120,7 +173,6 @@ deleted file. Omnigent does not distinguish that failure from a new file.
 - [ ] Design centralized authentication for remote servers, including token expiration.
 - [ ] Fetch sessions incrementally: load 20 first, then let the user fetch more.
 - [ ] Fetch older conversation items on demand.
-- [ ] Support side chat.
 
 ## Sources
 

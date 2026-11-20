@@ -1207,10 +1207,8 @@ Use the current project root when the session workspace is unavailable."
  'omnigent-sessions-change-hook
  #'omnigent-conversation--update-directories)
 
-;;;###autoload
-(defun omnigent-conversation-open (id &optional title)
-  "Open the conversation for session ID, with optional TITLE."
-  (interactive "sSession ID: ")
+(defun omnigent--conversation-buffer (id title)
+  "Return the conversation buffer for session ID, creating it with TITLE."
   (let* ((directory (omnigent-conversation--default-directory id))
          (buffer (omnigent-sessions-buffer id))
          (session
@@ -1248,7 +1246,53 @@ Use the current project root when the session workspace is unavailable."
              (not (string-empty-p workspace))
              (stringp host)
              (not (string-empty-p host))))))
-    (pop-to-buffer buffer)))
+    buffer))
+
+;;;###autoload
+(defun omnigent-conversation-open (id &optional title)
+  "Open the conversation for session ID, with optional TITLE."
+  (interactive "sSession ID: ")
+  (pop-to-buffer (omnigent--conversation-buffer id title)))
+
+;;;###autoload
+(defun omnigent-conversation-side-chat (&optional callback)
+  "Open a private side chat with the current conversation's history.
+Use `omnigent-side-chat-display-action' as set when called.
+Optional CALLBACK receives (STATUS BODY) asynchronously.  On HTTP success,
+BODY is the conversation buffer.  It may still be loading its transcript.
+On failure, BODY holds the diagnostics.  Without CALLBACK, report errors
+in the echo area."
+  (interactive)
+  (unless (derived-mode-p 'omnigent-conversation-mode)
+    (user-error "No Omnigent conversation in this buffer"))
+  (when buffer-read-only
+    (user-error "This session is read-only"))
+  (let ((action omnigent-side-chat-display-action)
+        (result
+         (or callback
+             (lambda (status body)
+               (unless (omnigent-transport-success-p status)
+                 (message "%s"
+                          (omnigent-transport-error-message
+                           "Open side chat" status body)))))))
+    (omnigent-sessions-side-chat
+     omnigent-conversation-session-id
+     (lambda (status session)
+       (if (not (omnigent-transport-success-p status))
+           (funcall result status session)
+         (let* ((id (alist-get 'id session))
+                (buffer
+                 (condition-case err
+                     (omnigent--conversation-buffer
+                      id (alist-get 'title session))
+                   (error
+                    (setq status nil)
+                    (format "Side chat %s: %s"
+                            id
+                            (error-message-string err))))))
+           (when (and action (bufferp buffer))
+             (pop-to-buffer buffer action))
+           (funcall result status buffer)))))))
 
 (defun omnigent-conversation-reconnect ()
   "Reconnect the current session and preserve its composer draft."
@@ -1460,6 +1504,52 @@ Use the current project root when the session workspace is unavailable."
   (omnigent--conversation-validate-command text t)
   (omnigent--conversation-control "compact" text))
 
+(defun omnigent--side-chat-send-question (question)
+  "Put QUESTION in the side chat composer and send it when writable."
+  (let ((inhibit-read-only t))
+    (goto-char (point-max))
+    (insert question))
+  (letrec ((send
+            (lambda ()
+              (unless buffer-read-only
+                (remove-hook 'omnigent-conversation-change-hook send
+                             t)
+                (condition-case err
+                    (omnigent--conversation-message question)
+                  (error
+                   (message "%s" (error-message-string err))))))))
+    (add-hook 'omnigent-conversation-change-hook send t t)
+    (funcall send)))
+
+(defun omnigent--conversation-side-command (text)
+  "Open a side chat for command TEXT and submit its optional question."
+  (omnigent--conversation-validate-command text)
+  (let ((source (current-buffer))
+        (question (omnigent--conversation-command-arguments text)))
+    (setq omnigent-conversation--sending t)
+    (condition-case err
+        (omnigent-conversation-side-chat
+         (lambda (status body)
+           (when (and (buffer-live-p source)
+                      (not
+                       (buffer-local-value
+                        'omnigent-conversation--invalid source)))
+             (with-current-buffer source
+               (setq omnigent-conversation--sending nil)
+               (when (omnigent-transport-success-p status)
+                 (let ((inhibit-read-only t))
+                   (omnigent--composer-clear text)))))
+           (if (omnigent-transport-success-p status)
+               (unless (string-empty-p question)
+                 (with-current-buffer body
+                   (omnigent--side-chat-send-question question)))
+             (message "%s"
+                      (omnigent-transport-error-message
+                       "Open side chat" status body)))))
+      ((error quit)
+       (setq omnigent-conversation--sending nil)
+       (signal (car err) (cdr err))))))
+
 (defun omnigent--conversation-unsupported-command (text)
   "Report that the command in TEXT is not supported."
   (omnigent--conversation-validate-command text)
@@ -1492,8 +1582,8 @@ Use the current project root when the session workspace is unavailable."
     ("context" . ,#'omnigent--conversation-unsupported-command)
     ("mcp" . ,#'omnigent--conversation-unsupported-command)
     ("permissions" . ,#'omnigent--conversation-unsupported-command)
-    ("btw" . ,#'omnigent--conversation-unsupported-command)
-    ("side" . ,#'omnigent--conversation-unsupported-command)
+    ("btw" . ,#'omnigent--conversation-side-command)
+    ("side" . ,#'omnigent--conversation-side-command)
     ("help" . ,#'omnigent--conversation-unsupported-command)
     (slash . ,#'omnigent--conversation-skill-command)
     (t . ,#'omnigent--conversation-message))

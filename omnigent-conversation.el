@@ -53,7 +53,7 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 (defvar-local omnigent-conversation--response-id nil)
 (defvar-local omnigent-conversation--section-id nil)
 (defvar-local omnigent-conversation-change-hook nil
-  "Hook run after transcript state changes in this buffer.")
+  "Hook run after conversation state changes in this buffer.")
 (defvar-local omnigent-conversation-event-hook nil
   "Hook called with stream event name and data after processing.")
 (defvar-local omnigent-conversation--elicitation-order nil)
@@ -467,8 +467,11 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 (defun omnigent-conversation--connection-state (state)
   "Apply stream connection STATE to this conversation."
   (unless omnigent-conversation--invalid
-    (setq omnigent-conversation--connected (eq state 'connected))
-    (omnigent-conversation--read-only)))
+    (let ((was-read-only buffer-read-only))
+      (setq omnigent-conversation--connected (eq state 'connected))
+      (omnigent-conversation--read-only)
+      (unless (eq was-read-only buffer-read-only)
+        (omnigent-conversation--notify-input-change)))))
 
 (defun omnigent-conversation--begin-snapshot ()
   "Make this conversation read-only and buffer events during its next snapshot."

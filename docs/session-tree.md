@@ -188,12 +188,11 @@ and full history by default. The response picker lists response IDs
 from the loaded conversation. For model and reasoning effort, distinguish inheritance
 from a reset to the selected agent's defaults.
 
-Resolve the host and workspace before creating the fork. Send the
-history and agent options in the fork request. After the server
-creates the fork, launch its runner on the selected host. If launch
-fails, report the fork ID so the user can find the session that
-already exists. Keep the fork request separate from runner launch
-so side chat can reuse it.
+Resolve the host and workspace before creating the fork. Send the history
+and agent options in the fork request. After the server creates the fork,
+launch its runner on the selected host. If launch fails, report the fork ID
+so the user can find the session that already exists. Keep the fork request
+separate from runner launch.
 
 For a managed fork, choose the managed host type in the menu. When the
 source is known to use a managed sandbox, the quick fork uses a new

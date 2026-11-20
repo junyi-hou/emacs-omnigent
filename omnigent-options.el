@@ -108,6 +108,13 @@ A URL can include a #branch fragment.  Nil uses an empty workspace."
   :type '(choice (const :tag "Use default" nil) string)
   :group 'omnigent-session-creation)
 
+(defcustom omnigent-side-chat-display-action
+  '(display-buffer-in-side-window (side . right) (window-width . 0.4))
+  "Display action passed to `pop-to-buffer' for a new side chat.
+Nil leaves the conversation buffer undisplayed."
+  :type '(choice (const :tag "Do not display" nil) sexp)
+  :group 'omnigent)
+
 (defcustom omnigent-conversation-mode-map
   (let ((map (make-sparse-keymap)))
     (require 'text-mode)

@@ -153,6 +153,60 @@
           buffer-read-only nil)
          ,@body))))
 
+(ert-deftest omnigent-ui-btw-opens-side-chat ()
+  "Open a side chat for /btw and send its question when supplied."
+  (dolist (question '(nil "What changed?"))
+    (with-temp-buffer
+      (let ((side (current-buffer))
+            opened
+            sent)
+        (omnigent-ui-test--conversation
+          (cl-letf (((symbol-function
+                      'omnigent-conversation-side-chat)
+                     (lambda (callback)
+                       (setq opened t)
+                       (funcall callback 200 side)))
+                    ((symbol-function
+                      'omnigent--side-chat-send-question)
+                     (lambda (text)
+                       (should (eq (current-buffer) side))
+                       (setq sent text))))
+            (insert
+             (if question
+                 (concat "/btw " question)
+               "/btw"))
+            (omnigent-conversation-send)
+            (should opened)
+            (should (equal sent question))))))))
+
+(ert-deftest omnigent-ui-side-chat-question-waits-for-connection ()
+  "Keep the question in the composer until the side chat can send it."
+  (omnigent-ui-test--conversation
+    (let (requests)
+      (cl-letf (((symbol-function
+                  'omnigent-transport-post-session-event)
+                 (lambda (id event callback)
+                   (push (cons id event) requests)
+                   (funcall callback 400 '((detail . "Rejected"))))))
+        (omnigent-conversation--connection-state 'connecting)
+        (omnigent--side-chat-send-question "/literal question")
+        (should-not requests)
+        (omnigent-conversation--connection-state 'connected)
+        (run-hooks 'omnigent-conversation-change-hook)
+        (should (= (length requests) 1))
+        (should
+         (equal
+          (alist-get "type" (cdar requests)
+                     nil
+                     nil
+                     #'equal)
+          "message"))
+        (should
+         (equal
+          (buffer-substring-no-properties
+           omnigent-conversation--prompt-start (point-max))
+          "/literal question"))))))
+
 (ert-deftest omnigent-ui-conversation-header-tracks-session-data ()
   "Show snapshot settings and update them from partial stream events."
   (omnigent-ui-test--conversation

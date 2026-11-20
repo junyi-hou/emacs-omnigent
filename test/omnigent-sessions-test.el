@@ -90,6 +90,54 @@
       (omnigent--fork-launched '((id . "fork")) 400 "failed")
       (should (string-match-p "fork" reported)))))
 
+(ert-deftest omnigent-sessions-side-chat-shares-runner ()
+  "Create a side chat and bind it to the runner from the source snapshot."
+  (let (requests
+        result)
+    (cl-letf (((symbol-function 'omnigent-transport--request)
+               (lambda (_id method path callback &optional data)
+                 (push (list method path data) requests)
+                 (pcase method
+                   ("GET"
+                    (funcall callback 200 '((runner_id . "runner"))))
+                   ("POST" (funcall callback 201 '((id . "side"))))
+                   ("PATCH" (funcall callback 200 nil))))))
+      (omnigent-sessions-side-chat
+       "source"
+       (lambda (status body) (setq result (cons status body)))))
+    (should
+     (equal
+      (nreverse requests)
+      '(("GET" "/v1/sessions/source" nil)
+        ("POST"
+         "/v1/sessions/source/fork"
+         (("side_chat" . t) ("title" . "Side chat")))
+        ("PATCH" "/v1/sessions/side" (("runner_id" . "runner"))))))
+    (should (equal result '(200 (id . "side"))))))
+
+(ert-deftest omnigent-conversation-side-chat-captures-display-action
+    ()
+  "Return a hidden buffer even after the caller's let binding ends."
+  (let (finish
+        result)
+    (with-temp-buffer
+      (let ((side (current-buffer)))
+        (cl-letf (((symbol-function 'omnigent-sessions-side-chat)
+                   (lambda (_id callback) (setq finish callback)))
+                  ((symbol-function 'omnigent--conversation-buffer)
+                   (lambda (_id _title) side))
+                  ((symbol-function 'pop-to-buffer)
+                   (lambda (&rest _)
+                     (ert-fail "Displayed hidden side chat"))))
+          (with-temp-buffer
+            (setq major-mode 'omnigent-conversation-mode)
+            (let ((omnigent-side-chat-display-action nil))
+              (omnigent-conversation-side-chat
+               (lambda (status body)
+                 (setq result (cons status body))))))
+          (funcall finish 201 '((id . "side")))
+          (should (equal result (cons 201 side))))))))
+
 (ert-deftest omnigent-sessions-frames-and-watch-limit ()
   (let ((omnigent-sessions '(((id . "one") (title . "old"))))
         (omnigent-sessions--buffers nil)
