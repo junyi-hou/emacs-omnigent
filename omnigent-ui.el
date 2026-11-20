@@ -186,6 +186,8 @@
                          (gethash
                           key omnigent-sessions--project-lists))
                     (insert "  ...\n")))))))
+        (when omnigent-sessions-truncated
+          (insert "...\n"))
         (goto-char (point-min))
         (when (or id project)
           (while (and (not (eobp))

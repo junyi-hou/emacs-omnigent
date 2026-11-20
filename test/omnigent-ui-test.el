@@ -64,6 +64,23 @@
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 
+(ert-deftest omnigent-ui-session-render-shows-global-ellipsis ()
+  "Show a separate line when the initial session list is incomplete."
+  (let ((omnigent-sessions '(((id . "a") (title . "First"))))
+        (omnigent-sessions-projects nil)
+        (omnigent-sessions-truncated t)
+        (omnigent-sessions--project-lists
+         (make-hash-table :test 'equal)))
+    (unwind-protect
+        (with-current-buffer (get-buffer-create "*omnigent-sessions*")
+          (omnigent-ui-sessions-mode)
+          (omnigent-ui-sessions-render)
+          (should (string-suffix-p "\n...\n" (buffer-string)))
+          (setq omnigent-sessions-truncated nil)
+          (omnigent-ui-sessions-render)
+          (should-not (string-suffix-p "\n...\n" (buffer-string))))
+      (kill-buffer "*omnigent-sessions*"))))
+
 (ert-deftest omnigent-ui-session-render-preserves-selection ()
   "Render statuses and attention while preserving the selected session."
   (let ((omnigent-sessions
