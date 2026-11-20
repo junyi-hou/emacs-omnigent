@@ -40,6 +40,10 @@
 (defface omnigent-ui-session-attention '((t :inherit warning))
   "Face for the pending elicitation marker."
   :group 'omnigent-ui)
+(defface omnigent-ui-project
+  '((t :inherit font-lock-keyword-face :weight normal))
+  "Face for project headings."
+  :group 'omnigent-ui)
 
 (defun omnigent-ui--session-face (session)
   "Return the face for SESSION."
@@ -169,7 +173,10 @@
                               (replace-regexp-in-string
                                "[\n\r]" " " name)
                               "\n")
-                             'omnigent-ui-project key 'face 'bold))
+                             'omnigent-ui-project
+                             key
+                             'face
+                             'omnigent-ui-project))
                 (unless folded
                   (dolist (session (nreverse (gethash key groups)))
                     (omnigent-ui--insert-session-row
