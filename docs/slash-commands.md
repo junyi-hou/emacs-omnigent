@@ -101,8 +101,9 @@ as plain text. This prevents a missed skill from bypassing the structured route.
 
 Fetch the catalog asynchronously when the session stream first connects. Cache its
 skill names for completion at the start of the composer, alongside supported local
-commands. Report discovery warnings. Fetch a fresh catalog when a slash command
-needs skill matching, so dispatch does not rely on stale or incomplete results.
+commands. Side chats skip this fetch and offer only built-in slash commands
+for completion. Report discovery warnings. Fetch a fresh catalog when a slash
+command needs skill matching, so dispatch uses current and complete results.
 
 ## Draft and request behavior
 

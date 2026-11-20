@@ -125,7 +125,9 @@
         (cl-letf (((symbol-function 'omnigent-sessions-side-chat)
                    (lambda (_id callback) (setq finish callback)))
                   ((symbol-function 'omnigent--conversation-buffer)
-                   (lambda (_id _title) side))
+                   (lambda (_id _title side-chat)
+                     (should side-chat)
+                     side))
                   ((symbol-function 'pop-to-buffer)
                    (lambda (&rest _)
                      (ert-fail "Displayed hidden side chat"))))
@@ -137,6 +139,28 @@
                  (setq result (cons status body))))))
           (funcall finish 201 '((id . "side")))
           (should (equal result (cons 201 side))))))))
+
+(ert-deftest omnigent-conversation-side-chat-skips-skill-completion ()
+  "Fetch the skill catalog on connect only for a regular conversation."
+  (dolist (side-chat '(nil t))
+    (let ((omnigent--conversation-opening-side-chat side-chat)
+          (omnigent-conversation--session-id "session")
+          requested)
+      (cl-letf (((symbol-function
+                  'omnigent-transport-start-session-stream)
+                 (lambda (_id _event _snapshot _error _connect state)
+                   (funcall state 'connected)
+                   nil))
+                ((symbol-function 'omnigent-transport--request)
+                 (lambda (_id _method path _callback &optional _data)
+                   (setq requested path))))
+        (with-temp-buffer
+          (omnigent-conversation-mode)
+          (should
+           (equal
+            requested
+            (unless side-chat
+              "/v1/skills?session_id=session"))))))))
 
 (ert-deftest omnigent-sessions-frames-and-watch-limit ()
   (let ((omnigent-sessions '(((id . "one") (title . "old"))))

@@ -1093,6 +1093,12 @@ Close this conversation buffer after the session becomes archived."
                   (eq (alist-get 'archived body) t))
          (kill-buffer buffer))))))
 
+(defvar omnigent--conversation-opening-side-chat nil
+  "Non-nil while initializing a side chat buffer.")
+
+(defvar-local omnigent--conversation-side-chat-p nil
+  "Non-nil when this conversation buffer is a side chat.")
+
 (define-derived-mode
  omnigent-conversation-mode text-mode "Omnigent"
  "Major mode for a conversation transcript and composer.
@@ -1101,6 +1107,7 @@ Use `omnigent-conversation-open' to create a conversation buffer."
    (error "A session ID is required"))
  (setq
   omnigent-conversation-session-id omnigent-conversation--session-id
+  omnigent--conversation-side-chat-p omnigent--conversation-opening-side-chat
   omnigent-conversation--sandbox-status omnigent-conversation--initial-sandbox-status
   omnigent-conversation--managed (and omnigent-conversation--initial-sandbox-status t)
   omnigent-conversation--items (make-hash-table :test 'equal)
@@ -1471,6 +1478,7 @@ AFTER is the cursor used for the current page."
             (omnigent-conversation--connection-state state)
             (when (and
                    (eq state 'connected)
+                   (not omnigent--conversation-side-chat-p)
                    (not
                     omnigent--conversation-command-catalog-requested))
               (setq
@@ -1546,8 +1554,9 @@ Use the current project root when the session workspace is unavailable."
  'omnigent-sessions-change-hook
  #'omnigent-conversation--update-directories)
 
-(defun omnigent--conversation-buffer (id title)
-  "Return the conversation buffer for session ID, creating it with TITLE."
+(defun omnigent--conversation-buffer (id title &optional side-chat)
+  "Return the conversation buffer for session ID, creating it with TITLE.
+When SIDE-CHAT is non-nil, skip skill completion discovery."
   (let* ((directory (omnigent-conversation--default-directory id))
          (buffer (omnigent-sessions-buffer id))
          (session
@@ -1570,7 +1579,9 @@ Use the current project root when the session workspace is unavailable."
           (progn
             (with-current-buffer buffer
               (setq default-directory directory)
-              (let ((omnigent-conversation--session-id id))
+              (let ((omnigent-conversation--session-id id)
+                    (omnigent--conversation-opening-side-chat
+                     side-chat))
                 (omnigent-conversation-mode)))
             (omnigent-sessions-register-buffer id buffer))
         (error
@@ -1622,8 +1633,10 @@ in the echo area."
          (let* ((id (alist-get 'id session))
                 (buffer
                  (condition-case err
-                     (omnigent--conversation-buffer
-                      id (alist-get 'title session))
+                     (omnigent--conversation-buffer id
+                                                    (alist-get
+                                                     'title session)
+                                                    t)
                    (error
                     (setq status nil)
                     (format "Side chat %s: %s"
