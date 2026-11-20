@@ -108,6 +108,7 @@
                   (line-beginning-position)
                   'omnigent-ui-session-project)))
             (inhibit-read-only t)
+            last-session
             (sessions
              (sort (copy-sequence (omnigent-sessions-visible))
                    (lambda (a b)
@@ -153,6 +154,7 @@
                                  omnigent-sessions--project-lists))
                         '(unassigned))))
               (let ((folded (member key omnigent-ui--folded-projects))
+                    (rows (gethash key groups))
                     (name
                      (if (eq key 'unassigned)
                          "Unassigned"
@@ -178,16 +180,30 @@
                              'face
                              'omnigent-ui-project))
                 (unless folded
-                  (dolist (session (nreverse (gethash key groups)))
+                  (dolist (session (nreverse rows))
+                    (setq last-session session)
                     (omnigent-ui--insert-session-row
                      session line-width))
                   (when (nth
                          2
                          (gethash
                           key omnigent-sessions--project-lists))
-                    (insert "  ...\n")))))))
+                    (insert
+                     (propertize
+                      "  ...\n"
+                      'face
+                      (when (and rows
+                                 (eq
+                                  (alist-get
+                                   'archived last-session)
+                                  t))
+                        'omnigent-ui-session-archived)))))))))
         (when omnigent-sessions-truncated
-          (insert "...\n"))
+          (insert
+           (propertize "...\n"
+                       'face
+                       (when (eq (alist-get 'archived last-session) t)
+                         'omnigent-ui-session-archived))))
         (goto-char (point-min))
         (when (or id project)
           (while (and (not (eobp))

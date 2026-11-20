@@ -65,9 +65,10 @@
         (kill-buffer buffer)))))
 
 (ert-deftest omnigent-ui-session-render-shows-global-ellipsis ()
-  "Show a separate line when the initial session list is incomplete."
+  "Show a separate line with the archive face only after an archived row."
   (let ((omnigent-sessions '(((id . "a") (title . "First"))))
         (omnigent-sessions-projects nil)
+        (omnigent-fetch-archived-sessions t)
         (omnigent-sessions-truncated t)
         (omnigent-sessions--project-lists
          (make-hash-table :test 'equal)))
@@ -76,6 +77,14 @@
           (omnigent-ui-sessions-mode)
           (omnigent-ui-sessions-render)
           (should (string-suffix-p "\n...\n" (buffer-string)))
+          (should-not (get-text-property (- (point-max) 4) 'face))
+          (setq omnigent-sessions
+                '(((id . "a") (title . "First") (archived . t))))
+          (omnigent-ui-sessions-render)
+          (should
+           (eq
+            (get-text-property (- (point-max) 4) 'face)
+            'omnigent-ui-session-archived))
           (setq omnigent-sessions-truncated nil)
           (omnigent-ui-sessions-render)
           (should-not (string-suffix-p "\n...\n" (buffer-string))))
@@ -144,7 +153,10 @@
            (save-excursion
              (goto-char (point-max))
              (forward-line -1)
-             (looking-at "  [.][.][.]$"))))
+             (and (looking-at "  [.][.][.]$")
+                  (eq
+                   (get-text-property (+ (point) 2) 'face)
+                   'omnigent-ui-session-archived)))))
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 
