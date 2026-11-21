@@ -4,7 +4,7 @@
 (require 'omnigent)
 
 (ert-deftest omnigent-ui-session-age-uses-short-time-units ()
-  "Show session ages in minutes, hours, days, and weeks."
+  "Show session ages from less than a minute to four weeks or more."
   (let* ((updated-at (encode-time 0 0 0 1 1 2025 t))
          (now (time-add updated-at (seconds-to-time (* 14 86400))))
          (timestamp
@@ -28,6 +28,11 @@
          (funcall timestamp
                   (time-subtract now (seconds-to-time (* 2 3600)))))
         "2hr"))
+      (should
+       (equal
+        (omnigent-ui--session-age
+         (funcall timestamp (time-subtract now (seconds-to-time 59))))
+        "<1m"))
       (should
        (equal
         (omnigent-ui--session-age

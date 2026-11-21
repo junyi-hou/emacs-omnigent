@@ -83,8 +83,10 @@
                       (float-time
                        (time-subtract (current-time) time))))))
           (cond
+           ((< seconds 60)
+            "<1m")
            ((< seconds 3600)
-            (format "%dm" (max 1 (/ seconds 60))))
+            (format "%dm" (/ seconds 60)))
            ((< seconds 86400)
             (format "%dhr" (/ seconds 3600)))
            ((< seconds 604800)
