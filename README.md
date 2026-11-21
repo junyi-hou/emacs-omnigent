@@ -126,23 +126,17 @@ the stream when the exchange ends. The server retains the private fork and
 its history. See [Side chat](docs/conversation-buffer.md#side-chat) for
 connection and turn handling.
 
-Run unit tests and both native integration suites separately:
+To set up and run the unit tests, use these commands.
 
 ```sh
 make test-deps
 make unit-test
-make integration-test HARNESS=claude-native
-make integration-test HARNESS=codex-native
 ```
 
-`make test-deps` installs Evil, WebSocket, `markdown-mode`, `f`, `s`, and their
-dependencies in `.tools/test-elpa`. Evil is not a runtime dependency. After
-setup, unit tests run offline. Integration tests need network access for
-dependency installation.
-
-`make test HARNESS=claude-native` runs unit tests and the selected integration
-suite together; the default harness is `claude-native`. See
-[test/README.md](test/README.md) for details.
+`make test-deps` installs Evil, WebSocket, `markdown-mode`, `f`, `s`, and
+their dependencies in `.tools/test-elpa`. Evil is not a runtime
+dependency. After setup, unit tests run offline. You can also run them with
+`make test`.
 
 The client can open at most 500 conversation buffers at once, because the server
 limits the WebSocket watch set to 500 sessions. This should be more than enough

@@ -24,9 +24,6 @@
 ## Tests
 
 - Run `make unit-test` for unit tests.
-- Run integration tests with both native harnesses:
-  - `make integration-test HARNESS=claude-native`
-  - `make integration-test HARNESS=codex-native`
 
 ## Markdown
 

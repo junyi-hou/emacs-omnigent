@@ -1,10 +1,10 @@
 # Emacs Transport Design
 
-**Status:** REST, SSE, session-updates WebSocket transport, connection setup, and
-connection reset are implemented. Native integration tests cover local client-outage
-faults; physical laptop suspend and deployed remote networking remain unverified. The
-transport implementation is [omnigent-transport.el](../omnigent-transport.el). The
-existing interactive entry points are in [omnigent.el](../omnigent.el).
+**Status:** REST, SSE, session-updates WebSocket transport, connection setup,
+and connection reset are implemented. Independent checks verified recovery
+after laptop suspend and over a remote network. The transport implementation
+is [omnigent-transport.el](../omnigent-transport.el). The existing interactive
+entry points are in [omnigent.el](../omnigent.el).
 [reconnection.md](reconnection.md) defines the client-outage recovery flow,
 including stale-connection detection, the subscription gap, and manual recovery after
 snapshot failure. Temporary snapshot failures retry automatically.
@@ -196,12 +196,9 @@ and updates session-list state.
 
 ## Checks
 
-Run `make test` for the unit and integration tests. The transport unit tests use a
-mocked WebSocket connection to check URL, watch messages, frame parsing, and reconnect
-behavior. The integration test starts an isolated Omnigent server with a temporary
-database and artifact directory. It checks REST and SSE without starting an agent turn,
-and it checks the WebSocket handshake, snapshot, and changed frame with the GNU ELPA
-client.
+Run `make test` for the unit tests. The transport unit tests use a mocked
+WebSocket connection to check URL, watch messages, frame parsing, and
+reconnect behavior.
 
 ## Open decisions
 

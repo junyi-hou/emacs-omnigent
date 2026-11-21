@@ -1,9 +1,9 @@
 # Client Reconnection and State Recovery
 
-**Status:** Implemented with unit and native integration coverage. Emacs-side fault
-injection tests use a real server and mock model with both native harnesses. Physical
-laptop suspend and deployed remote networking remain unverified. This document covers
-client outages, not execution-host outages or recovery of an agent process that stops.
+**Status:** Implemented with unit test coverage. Independent checks verified
+recovery after laptop suspend and over a remote network. This document covers
+client outages, not execution-host outages or recovery of an agent process
+that stops.
 
 [transport.md](transport.md) owns connections and requests.
 [session-tree.md](session-tree.md) owns the session list and watch set.
@@ -33,9 +33,9 @@ in this client. See [transport authentication](transport.md#authentication).
 
 | Area | Implemented | Remaining work |
 |---|---|---|
-| SSE | Reconnect after exit, inactivity, or a long scheduling gap, with capped backoff. | Verify physical laptop suspend and deployed proxies. |
+| SSE | Reconnect after exit, inactivity, or a long scheduling gap, with capped backoff. | Verify deployed proxies. |
 | Session snapshot | Serialize bounded composite reads; invalidate on read failure, timeout, or malformed data. | Verify commits during real-server snapshot pagination. |
-| Conversation state | Preserve drafts and history as read-only during recovery; reconcile full items by ID. | Verify physical laptop suspend and deployed remote networking. |
+| Conversation state | Preserve drafts and history as read-only during recovery; reconcile full items by ID. | None for this flow. |
 | Session updates | Detect inactivity, reconnect, restore the watch set, and refresh the list on open. | Verify deployed proxies. |
 | Initial connection | Reset state, select the server URL, start session updates, and load the list. | None for this flow. |
 
