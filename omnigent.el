@@ -1812,6 +1812,7 @@ in the echo area."
     (user-error "No Omnigent conversation in this buffer"))
   (when buffer-read-only
     (user-error "This session is read-only"))
+  (message "Opening side chat...")
   (let ((action omnigent-side-chat-display-action)
         (result
          (or callback
