@@ -115,6 +115,98 @@
         ("PATCH" "/v1/sessions/side" (("runner_id" . "runner"))))))
     (should (equal result '(200 (id . "side"))))))
 
+(ert-deftest omnigent-generate-session-title-waits-for-native-turn ()
+  "Rename the source once the matching side chat turn completes."
+  (let (event
+        snapshot
+        state
+        stopped
+        posted
+        updates)
+    (cl-letf (((symbol-function 'omnigent-ui--action-target)
+               (lambda () '("source" . "Old title")))
+              ((symbol-function 'omnigent-sessions-side-chat)
+               (lambda (id callback)
+                 (should (equal id "source"))
+                 (funcall callback 200 '((id . "child")))))
+              ((symbol-function
+                'omnigent-transport-start-session-stream)
+               (lambda (id
+                        on-event
+                        on-snapshot
+                        _error
+                        _connect
+                        on-state
+                        skip-history)
+                 (should (equal id "child"))
+                 (should skip-history)
+                 (setq
+                  event on-event
+                  snapshot on-snapshot
+                  state on-state)
+                 'stream))
+              ((symbol-function
+                'omnigent-transport-post-session-event)
+               (lambda (id _event callback)
+                 (push id posted)
+                 (funcall callback 202 nil)))
+              ((symbol-function
+                'omnigent-transport-stop-session-stream)
+               (lambda (stream) (push stream stopped)))
+              ((symbol-function 'omnigent-transport--request)
+               (lambda (id method _path callback body)
+                 (push (list id method body) updates)
+                 (funcall callback 200 nil)))
+              ((symbol-function 'omnigent-sessions-refresh) #'ignore))
+      (omnigent-ui-generate-session-title)
+      (unwind-protect
+          (progn
+            (funcall snapshot
+                     200
+                     '((sandbox_status . ((stage . "starting")))))
+            (should-not posted)
+            (funcall state 'connected)
+            (should-not posted)
+            (funcall event
+                     "session.sandbox_status"
+                     '((stage . "ready")))
+            (should (equal posted '("child")))
+            (funcall event
+                     "session.status"
+                     '((status . "running") (response_id . "native")))
+            (funcall event
+                     "response.completed"
+                     '((response
+                        . ((id . "delivery") (output . [])))))
+            (funcall event
+                     "response.output_item.done"
+                     '((item
+                        .
+                        ((type . "message")
+                         (response_id . "native")
+                         (data
+                          .
+                          ((role . "assistant")
+                           (content . " New title ")))))))
+            (funcall event
+                     "response.output_item.done"
+                     '((item
+                        .
+                        ((type . "message")
+                         (role . "assistant")
+                         (response_id . "other")
+                         (content . "Wrong")))))
+            (should-not updates)
+            (funcall event
+                     "session.status"
+                     '((status . "idle") (response_id . "native")))
+            (should
+             (equal
+              updates
+              '(("source" "PATCH" (("title" . "New title"))))))
+            (should (equal stopped '(stream))))
+        (funcall state 'disconnected)))))
+
 (ert-deftest omnigent-conversation-side-chat-captures-display-action
     ()
   "Return a hidden buffer even after the caller's let binding ends."

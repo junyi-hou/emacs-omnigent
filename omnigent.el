@@ -1891,11 +1891,7 @@ in the echo area."
 (defun omnigent--conversation-message (text)
   "Submit TEXT as a user message."
   (omnigent--conversation-submit
-   text
-   `(("type" . "message")
-     ("data" .
-      (("role" . "user")
-       ("content" . [(("type" . "input_text") ("text" . ,text))]))))))
+   text (omnigent-transport--user-message-event text)))
 
 (defun omnigent--conversation-skills-result
     (buffer text name args status body)
@@ -2060,7 +2056,7 @@ in the echo area."
     (insert question))
   (letrec ((send
             (lambda ()
-              (unless buffer-read-only
+              (when (omnigent-conversation-ready-p)
                 (remove-hook 'omnigent-conversation-change-hook send
                              t)
                 (condition-case err
@@ -2665,6 +2661,202 @@ When UNASSIGN is non-nil, offer to remove the project assignment."
              (omnigent-sessions-refresh)
            (omnigent-ui--action-result "Rename" title status body)))
        `(("title" . ,new-title))))))
+
+(defun omnigent-ui-generate-session-title ()
+  "Generate a title for the current session or the session at point.
+Use a private side chat on the source runner to read the conversation."
+  (interactive)
+  (pcase-let ((`(,id . ,title) (omnigent-ui--action-target)))
+    (message "Generating title...")
+    (omnigent-side-chat-ask
+     id
+     "Write a short session title based on the recent conversation before this request. Return only the title on one line, without quotes or markup. Do not use tools."
+     (apply-partially #'omnigent--apply-generated-session-title
+                      id title))))
+
+(defun omnigent--apply-generated-session-title (id title status body)
+  "Apply BODY to session ID, currently TITLE, if STATUS indicates success."
+  (let ((new-title
+         (and (omnigent-transport-success-p status)
+              (string-trim body))))
+    (cond
+     ((not new-title)
+      (omnigent-ui--action-result
+       "Generate title for" title status body))
+     ((or (string-empty-p new-title)
+          (string-match-p "[[:cntrl:]]" new-title))
+      (omnigent-ui--action-result
+       "Generate title for"
+       title
+       nil
+       "The side chat did not return a single-line title"))
+     (t
+      (omnigent-transport--request
+       id "PATCH" (omnigent-transport--session-path id)
+       (lambda (patch-status patch-body)
+         (if (omnigent-transport-success-p patch-status)
+             (progn
+               (when (equal (current-message) "Generating title...")
+                 (message nil))
+               (omnigent-sessions-refresh))
+           (omnigent-ui--action-result
+            "Rename" title patch-status patch-body)))
+       `(("title" . ,new-title)))))))
+
+(defun omnigent-side-chat-ask (id question callback &optional on-send)
+  "Ask QUESTION in a private fork of ID without opening a buffer.
+Call CALLBACK with (STATUS BODY).  On success BODY is the final assistant
+message text.  On failure BODY contains diagnostics.  Call ON-SEND, if
+non-nil, immediately before posting the question."
+  (omnigent-sessions-side-chat
+   id
+   (lambda (status body)
+     (if (omnigent-transport-success-p status)
+         (omnigent--side-chat-ask
+          (alist-get 'id body) question callback on-send)
+       (funcall callback status body)))))
+
+(defun omnigent--side-chat-ask (child question callback on-send)
+  "Post QUESTION to private fork CHILD and report its answer to CALLBACK.
+Call ON-SEND, if non-nil, when the fork is ready to submit the question."
+  (let (stream
+        timer
+        connected
+        snapshot
+        sandbox-stage
+        sent
+        response-id
+        answer
+        finished)
+    (cl-labels
+     ((finish
+       (status body) "Close the stream and report the result once."
+       (unless finished
+         (setq finished t)
+         (when timer
+           (cancel-timer timer))
+         (when stream
+           (omnigent-transport-stop-session-stream stream))
+         (funcall callback status body)))
+      (send
+       () "Send the question once the fork can accept a message."
+       (when (and (not sent)
+                  (not finished)
+                  (omnigent-transport--session-write-ready-p
+                   connected snapshot nil
+                   (and sandbox-stage
+                        (not (equal sandbox-stage "ready")))))
+         (setq sent t)
+         (condition-case err
+             (progn
+               (when on-send
+                 (funcall on-send))
+               (omnigent-transport-post-session-event
+                child
+                (omnigent-transport--user-message-event question)
+                (lambda (status body)
+                  (unless (omnigent-transport-success-p status)
+                    (finish status body)))))
+           (error
+            (finish nil (error-message-string err))))))
+      (event
+       (name data)
+       "Track sandbox readiness and collect the matching assistant answer."
+       (when (and (equal name "session.sandbox_status")
+                  (stringp (alist-get 'stage data)))
+         (setq sandbox-stage (alist-get 'stage data))
+         (send))
+       (when (and sent (not finished))
+         (let* ((status (alist-get 'status data))
+                (response (alist-get 'response data))
+                (event-id
+                 (or (alist-get 'response_id data)
+                     (alist-get 'id response)))
+                (item
+                 (omnigent-transport--output-item
+                  (alist-get 'item data))))
+           (cond
+            ((or (and (equal name "session.status")
+                      (equal status "running"))
+                 (and (not response-id)
+                      (member
+                       name
+                       '("response.created" "response.in_progress"))))
+             (let ((id
+                    (omnigent-transport--starting-response-id data)))
+               (when (and id (not (equal id response-id)))
+                 (setq
+                  response-id id
+                  answer nil))))
+            ((and (equal name "response.output_item.done")
+                  response-id
+                  (equal
+                   response-id
+                   (or (alist-get 'response_id item)
+                       event-id
+                       response-id))
+                  (equal (alist-get 'type item) "message")
+                  (equal (alist-get 'role item) "assistant"))
+             (setq answer (omnigent-conversation--text item)))
+            ((and response-id (equal event-id response-id))
+             (cond
+              ((or (and (equal name "session.status")
+                        (equal status "idle"))
+                   (and (equal name "response.completed")
+                        (not
+                         (seq-empty-p (alist-get 'output response)))))
+               (if (and answer (not (string-blank-p answer)))
+                   (finish 200 answer)
+                 (finish
+                  nil "The side chat did not return an answer")))
+              ((or (and (equal name "session.status")
+                        (equal status "failed"))
+                   (member
+                    name
+                    '("response.failed"
+                      "response.incomplete"
+                      "response.cancelled")))
+               (finish
+                nil
+                (or (alist-get 'error data)
+                    "The side chat turn failed"))))))))))
+     (condition-case err
+         (progn
+           (setq stream
+                 (omnigent-transport-start-session-stream
+                  child #'event
+                  (lambda (status body)
+                    (cond
+                     ((not (omnigent-transport-success-p status))
+                      (finish status body))
+                     ((equal (alist-get 'permission_level body) 1)
+                      (finish nil "The side chat is read-only"))
+                     (t
+                      (let ((stage
+                             (alist-get
+                              'stage
+                              (alist-get 'sandbox_status body))))
+                        (setq
+                         snapshot t
+                         sandbox-stage (or sandbox-stage stage))
+                        (send)))))
+                  (lambda (error) (finish nil error)) nil
+                  (lambda (state)
+                    (pcase state
+                      ('connected
+                       (setq connected t)
+                       (send))
+                      ('disconnected
+                       (finish nil "The side chat disconnected"))))
+                  t))
+           (if finished
+               (omnigent-transport-stop-session-stream stream)
+             (setq timer
+                   (run-at-time 120 nil #'finish
+                                nil
+                                "The side chat timed out"))))
+       (error
+        (finish nil (error-message-string err)))))))
 
 (defun omnigent-ui-delete ()
   "Delete the selected session after confirmation."

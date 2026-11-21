@@ -178,7 +178,7 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 
 (defun omnigent-conversation--stream-item (item &optional added)
   "Reconcile stream ITEM in place; ADDED starts an identified section."
-  (let* ((item (append item (alist-get 'data item)))
+  (let* ((item (omnigent-transport--output-item item))
          (id (alist-get 'id item))
          (kind (alist-get 'type item))
          (response-id
@@ -313,12 +313,8 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
     (("response.created" "response.in_progress" "session.status")
      .
      ,(lambda (data)
-        ;; Native turns report their response ID through session.status.
         (when-let* ((id
-                     (or (alist-get 'id (alist-get 'response data))
-                         (and (equal
-                               (alist-get 'status data) "running")
-                              (alist-get 'response_id data)))))
+                     (omnigent-transport--starting-response-id data)))
           (when (or (not omnigent-conversation--response-id)
                     (equal id omnigent-conversation--response-id)
                     (equal (alist-get 'status data) "running"))
@@ -455,15 +451,26 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
       (run-hook-with-args 'omnigent-conversation-event-hook name data)
       (run-hooks 'omnigent-conversation-change-hook))))
 
+(defun omnigent-conversation--write-blocked-p ()
+  "Return non-nil when session state prevents writes."
+  (not
+   (omnigent-transport--session-write-ready-p
+    omnigent-conversation--connected
+    (not omnigent-conversation--loading)
+    (or omnigent-conversation--invalid
+        omnigent-conversation--permission-read-only)
+    omnigent-conversation--sandbox-status)))
+
+(defun omnigent-conversation-ready-p ()
+  "Return non-nil when the current conversation can submit composer text."
+  (and (derived-mode-p 'omnigent-conversation-mode)
+       (not (omnigent-conversation--write-blocked-p))
+       (not omnigent-conversation--sending)))
+
 (defun omnigent-conversation--read-only ()
   "Apply recovery and server permission restrictions without losing drafts."
   (let ((previous buffer-read-only))
-    (setq buffer-read-only
-          (or omnigent-conversation--invalid
-              omnigent-conversation--loading
-              (not omnigent-conversation--connected)
-              omnigent-conversation--permission-read-only
-              (and omnigent-conversation--sandbox-status t)))
+    (setq buffer-read-only (omnigent-conversation--write-blocked-p))
     (unless (eq previous buffer-read-only)
       (omnigent-conversation--notify-submission-change))))
 

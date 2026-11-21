@@ -317,6 +317,33 @@ An empty PROJECT string selects unassigned sessions."
                                        "/child_sessions"))
    callback))
 
+(defun omnigent-transport--session-write-ready-p
+    (connected snapshot-ready restricted sandbox-status)
+  "Return non-nil when CONNECTED and SNAPSHOT-READY permit session writes.
+RESTRICTED is non-nil when writes are denied.  SANDBOX-STATUS is non-nil
+while the sandbox is unavailable."
+  (and connected
+       snapshot-ready
+       (not restricted)
+       (not sandbox-status)))
+
+(defun omnigent-transport--user-message-event (text)
+  "Build a session event that submits TEXT as a user message."
+  `(("type" . "message")
+    ("data" .
+     (("role" . "user")
+      ("content" . [(("type" . "input_text") ("text" . ,text))])))))
+
+(defun omnigent-transport--output-item (item)
+  "Return ITEM with its event data fields at the top level."
+  (append item (alist-get 'data item)))
+
+(defun omnigent-transport--starting-response-id (data)
+  "Read the response ID from response or native running event DATA."
+  (or (alist-get 'id (alist-get 'response data))
+      (and (equal (alist-get 'status data) "running")
+           (alist-get 'response_id data))))
+
 (defun omnigent-transport-post-session-event
     (session-id event callback)
   "Post EVENT to SESSION-ID and call CALLBACK with status and response body."

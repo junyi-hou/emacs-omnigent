@@ -235,18 +235,18 @@ optional callback receives the HTTP status and buffer on success. Wait for
 the buffer to become writable before inserting text at `point-max` and
 calling `omnigent-conversation-send`.
 
-For a caller that only needs the answer, use `omnigent-sessions-side-chat`
-to get a session ID. Start the stream with
-`omnigent-transport-start-session-stream` with `skip-history` set to
-non-nil. Wait for the initial snapshot and live connection. Then post the
-question with
-`omnigent-transport-post-session-event`. The POST callback reports
-acceptance. Read assistant items from `response.output_item.done` and match
-them to the new turn to exclude inherited history. For native harnesses,
-track the new response ID from `session.status`. An empty
+Use `omnigent-side-chat-ask` for one answer without a conversation buffer.
+Pass the source session ID, the question, and a callback. The callback
+receives the status and the final assistant text or error details.
+
+Both paths use `omnigent-sessions-side-chat` to create the fork. The
+bufferless path loads session metadata and waits for the live stream before
+posting a user message. The POST callback reports acceptance. The stream
+provides the answer through `response.output_item.done`. Native harnesses
+report the turn ID through `session.status`. An empty
 `response.completed` can acknowledge input delivery before the turn
-finishes. Recover committed items from a snapshot after a disconnect. The
-client has no single callback for the final answer.
+finishes. If the stream disconnects or the exchange times out, the function
+closes the stream and reports the error.
 
 ## Harness and session errors
 

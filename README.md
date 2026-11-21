@@ -93,50 +93,38 @@ to send a question in the side chat. The source session must have a
 connected runner. Customize `omnigent-side-chat-display-action` to change
 where Emacs opens the chat. `/btw` and `/btw QUESTION` work the same way.
 
+#### Generate a session title
+
+Press `C-c C-t` in a conversation to generate a title from recent
+messages. You can also run `M-x omnigent-ui-generate-session-title` with
+point on a session in the list. The command uses the bufferless side-chat
+API and applies the title to the source session. See the [side-chat
+API](docs/conversation-buffer.md#side-chat) for stream and turn tracking
+details.
+
 #### Ask for a one-shot answer from Lisp
 
-Call this example from the source conversation with lexical binding enabled.
-It opens a hidden side chat and sends one question. The open callback
-receives the HTTP status and the new buffer on success.
+Call `omnigent-side-chat-ask` with the source session ID, a question, and a
+callback. This example prints the answer in the echo area.
 
 ```elisp
-(defun my-side-chat-send (question observe)
-  "Send QUESTION in a hidden side chat and pass its events to OBSERVE."
-  (let ((omnigent-side-chat-display-action nil))
-    (omnigent-conversation-side-chat
-     (lambda (status body)
-       (if (omnigent-transport-success-p status)
-           (with-current-buffer body
-             (add-hook 'omnigent-conversation-event-hook observe nil t)
-             (letrec ((send-when-ready
-                       (lambda ()
-                         (unless buffer-read-only
-                           (remove-hook 'omnigent-conversation-change-hook
-                                        send-when-ready t)
-                           (goto-char (point-max))
-                           (insert question)
-                           (omnigent-conversation-send)))))
-               (add-hook 'omnigent-conversation-change-hook
-                         send-when-ready t t)
-               (funcall send-when-ready)))
-         (message "%s" (omnigent-transport-error-message
-                        "Open side chat" status body)))))))
+(omnigent-side-chat-ask
+ omnigent-conversation-session-id
+ "What did we decide in the last exchange?"
+ (lambda (status body)
+   (message "%s"
+            (if (omnigent-transport-success-p status)
+                body
+              (omnigent-transport-error-message
+               "Ask side chat" status body)))))
 ```
 
-`send-when-ready` checks the composer immediately and after each
-conversation change. Once the composer is writable, the function removes
-itself before sending. `letrec` lets the function refer to itself for that
-removal.  The send command treats a leading slash as a possible slash
-command.
-
-Your `observe` function receives `(EVENT-NAME DATA)` in the side chat
-buffer.  Collect the assistant messages for the new turn from
-`response.output_item.done` events. Use the answer when that turn finishes.
-An empty `response.completed` can acknowledge native input delivery before
-the agent answers. Handle failures and set a timeout for the exchange.  Kill
-the buffer when you finish or give up. The server retains the side chat and
-its history. See [Side chat](docs/conversation-buffer.md#side-chat) for turn
-tracking and the bufferless API.
+Run this example in the source conversation, or pass its session ID
+explicitly. The function waits for the private fork, sends the question,
+and calls back with the final assistant message or an error. It closes
+the stream when the exchange ends. The server retains the private fork and
+its history. See [Side chat](docs/conversation-buffer.md#side-chat) for
+connection and turn handling.
 
 Run unit tests and both native integration suites separately:
 
