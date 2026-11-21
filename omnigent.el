@@ -129,7 +129,7 @@ reset session and transport state before selecting the server."
 
 ;;;###autoload
 (defun omnigent-disconnect ()
-  "Disconnect from the server and close its conversation and workspace buffers.
+  "Disconnect and close Omnigent side windows and server-specific buffers.
 Unsent drafts are lost, but agents continue to run on their execution hosts."
   (interactive)
   (mapc
@@ -139,6 +139,15 @@ Unsent drafts are lost, but agents continue to run on their execution hosts."
    (copy-sequence omnigent-sessions--buffers))
   (omnigent-sessions-reset)
   (omnigent-transport-reset)
+  (let ((omnigent-ui--changing-windows t))
+    (dolist (frame (frame-list))
+      (dolist (window (window-list frame))
+        (when (and (window-parameter window 'window-side)
+                   (with-current-buffer (window-buffer window)
+                     (derived-mode-p
+                      'omnigent-ui-sessions-mode
+                      'omnigent-ui-workspace-mode)))
+          (delete-window window)))))
   (omnigent-ui-reset)
   (message "Disconnected from Omnigent"))
 
