@@ -1763,31 +1763,54 @@ CHOICES is a widget choice list; REQUIRED and SECRET control input handling."
          (params (alist-get 'params request))
          (url (alist-get 'url params))
          (external (and url (not (string-prefix-p "/approve/" url))))
+         (questions (omnigent-conversation-elicitation-questions id))
          (approval
-          (or (and url (not external))
-              (alist-get 'policy_name params)))
+          (and (not external)
+               (not questions)
+               (not (alist-get 'requestedSchema params))
+               (or url (alist-get 'policy_name params))))
+         (command (and approval (alist-get 'command params)))
+         (cwd (and approval (alist-get 'cwd params)))
+         (reason
+          (or (and approval (alist-get 'reason params))
+              (unless command
+                (alist-get 'message params))))
          (pending (omnigent-conversation-elicitation-submitting-p id))
          (start (point)))
     (insert
-     (propertize (if approval
-                     "Approval required\n"
-                   "Question\n")
-                 'face 'omnigent-ui-elicitation))
-    (dolist (key '(message policy_name phase content_preview))
-      (when-let* ((value (alist-get key params)))
-        (insert (omnigent-ui--string value) "\n")))
+     (if approval
+         "# Approval required\n\n"
+       "# Question\n\n"))
+    (when (and (stringp reason) (not (string-empty-p reason)))
+      (insert
+       "> " (replace-regexp-in-string "\n" "\n> " reason) "\n\n"))
+    (when (and (stringp command) (not (string-empty-p command)))
+      (let ((fence
+             (make-string
+              (1+ (apply #'max
+                         2
+                         (mapcar
+                          #'length (split-string command "[^`]+" t))))
+              ?`)))
+        (insert fence "\n" command "\n" fence "\n\n")))
+    (when (and (stringp cwd) (not (string-empty-p cwd)))
+      (insert "> cwd: `" cwd "`\n\n"))
+    (omnigent-ui--markdown-apply start (point) t)
     (if external
         (push (widget-create 'url-link :value url url)
               omnigent-ui--widgets)
-      (if (omnigent-conversation-elicitation-questions id)
-          (omnigent-ui--question-fields id)
-        (omnigent-ui--schema-fields id params))
-      (dolist (error (gethash id omnigent-ui--field-errors))
-        (unless (car error)
-          (insert
-           (propertize (concat (cdr error) "\n")
-                       'face
-                       'omnigent-ui-error))))
+      (let ((fields-start (point)))
+        (if questions
+            (omnigent-ui--question-fields id)
+          (omnigent-ui--schema-fields id params))
+        (dolist (error (gethash id omnigent-ui--field-errors))
+          (unless (car error)
+            (insert
+             (propertize (concat (cdr error) "\n")
+                         'face
+                         'omnigent-ui-error))))
+        (when (> (point) fields-start)
+          (insert "\n")))
       (dolist (action '(accept decline))
         (let ((widget
                (widget-create
@@ -1808,7 +1831,16 @@ CHOICES is a widget choice list; REQUIRED and SECRET control input handling."
         (insert "Submitting...")))
     (insert "\n\n")
     (add-text-properties
-     start (point) (list 'omnigent-ui-request-id id))))
+     start (point)
+     (list
+      'omnigent-ui-request-id
+      id
+      'line-prefix
+      "   "
+      'wrap-prefix
+      "   "
+      'rear-nonsticky
+      t))))
 
 (defun omnigent-ui--widget-before-change (start end)
   "Apply widget edit protection to request fields between START and END only."

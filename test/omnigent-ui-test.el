@@ -782,7 +782,8 @@
           ((type . "object")
            (required . ["name"])
            (properties . ((name . ((type . "string")))))))))))
-    (should (string-match-p "Question\nYour name?" (buffer-string)))
+    (should
+     (string-match-p "# Question\n\n> Your name?" (buffer-string)))
     (let* ((field
             (cl-find
              "name"
@@ -888,7 +889,7 @@
       '("first" "second")))
     (should
      (string-match-p
-      "first\n.*\n\nQuestion\nsecond" (buffer-string)))))
+      "first\n\n.*\n\n# Question\n\n> second" (buffer-string)))))
 
 (ert-deftest omnigent-ui-schema-validation-shows-all-errors ()
   "Display every invalid field and select the first invalid field."
@@ -933,7 +934,9 @@
      '((elicitation_id . "q")
        (params
         .
-        ((ask_user_question
+        ((policy_name . "codex_native_request_user_input")
+         (message . "Codex needs input")
+         (ask_user_question
           .
           ((questions
             .
@@ -946,6 +949,10 @@
               (multiSelect . t)
               (isOther . :json-false)
               (options . [((label . "A")) ((label . "B"))]))])))))))
+    (should
+     (string-match-p
+      "# Question\n\n> Codex needs input" (buffer-string)))
+    (should (string-match-p "Submit" (buffer-string)))
     (dolist (entry '(("choice" . "Custom") ("many" . ("A" "B"))))
       (let ((field
              (cl-find
@@ -982,8 +989,49 @@
      "response.elicitation_request"
      '((elicitation_id . "approval")
        (params . ((url . "/approve/id")))))
-    (should (string-match-p "Approval required" (buffer-string)))
-    (should (string-match-p "Approve" (buffer-string)))))
+    (goto-char omnigent-ui--request-start)
+    (should
+     (search-forward "# Approval required\n\n[Approve] [Decline]"
+                     omnigent-ui--pending-start t))))
+
+(ert-deftest
+    omnigent-ui-approval-card-renders-structured-command-details
+    ()
+  "Render command details as Markdown and keep the response buttons active."
+  (omnigent-ui-test--conversation
+    (omnigent-conversation--event
+     "response.elicitation_request"
+     '((elicitation_id . "command")
+       (params
+        .
+        ((policy_name . "internal-policy")
+         (phase . "internal-phase")
+         (content_preview . "raw-preview")
+         (message . "Run a command")
+         (reason . "First line\nSecond line")
+         (command . "printf '%s' value")
+         (cwd . "/work tree")))))
+    (goto-char omnigent-ui--request-start)
+    (should
+     (looking-at-p
+      (regexp-quote
+       (concat
+        "# Approval required\n\n> First line\n> Second line\n\n"
+        "```\nprintf '%s' value\n```\n\n> cwd: `/work tree`\n\n[Approve] [Decline]"))))
+    (should (get-text-property (point) 'omnigent-ui-markdown-done))
+    (should (equal (get-text-property (point) 'line-prefix) "   "))
+    (should (equal (get-text-property (point) 'wrap-prefix) "   "))
+    (should-not
+     (re-search-forward
+      "internal-policy\\|internal-phase\\|raw-preview"
+      omnigent-ui--pending-start t))
+    (should
+     (equal
+      (mapcar
+       (lambda (widget)
+         (widget-get widget :response-action))
+       omnigent-ui--widgets)
+      '(decline accept)))))
 
 (ert-deftest
     omnigent-ui-composer-continuation-indentation-is-display-only
@@ -1875,7 +1923,8 @@
      "response.output_item.done"
      '((item . ((id . "answer") (content . "output")))))
     (should
-     (string-match-p "output\n\nQuestion\nApproval" (buffer-string)))
+     (string-match-p
+      "output\n\n# Question\n\n> Approval" (buffer-string)))
     (should
      (string-match-p
       "\\[queued\\] > first\n\n\\[queued\\] > second\n\n> draft"

@@ -8,11 +8,12 @@ reconciliation.
 
 ## Scope
 
-Apply Markdown highlighting and display properties to agent messages, user
-messages, submitted pending messages, and the composer. Use `markdown-mode` to
-interpret Markdown, including native syntax highlighting for fenced code.  Tool
-output, reasoning folds, error messages, labels, and request widgets keep their
-existing presentation.
+Apply Markdown highlighting and display properties to agent messages,
+user messages, submitted pending messages, request card text, and the
+composer. Use `markdown-mode` to interpret Markdown, including native
+syntax highlighting for fenced code.  Tool output, reasoning folds,
+error messages, labels, and request widgets keep their existing
+presentation.
 
 Keep the source text unchanged. Message display can conceal Markdown delimiters.
 The composer keeps delimiters visible so the user can edit the source. Sending
@@ -28,6 +29,7 @@ incoming text delta. Ready does not mean immutable.
 | User message | The message is accepted or loaded from a snapshot. |
 | Submitted pending message | The submitted text is available in full. |
 | Agent message | A final full item arrives, the next block starts, or the response ends. |
+| Request card text | The request card is inserted. |
 | Snapshot message | The full message is available from the snapshot. |
 | Composer | The user edits the draft. |
 
@@ -36,8 +38,9 @@ new block ends the previous active text section for Markdown purposes. The final
 message in a response becomes ready when its final item arrives or the response
 ends. Snapshot messages are ready even if the session is still running.
 
-Readiness permits processing. It does not require immediate processing of text
-outside the window.
+Readiness permits processing. It does not require immediate processing
+of text outside the window. Apply Markdown to request card text when
+the card is inserted, before adding the response widgets.
 
 ## Visible text and deferred processing
 

@@ -195,14 +195,21 @@ not report them. Update the header from session snapshots and stream events.
 
 ## Elicitations
 
-Give each request an action-specific heading, such as `Approval required` or `Question`.
-Show each pending request only in a separate inline block between the transcript and the
-composer, in arrival order with the oldest first. Remove the whole block when resolution
-is confirmed; retain it if submission fails. Elicitations are temporary requests, not
-transcript items. Do not move point when a new request arrives. Show its message and
-available policy, phase, and content preview. Show `Approve` and `Decline` actions for
-approvals. Treat an internal `/approve/...` URL as an approval page; show an external
-URL as a browser link without in-buffer response actions.
+Give each request an action-specific heading, such as `Approval
+required` or `Question`.  Show each pending request only in a separate
+inline block between the transcript and the composer, in arrival order
+with the oldest first. Remove the whole block when resolution is
+confirmed; retain it if submission fails. Elicitations are temporary
+requests, not transcript items. Do not move point when a new request
+arrives. Use the same display indentation as transcript
+messages. Format the heading and reason as Markdown. Show the command
+in a fenced code block and the working directory as inline code in a
+block quote when the request includes them. Use the request message as
+the prompt for questions and for approvals without a reason or
+command. Show `Approve` and `Decline` for approvals and `Submit` and
+`Decline` for questions. Treat an internal `/approve/...` URL as an
+approval page. Show an external URL as a browser link without
+in-buffer response actions.
 
 Use normal Emacs widget navigation, including `TAB` between fields and actions.
 Show editable form fields, including boolean and selectable options. Show an
