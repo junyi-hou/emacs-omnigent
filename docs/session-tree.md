@@ -17,6 +17,7 @@ the WebSocket subscription has its own transport contract.
 | Operation | Server API | Client helper |
 |---|---|---|
 | List sessions | `GET /v1/sessions?limit=1000&include_archived={true|false}&sort_by=updated_at&order=desc` | `omnigent-transport-list-sessions` |
+| List child sessions | `GET /v1/sessions/{id}/child_sessions` | `omnigent-transport-list-child-sessions` |
 | List projects | `GET /v1/projects` | `omnigent-sessions-refresh-projects` |
 | Move session | `PATCH /v1/sessions/{id}` with `project_id` | `omnigent-sessions-move` |
 | List agents | `GET /v1/agents` | `omnigent-transport-request` |
@@ -127,12 +128,14 @@ or malformed fields are client processing failures, not empty results. Preserve
 the previous list and truncation state when a response is malformed. An explicit
 empty array is valid.
 
-Subscribe to session updates. A watch message replaces the complete watch set, which
-contains only IDs with live conversation buffers. Creating or closing a conversation
-buffer adds or removes its ID. The server limits the watch set to 500 IDs, so refuse to
-open a new conversation buffer at the limit and report why.  Reusing an open buffer is
-still allowed. Manual refresh reconciles all loaded rows; rows without open conversation
-buffers do not receive live updates. The transport reconnects and resends the watch set.
+Subscribe to session updates. A watch message replaces the complete watch set.
+Include IDs with live conversation buffers and known child IDs of sessions with
+live conversation buffers. The server limits the set to 500 IDs. Give open
+conversations priority over children without open buffers. Refuse to open a new
+conversation buffer only when 500 distinct IDs already have live buffers.
+Reusing an open buffer is still allowed. If child IDs exceed the remaining
+capacity, indicate that some child rows lack live updates. The transport
+reconnects and resends the watch set.
 
 The server sends a snapshot after each watch, changed and removed frames, and
 heartbeats. Merge the fetched root list with watched sessions that have open
@@ -145,15 +148,36 @@ including any draft,
 and make it read-only; do not report the deletion. Close its workspace panel. Do not infer that a session was deleted merely because a list refresh omitted
 it. After a conversation buffer closes, retain its row until the next successful
 list refresh; remove it then if it is absent from the fetched list. Reconcile on
-reconnect and manual refresh. Child sessions remain outside v1.
+reconnect and manual refresh.
 
 The server owns session state. Refresh the list once after Emacs becomes idle for
 10 seconds, in addition to live updates and manual refresh. Do not repeat the
 refresh during the same idle period. Keep the idle timer active while connected,
 even when the session side window is hidden; stop it on disconnect. The frontend
-owns the list's display and ordering. The conversation frontend owns user-facing actions. Child-session
-display and management are post-v1; do not fetch child lists or open child conversations
-in v1.
+owns the list's display and ordering. The conversation frontend owns user-facing
+actions.
+
+### Child session freshness
+
+1. **List membership.** Fetch the full child list alongside the parent snapshot
+   each time the parent conversation opens. Follow pagination until the server
+   returns the last page. While the parent is open, refresh its child list when
+   its SSE stream reports `session.created` for a child. Combine nearby spawn
+   events into one refresh. If an event arrives during a fetch, reconcile again
+   after that fetch completes. Refresh on parent stream reconnect and manual
+   refresh to recover missed events. A WebSocket removal for a watched child
+   removes that row. Use event-driven refreshes without a per-turn request or
+   periodic child-list timer.
+2. **Child row state.** Add the known child IDs to the session-updates WebSocket
+   watch set. Apply snapshot and change frames to the child rows. Open a child's
+   SSE stream when the user opens its conversation.
+
+When the parent conversation closes, stop fetching its list and remove its
+children from the watch set unless another open conversation still needs their
+IDs. Apply a child-list response only to the parent buffer that requested it.
+Opening the parent again starts a fresh request alongside its snapshot.
+Tree folding only changes which rows are visible. The conversation buffer
+lifecycle controls child-list fetches and child watches.
 
 ## Checks
 
@@ -166,9 +190,14 @@ requests. Real-server tests mock user choices, browse nested directories, and
 reject a missing typed path before creation. Existing transport tests cover the
 WebSocket.
 
+Check child-list loads on open and reopen, spawn events during a fetch, and
+reconciliation after reconnect. Check that closing the parent drops its child
+watches, ignores pending responses, and keeps an open child watched. Check that
+child watches yield to open conversation buffers at the server limit.
+
 ## Deferred
 
-Child sessions, cursor pagination beyond 1,000,
+Root-list cursor pagination beyond 1,000,
 search, custom ordering, automatic remote-host setup, TRAMP-to-host inference,
 managed sandbox creation, advanced creation options, and `delete_worktree` are
 post-v1. Selecting an existing online remote host is supported. V1 still lists

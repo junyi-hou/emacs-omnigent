@@ -25,22 +25,34 @@ Within each group, show active sessions before archived sessions. Sort each
 set by most recent update first. Create sessions with a keyboard command. Show
 each session's title and an attention marker for pending
 elicitations. Indicate status with a face. Preserve point by session ID on
-refresh. Child sessions are deferred.
+refresh. Indent each child session one level below its parent. Apply the same
+rule to descendants at every level. Follow the
+[child session freshness rules](session-tree.md#child-session-freshness).
 
 Show each session on one line. Use faces, not glyphs, for session states. Show
 `!` in a separate column when an elicitation is pending; otherwise leave it
-blank.  Truncate long titles rather than wrap lines, and keep the attention
-marker visible in narrow windows. Do not show a legend in the buffer. Use `g`
+blank. Use the child's WebSocket `pending_elicitations_count` for its
+marker. When a fold hides a child with a pending request, show the marker on
+the visible folded ancestor. Stop using a child's cached count for that
+ancestor when its watch ends. Keep using updates for a child that remains
+watched because its own conversation is open. Truncate long titles rather
+than wrap lines, and keep the attention marker visible in narrow windows. Do not show a legend in the buffer. Use `g`
 for manual refresh.  Refresh once after Emacs has been idle for 10 seconds,
 even if the side window is hidden; stop the idle timer on disconnect. If
 refresh fails, report the failure and keep the existing rows, which may be
 stale. If a project fetch reports more sessions, show `...` below that
 project’s session rows. `RET` opens the selected session's conversation buffer in the main
 window and keeps the session side window visible. Move point to the
-conversation buffer. Press `TAB` on a project heading to fold or unfold its
-sessions. Press `TAB` on a session to fold its project and move point to the
-heading. Preserve the fold state across refreshes. Press `m` on a session to
-select a destination with completion. Select `[Unassigned]` to remove the
+conversation buffer. Bind `TAB` to one tree toggle command. On a project
+heading, the command folds or unfolds the project. On a session row with
+children, it folds or unfolds that session's subtree. On a leaf row, it
+leaves the tree unchanged. Keep point on the row that the user toggles.
+When the first child becomes known, turn the parent row into an expanded
+branch and show all its children. Keep the branch expanded until the user
+folds it. Preserve the user's fold state across refreshes and when more
+children appear. Keep fold state independent of whether a conversation buffer
+is open. Press `m` on a session to select a destination
+with completion. Select `[Unassigned]` to remove the
 project assignment. Moving a session changes its server project
 membership. Its workspace stays the same. Follow Treemacs or Neotree
 conventions for other bindings where applicable. Use `a` to toggle archive and

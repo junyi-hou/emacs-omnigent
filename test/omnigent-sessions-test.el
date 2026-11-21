@@ -1555,3 +1555,69 @@
          `((hosts . [((host_id . ,host) (status . "online"))])))
         (should
          (equal default (and (equal host "host-a") "/original")))))))
+
+(ert-deftest
+    omnigent-sessions-child-refresh-pages-and-drops-closed-requests
+    ()
+  "Reconcile child pages and watch only children needed by open conversations."
+  (let ((omnigent-sessions--buffers nil)
+        (omnigent-sessions--children (make-hash-table :test 'equal))
+        (omnigent-sessions--child-requests
+         (make-hash-table :test 'equal))
+        (omnigent-sessions--watched-ids nil)
+        (omnigent-sessions-updates 'updates)
+        (omnigent-sessions-change-hook nil)
+        (omnigent-sessions-frame-hook nil)
+        (omnigent-sessions--revision 0)
+        (parent (generate-new-buffer " *parent*"))
+        (child (generate-new-buffer " *child*"))
+        requests)
+    (cl-letf (((symbol-function
+                'omnigent-transport-set-session-updates-watch)
+               #'ignore)
+              ((symbol-function
+                'omnigent-transport-list-child-sessions)
+               (lambda (id callback &optional after)
+                 (push (list id callback after) requests))))
+      (unwind-protect
+          (progn
+            (omnigent-sessions-register-buffer "parent" parent)
+            (omnigent-sessions-refresh-children "parent")
+            (omnigent-sessions-refresh-children "parent")
+            (should (= (length requests) 1))
+            (funcall (cadar requests)
+                     200
+                     '((data . [((id . "child"))])
+                       (has_more . t)
+                       (last_id . "child")))
+            (should (equal (caddar requests) "child"))
+            (omnigent-sessions--frame
+             '((type . "changed")
+               (items
+                .
+                [((id . "child")
+                  (parent_session_id . "parent")
+                  (pending_elicitations_count . 1))])))
+            (funcall (cadar requests)
+                     200
+                     '((data . [((id . "sibling"))])))
+            (should (= (length requests) 3))
+            (should
+             (equal
+              omnigent-sessions--watched-ids
+              '("parent" "child" "sibling")))
+            (should
+             (= (alist-get
+                 'pending_elicitations_count
+                 (omnigent-sessions-row "child"))
+                1))
+            (omnigent-sessions-register-buffer "child" child)
+            (kill-buffer parent)
+            (should (equal omnigent-sessions--watched-ids '("child")))
+            (funcall (cadar requests) 200 '((data . [])))
+            (should
+             (= (length (omnigent-sessions-children "parent")) 2)))
+        (when (buffer-live-p parent)
+          (kill-buffer parent))
+        (when (buffer-live-p child)
+          (kill-buffer child))))))

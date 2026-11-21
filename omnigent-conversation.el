@@ -879,8 +879,15 @@ unanswered.  The frontend must use the setter to change this table."
   (gethash id omnigent-conversation--elicitation-submitting))
 
 (defun omnigent-conversation--elicitation-put (request)
-  "Store elicitation REQUEST and initialize its draft from schema defaults."
-  (when-let* ((id (alist-get 'elicitation_id request)))
+  "Store a local elicitation REQUEST and initialize its draft."
+  (when-let* ((id (alist-get 'elicitation_id request))
+              ((let ((target
+                      (alist-get
+                       'target_session_id
+                       (alist-get 'params request))))
+                 (or (not target)
+                     (equal
+                      target omnigent-conversation-session-id)))))
     (unless (gethash id omnigent-conversation--elicitations)
       (setq omnigent-conversation--elicitation-order
             (append

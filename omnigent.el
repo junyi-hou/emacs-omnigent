@@ -1532,7 +1532,8 @@ AFTER is the cursor used for the current page."
 
 (defun omnigent--conversation-connect ()
   "Start the current conversation stream without replacing its draft."
-  (let ((buffer (current-buffer)))
+  (let ((buffer (current-buffer))
+        opening-snapshot)
     (setq
      omnigent-conversation--stream
      (omnigent-transport-start-session-stream
@@ -1540,6 +1541,10 @@ AFTER is the cursor used for the current page."
       (lambda (name data)
         (when (buffer-live-p buffer)
           (with-current-buffer buffer
+            (when (and (equal name "session.created")
+                       (stringp (alist-get 'child_session_id data)))
+              (omnigent-sessions-refresh-children
+               omnigent-conversation-session-id))
             (omnigent-conversation--event name data))))
       (lambda (status body)
         (when (buffer-live-p buffer)
@@ -1549,10 +1554,16 @@ AFTER is the cursor used for the current page."
       (lambda ()
         (when (buffer-live-p buffer)
           (with-current-buffer buffer
-            (omnigent-conversation--begin-snapshot))))
+            (omnigent-conversation--begin-snapshot)
+            (when opening-snapshot
+              (setq opening-snapshot nil)
+              (omnigent-sessions-refresh-children
+               omnigent-conversation-session-id)))))
       (lambda (state)
         (when (buffer-live-p buffer)
           (with-current-buffer buffer
+            (when (eq state 'connecting)
+              (setq opening-snapshot t))
             (omnigent-conversation--connection-state state)
             (when (and
                    (eq state 'connected)
@@ -1583,12 +1594,7 @@ AFTER is the cursor used for the current page."
 (defun omnigent-conversation--default-directory (id)
   "Return the local workspace directory for session ID.
 Use the current project root when the session workspace is unavailable."
-  (let* ((session
-          (cl-find
-           id
-           (omnigent-sessions-visible)
-           :key (lambda (row) (alist-get 'id row))
-           :test #'equal))
+  (let* ((session (omnigent-sessions-row id))
          (workspace (alist-get 'workspace session))
          (host-id (alist-get 'host_id session)))
     (if (and (stringp workspace)
@@ -1638,12 +1644,7 @@ Use the current project root when the session workspace is unavailable."
 When SIDE-CHAT is non-nil, skip skill completion discovery."
   (let* ((directory (omnigent-conversation--default-directory id))
          (buffer (omnigent-sessions-buffer id))
-         (session
-          (cl-find
-           id
-           (omnigent-sessions-visible)
-           :key (lambda (row) (alist-get 'id row))
-           :test #'equal))
+         (session (omnigent-sessions-row id))
          (workspace (alist-get 'workspace session))
          (host (alist-get 'host_id session)))
     (unless buffer
@@ -1662,7 +1663,8 @@ When SIDE-CHAT is non-nil, skip skill completion discovery."
                     (omnigent--conversation-opening-side-chat
                      side-chat))
                 (omnigent-conversation-mode)))
-            (omnigent-sessions-register-buffer id buffer))
+            (omnigent-sessions-register-buffer id buffer)
+            (omnigent-sessions-refresh-children id))
         (error
          (kill-buffer buffer)
          (signal (car err) (cdr err)))))
@@ -2341,12 +2343,7 @@ When EFFORT is nil, prompt with the current model's supported levels."
   "Open the session at point."
   (interactive)
   (let* ((id (omnigent-ui--session-id-at-point))
-         (session
-          (cl-find
-           id
-           (omnigent-sessions-visible)
-           :key (lambda (row) (alist-get 'id row))
-           :test #'equal)))
+         (session (and id (omnigent-sessions-row id))))
     (unless session
       (user-error "No session at point"))
     (omnigent-ui-open id (alist-get 'title session))))
@@ -2361,19 +2358,26 @@ When EFFORT is nil, prompt with the current model's supported levels."
     (when (omnigent-ui--project-at-point)
       (point))))
 
-(defun omnigent-ui-toggle-project ()
-  "Fold or unfold the project at point."
+(defun omnigent-ui-toggle-tree ()
+  "Fold or unfold the project or session branch at point."
   (interactive)
-  (let ((heading (omnigent-ui--project-heading)))
-    (unless heading
-      (user-error "No project at point"))
-    (goto-char heading)
-    (let ((key (omnigent-ui--project-at-point)))
+  (let ((project (omnigent-ui--project-at-point))
+        (id (omnigent-ui--session-id-at-point)))
+    (cond
+     (project
       (setq omnigent-ui--folded-projects
-            (if (member key omnigent-ui--folded-projects)
-                (delete key omnigent-ui--folded-projects)
-              (cons key omnigent-ui--folded-projects))))
-    (omnigent-ui-sessions-render)))
+            (if (member project omnigent-ui--folded-projects)
+                (delete project omnigent-ui--folded-projects)
+              (cons project omnigent-ui--folded-projects)))
+      (omnigent-ui-sessions-render))
+     ((and id (omnigent-sessions-children id))
+      (setq omnigent-ui--folded-sessions
+            (if (member id omnigent-ui--folded-sessions)
+                (delete id omnigent-ui--folded-sessions)
+              (cons id omnigent-ui--folded-sessions)))
+      (omnigent-ui-sessions-render)))))
+
+(defalias 'omnigent-ui-toggle-project #'omnigent-ui-toggle-tree)
 
 (defun omnigent-ui--read-project (prompt projects &optional unassign)
   "Read a project from PROJECTS with PROMPT.
@@ -2463,9 +2467,11 @@ When UNASSIGN is non-nil, offer to remove the project assignment."
           `((window-width . ,omnigent-side-window-width))))))))
 
 (defun omnigent-ui-refresh ()
-  "Refresh the full root session list."
+  "Refresh the root list and the child lists of open conversations."
   (interactive)
-  (omnigent-sessions-refresh))
+  (omnigent-sessions-refresh)
+  (dolist (entry omnigent-sessions--buffers)
+    (omnigent-sessions-refresh-children (car entry))))
 
 (defun omnigent-ui--adjust-project-limit (amount)
   "Change the fetch limit for the project at point by AMOUNT."
@@ -2615,12 +2621,7 @@ When UNASSIGN is non-nil, offer to remove the project assignment."
   (interactive)
   (pcase-let* ((`(,id . ,title) (omnigent-ui--action-target))
                (buffer (current-buffer))
-               (session
-                (cl-find
-                 id
-                 (omnigent-sessions-visible)
-                 :key (lambda (row) (alist-get 'id row))
-                 :test #'equal))
+               (session (omnigent-sessions-row id))
                (next-id
                 (when (and (derived-mode-p 'omnigent-ui-sessions-mode)
                            (not (eq (alist-get 'archived session) t)))

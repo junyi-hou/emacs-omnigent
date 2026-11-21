@@ -304,12 +304,17 @@ An empty PROJECT string selects unassigned sessions."
    (omnigent-transport--session-path session-id)
    callback))
 
-(defun omnigent-transport-list-child-sessions (parent-id callback)
-  "List children of PARENT-ID and call CALLBACK with status and response body."
+(defun omnigent-transport-list-child-sessions
+    (parent-id callback &optional after)
+  "List children of PARENT-ID after AFTER and pass the result to CALLBACK."
   (omnigent-transport--request
-   parent-id
-   "GET"
-   (omnigent-transport--session-path parent-id "/child_sessions")
+   parent-id "GET"
+   (omnigent-transport--session-path parent-id
+                                     (if after
+                                         (concat
+                                          "/child_sessions?after="
+                                          (url-hexify-string after))
+                                       "/child_sessions"))
    callback))
 
 (defun omnigent-transport-post-session-event

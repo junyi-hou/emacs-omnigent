@@ -50,7 +50,13 @@ Closing a buffer needs no confirmation. A still-pending server request can be
 loaded again when the buffer opens. Unsubmitted draft answers are lost. Pending
 requests are held in server memory and can be lost on server restart; a request
 can also resolve while the buffer is closed. Do not promise recovery in those
-cases. Child-session request handling is deferred with child sessions.
+cases.
+
+When the user opens a child conversation, load its pending requests from its
+snapshot. The session tree shows pending requests as attention markers. See
+[the session list design](frontend.md#session-list). Answering a forwarded
+child request from the parent conversation remains deferred. That flow uses
+`params.target_session_id` to route the resolve request to the child.
 
 ## Checks
 

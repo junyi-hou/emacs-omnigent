@@ -7,6 +7,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'seq)
 (require 'omnigent-transport)
 (require 'omnigent-workspace)
 
@@ -108,7 +109,9 @@
                 (or
                  (cl-remove-if-not
                   (lambda (row)
-                    (equal key (omnigent-sessions-project-key row)))
+                    (and
+                     (not (alist-get 'parent_session_id row))
+                     (equal key (omnigent-sessions-project-key row))))
                   (append (alist-get 'data body) nil))
                  ;; Distinguish an empty result from a pending request.
                  [])
@@ -135,6 +138,141 @@
 (defvar omnigent-sessions--refresh-number 0)
 (defvar omnigent-sessions--buffers nil)
 (defvar omnigent-sessions--revision 0)
+
+(defvar omnigent-sessions--children (make-hash-table :test 'equal)
+  "Map parent IDs to cached child rows.")
+(defvar omnigent-sessions--child-requests
+  (make-hash-table :test 'equal)
+  "Map parent IDs to pending refresh state.")
+(defvar omnigent-sessions--watched-ids nil
+  "IDs submitted to the session-updates watch.")
+
+(defun omnigent-sessions-children (id)
+  "Return known children of session ID."
+  (gethash id omnigent-sessions--children))
+
+(defun omnigent-sessions-row (id)
+  "Return the root or child session row for ID."
+  (or (cl-find
+       id
+       (omnigent-sessions-visible)
+       :key (lambda (row) (alist-get 'id row))
+       :test #'equal)
+      (catch 'row
+        (maphash
+         (lambda (_ rows)
+           (when-let* ((row
+                        (cl-find
+                         id rows
+                         :key
+                         (lambda (row) (alist-get 'id row))
+                         :test #'equal)))
+             (throw 'row row)))
+         omnigent-sessions--children))))
+
+(defun omnigent-sessions--merge-child (row fields)
+  "Return ROW with the supplied FIELDS updated."
+  (append
+   fields
+   (cl-remove-if (lambda (field) (assq (car field) fields)) row)))
+
+(defun omnigent-sessions--child-change (parent id fields)
+  "Update child ID of PARENT with FIELDS, or remove it if FIELDS is nil."
+  (when-let* ((request
+               (gethash parent omnigent-sessions--child-requests)))
+    (let ((old (assoc id (cdr request))))
+      (setcdr
+       request
+       (cons
+        (cons
+         id
+         (and fields
+              (omnigent-sessions--merge-child (cdr old) fields)))
+        (delq old (cdr request))))))
+  (when-let* ((rows (omnigent-sessions-children parent)))
+    (puthash
+     parent
+     (delq
+      nil
+      (mapcar
+       (lambda (row)
+         (if (equal id (alist-get 'id row))
+             (and fields (omnigent-sessions--merge-child row fields))
+           row))
+       rows))
+     omnigent-sessions--children)))
+
+(defun omnigent-sessions--child-page (id buffer request rows cursors)
+  "Fetch a page for ID and BUFFER, tracking ROWS and CURSORS for REQUEST."
+  (condition-case err
+      (omnigent-transport-list-child-sessions
+       id
+       (lambda (status body)
+         (when (and (eq
+                     request
+                     (gethash id omnigent-sessions--child-requests))
+                    (eq buffer (omnigent-sessions-buffer id)))
+           (let* ((valid
+                   (and (omnigent-transport-success-p status)
+                        (omnigent-sessions--rows-p body 'data 'id)))
+                  (more (and valid (eq (alist-get 'has_more body) t)))
+                  (cursor (and more (alist-get 'last_id body))))
+             (when valid
+               (setq rows
+                     (nconc
+                      rows (append (alist-get 'data body) nil))))
+             (if (and more
+                      (stringp cursor)
+                      (not (string-empty-p cursor))
+                      (not (member cursor cursors)))
+                 (omnigent-sessions--child-page
+                  id buffer request rows (cons cursor cursors))
+               (remhash id omnigent-sessions--child-requests)
+               (cond
+                ((not (omnigent-transport-success-p status))
+                 (omnigent-sessions--error
+                  "List child sessions" status
+                  body))
+                ((or (not valid) more)
+                 (omnigent-sessions--error
+                  "List child sessions" nil
+                  "Invalid child session list"))
+                (t
+                 (puthash
+                  id
+                  (delq
+                   nil
+                   (mapcar
+                    (lambda (row)
+                      (if-let* ((patch
+                                 (assoc
+                                  (alist-get 'id row) (cdr request))))
+                        (and (cdr patch)
+                             (omnigent-sessions--merge-child
+                              row (cdr patch)))
+                        row))
+                    rows))
+                  omnigent-sessions--children)
+                 (omnigent-sessions--watch)
+                 (run-hooks 'omnigent-sessions-change-hook)))
+               (when (car request)
+                 (omnigent-sessions-refresh-children id))))))
+       (car cursors))
+    (error
+     (when (eq request (gethash id omnigent-sessions--child-requests))
+       (remhash id omnigent-sessions--child-requests)
+       (omnigent-sessions--error "List child sessions" nil
+                                 (error-message-string err))))))
+
+(defun omnigent-sessions-refresh-children (id)
+  "Refresh ID's child list while its conversation buffer is open."
+  (when-let* ((buffer (omnigent-sessions-buffer id)))
+    (if-let* ((request
+               (gethash id omnigent-sessions--child-requests)))
+      (setcar request t)
+      (let ((request (list nil)))
+        (puthash id request omnigent-sessions--child-requests)
+        (omnigent-sessions--child-page id buffer request nil nil)))))
 
 (defun omnigent-sessions--check-project-more (key name)
   "Check whether project KEY, queried as NAME, has more sessions."
@@ -247,6 +385,7 @@ Refresh the list if FRAME contains a session that is not in the list."
      ((member type '("snapshot" "changed"))
       (dolist (item (append (alist-get 'items frame) nil))
         (let* ((id (alist-get 'id item))
+               (parent (alist-get 'parent_session_id item))
                (old
                 (cl-find
                  id
@@ -255,20 +394,36 @@ Refresh the list if FRAME contains a session that is not in the list."
                  :test #'equal)))
           (unless (alist-get
                    'omnigent.side_chat (alist-get 'labels item))
-            (if old
-                (setq omnigent-sessions
-                      (mapcar
-                       (lambda (row)
-                         (if (eq row old)
-                             item
-                           row))
-                       omnigent-sessions))
-              (when (and (omnigent-sessions-buffer id)
-                         (not (alist-get 'parent_session_id item)))
+            (cond
+             (parent
+              (when (or (omnigent-sessions-buffer parent)
+                        (omnigent-sessions-buffer id))
+                (omnigent-sessions--child-change parent id item)))
+             (old
+              (setq omnigent-sessions
+                    (mapcar
+                     (lambda (row)
+                       (if (eq row old)
+                           item
+                         row))
+                     omnigent-sessions)))
+             (t
+              (when (omnigent-sessions-buffer id)
                 (push item omnigent-sessions))
-              (setq unknown t))))))
+              (setq unknown t)))))))
      ((equal type "removed")
       (let ((ids (append (alist-get 'ids frame) nil)))
+        (dolist (id ids)
+          (remhash id omnigent-sessions--child-requests)
+          (remhash id omnigent-sessions--children))
+        (maphash
+         (lambda (parent rows)
+           (dolist (row rows)
+             (let ((id (alist-get 'id row)))
+               (when (member id ids)
+                 (omnigent-sessions--child-change parent id nil)))))
+         omnigent-sessions--children)
+        (omnigent-sessions--watch)
         (setq omnigent-sessions
               (cl-remove-if
                (lambda (row)
@@ -288,10 +443,29 @@ Refresh the list if FRAME contains a session that is not in the list."
         (cl-remove-if-not
          (lambda (entry) (buffer-live-p (cdr entry)))
          omnigent-sessions--buffers))
-  (when omnigent-sessions-updates
-    (omnigent-transport-set-session-updates-watch
-     omnigent-sessions-updates
-     (mapcar #'car omnigent-sessions--buffers))))
+  (let* ((open (mapcar #'car omnigent-sessions--buffers))
+         (children
+          (delete-dups
+           (apply #'append
+                  (mapcar
+                   (lambda (id)
+                     (mapcar
+                      (lambda (row) (alist-get 'id row))
+                      (omnigent-sessions-children id)))
+                   open))))
+         (ids
+          (append
+           open
+           (cl-remove-if (lambda (id) (member id open)) children)))
+         (watch (seq-take ids 500)))
+    (when (and omnigent-sessions-updates
+               (not (equal watch omnigent-sessions--watched-ids)))
+      (setq omnigent-sessions--watched-ids watch)
+      (omnigent-transport-set-session-updates-watch
+       omnigent-sessions-updates watch))
+    (when (> (length ids) 500)
+      (message
+       "Some child sessions lack live updates: session watch limit is 500"))))
 
 (defun omnigent-sessions-buffer (id)
   "Return the live conversation buffer for ID, or nil."
@@ -324,12 +498,13 @@ Signal a user error if ID already has a different live buffer or the
 
 (defun omnigent-sessions--buffer-killed ()
   "Remove the current buffer's registration and update the watch set."
-  (setq omnigent-sessions--buffers
-        (cl-remove
-         (current-buffer)
-         omnigent-sessions--buffers
-         :key #'cdr))
-  (omnigent-sessions--watch))
+  (when-let* ((entry
+               (rassq (current-buffer) omnigent-sessions--buffers)))
+    (remhash (car entry) omnigent-sessions--child-requests)
+    (setq omnigent-sessions--buffers
+          (delq entry omnigent-sessions--buffers))
+    (omnigent-sessions--watch)
+    (run-hooks 'omnigent-sessions-change-hook)))
 
 (defun omnigent-sessions--close-conversation (id)
   "Close the registered conversation buffer for session ID."
@@ -526,6 +701,9 @@ Signal a user error if ID already has a different live buffer or the
 (defun omnigent-sessions-reset ()
   "Forget state from the current server."
   (cl-incf omnigent-sessions--refresh-number)
+  (clrhash omnigent-sessions--children)
+  (clrhash omnigent-sessions--child-requests)
+  (setq omnigent-sessions--watched-ids nil)
   (clrhash omnigent-sessions--pending-projects)
   (clrhash omnigent-sessions--missing-projects)
   (setq
@@ -555,6 +733,7 @@ Signal a user error if ID already has a different live buffer or the
                (setq on-first-open nil)
                (funcall callback)))
            (omnigent-sessions-refresh))))
+  (omnigent-sessions--watch)
   (omnigent-sessions-refresh))
 
 (defun omnigent-sessions--filesystem-path

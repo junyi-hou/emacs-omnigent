@@ -1217,7 +1217,7 @@
                (lambda (seconds repeat function)
                  (should (= seconds 10))
                  (should repeat)
-                 (should (eq function #'omnigent-ui-refresh))
+                 (should (eq function #'omnigent-sessions-refresh))
                  (cl-incf calls)
                  'timer))
               ((symbol-function 'timerp)
@@ -2369,3 +2369,46 @@
       (should (get-text-property (1- (point)) 'face))
       (search-forward "code")
       (should (get-text-property (1- (point)) 'face)))))
+
+(ert-deftest
+    omnigent-ui-child-branches-default-open-and-preserve-folds
+    ()
+  "Display nested branches and move child attention to a folded ancestor."
+  (let ((omnigent-sessions '(((id . "parent") (title . "Parent"))))
+        (omnigent-sessions--children (make-hash-table :test 'equal))
+        (omnigent-sessions--watched-ids '("grandchild"))
+        (buffer (get-buffer-create "*omnigent-sessions*")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (omnigent-ui-sessions-mode)
+          (omnigent-ui-sessions-render)
+          (forward-line 1)
+          (omnigent-ui-toggle-tree)
+          (should (equal (omnigent-ui--session-id-at-point) "parent"))
+          (puthash
+           "parent"
+           '(((id . "child")
+              (title . "Child")
+              (parent_session_id . "parent")))
+           omnigent-sessions--children)
+          (puthash
+           "child"
+           '(((id . "grandchild")
+              (title . "Grandchild")
+              (parent_session_id . "child")
+              (pending_elicitations_count . 1)))
+           omnigent-sessions--children)
+          (omnigent-ui-sessions-render)
+          (should
+           (string-match-p "^      ! Grandchild" (buffer-string)))
+          (omnigent-ui-toggle-tree)
+          (should (equal (omnigent-ui--session-id-at-point) "parent"))
+          (should (string-match-p "▸ ! Parent" (buffer-string)))
+          (should-not (string-match-p "Grandchild" (buffer-string)))
+          (setq omnigent-sessions--watched-ids nil)
+          (omnigent-ui-sessions-render)
+          (should (string-match-p "▸ Parent" (buffer-string)))
+          (omnigent-ui-toggle-tree)
+          (should
+           (string-match-p "^      Grandchild" (buffer-string))))
+      (kill-buffer buffer))))

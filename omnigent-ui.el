@@ -50,11 +50,16 @@
   (cond
    ((eq (alist-get 'archived session) t)
     'omnigent-ui-session-archived)
-   ((equal (alist-get 'status session) "running")
+   ((or (equal (alist-get 'status session) "running")
+        (and (not (alist-get 'status session))
+             (eq (alist-get 'busy session) t)))
     'omnigent-ui-session-running)
    ((equal (alist-get 'status session) "waiting")
     'omnigent-ui-session-waiting)
-   ((equal (alist-get 'status session) "failed")
+   ((or (equal (alist-get 'status session) "failed")
+        (and (not (alist-get 'status session))
+             (equal
+              (alist-get 'current_task_status session) "failed")))
     'omnigent-ui-session-failed)
    (t
     'omnigent-ui-session-idle)))
@@ -92,6 +97,27 @@
        "n/a"))))
 
 (defvar-local omnigent-ui--folded-projects nil)
+
+(defvar-local omnigent-ui--folded-sessions nil
+  "Session IDs whose child rows are folded.")
+
+(defun omnigent-ui--session-pending-p (session)
+  "Return non-nil if SESSION has a current pending elicitation."
+  (let ((count (alist-get 'pending_elicitations_count session)))
+    (and (numberp count)
+         (> count 0)
+         (or (not (alist-get 'parent_session_id session))
+             (member
+              (alist-get 'id session)
+              omnigent-sessions--watched-ids)))))
+
+(defun omnigent-ui--descendant-pending-p (session)
+  "Return non-nil if a descendant of SESSION has a pending elicitation."
+  (seq-some
+   (lambda (child)
+     (or (omnigent-ui--session-pending-p child)
+         (omnigent-ui--descendant-pending-p child)))
+   (omnigent-sessions-children (alist-get 'id session))))
 
 (defun omnigent-ui--project-at-point ()
   "Return the project key on the heading at point."
@@ -167,22 +193,29 @@
                              :test #'equal))
                            key))))
                 (insert
-                 (propertize (concat
-                              (if folded
-                                  "▸ "
-                                "▾ ")
-                              (replace-regexp-in-string
-                               "[\n\r]" " " name)
-                              "\n")
-                             'omnigent-ui-project
-                             key
-                             'face
-                             'omnigent-ui-project))
+                 (propertize
+                  (concat
+                   (if folded
+                       "▸ "
+                     "▾ ")
+                   (if (and folded
+                            (seq-some
+                             #'omnigent-ui--descendant-pending-p
+                             (gethash key groups)))
+                       (propertize
+                        "! "
+                        'face 'omnigent-ui-session-attention)
+                     "")
+                   (replace-regexp-in-string "[\n\r]" " " name) "\n")
+                  'omnigent-ui-project
+                  key
+                  'face
+                  'omnigent-ui-project))
                 (unless folded
                   (dolist (session (nreverse (gethash key groups)))
                     (setq last-session session)
                     (omnigent-ui--insert-session-row
-                     session line-width))
+                     session line-width 1 key))
                   (when (if-let*
                             ((entry
                               (gethash
@@ -219,15 +252,26 @@
               (when (eobp)
                 (goto-char (point-min))))))))))
 
-(defun omnigent-ui--insert-session-row (session line-width)
-  "Insert SESSION within LINE-WIDTH."
+(defun omnigent-ui--insert-session-row
+    (session line-width depth project)
+  "Insert SESSION and its unfolded children within LINE-WIDTH at DEPTH in PROJECT."
   (let* ((start (point))
-         (attention (alist-get 'pending_elicitations_count session))
-         (pending (and (numberp attention) (> attention 0)))
+         (id (alist-get 'id session))
+         (children (omnigent-sessions-children id))
+         (folded (member id omnigent-ui--folded-sessions))
+         (indent (* 2 depth))
+         (pending
+          (or (omnigent-ui--session-pending-p session)
+              (and folded
+                   (omnigent-ui--descendant-pending-p session))))
          (prefix-width
-          (if pending
-              4
-            2))
+          (+ indent
+             (if children
+                 2
+               0)
+             (if pending
+                 2
+               0)))
          (title (alist-get 'title session))
          (updated-at
           (omnigent-ui--session-age (alist-get 'updated_at session)))
@@ -235,7 +279,12 @@
           (if (and (stringp title) (not (string-empty-p title)))
               (replace-regexp-in-string "[\n\r]" " " title)
             "Untitled")))
-    (insert "  ")
+    (insert (make-string indent ?\s))
+    (when children
+      (insert
+       (if folded
+           "▸ "
+         "▾ ")))
     (when pending
       (insert "! "))
     (insert
@@ -261,7 +310,7 @@
       'omnigent-ui-session-id
       (alist-get 'id session)
       'omnigent-ui-session-project
-      (omnigent-sessions-project-key session)
+      project
       'face
       (omnigent-ui--session-face session)))
     (when (equal
@@ -270,10 +319,14 @@
        (+ start prefix-width) (1- (point)) 'bold))
     (when pending
       (put-text-property
-       (+ start 2)
-       (+ start 3)
+       (+ start prefix-width -2)
+       (+ start prefix-width -1)
        'face
-       'omnigent-ui-session-attention))))
+       'omnigent-ui-session-attention))
+    (unless folded
+      (dolist (child children)
+        (omnigent-ui--insert-session-row
+         child line-width (1+ depth) project)))))
 
 
 ;;; Connection and selection
@@ -298,13 +351,15 @@
          (omnigent-ui-sessions)))))
   (unless omnigent-ui--idle-timer
     (setq omnigent-ui--idle-timer
-          (run-with-idle-timer 10 t #'omnigent-ui-refresh))))
+          (run-with-idle-timer 10 t #'omnigent-sessions-refresh))))
 
 (defun omnigent-ui-reset ()
   "Stop frontend timers and discard server-specific workspace views."
   (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
     (with-current-buffer buffer
-      (setq omnigent-ui--folded-projects nil)))
+      (setq
+       omnigent-ui--folded-projects nil
+       omnigent-ui--folded-sessions nil)))
   (when (timerp omnigent-ui--idle-timer)
     (cancel-timer omnigent-ui--idle-timer))
   (setq
@@ -363,12 +418,7 @@
           (or (and (derived-mode-p 'omnigent-conversation-mode)
                    omnigent-conversation-session-id)
               (omnigent-ui--session-id-at-point)))
-         (row
-          (cl-find
-           id
-           (omnigent-sessions-visible)
-           :key (lambda (session) (alist-get 'id session))
-           :test #'equal)))
+         (row (omnigent-sessions-row id)))
     (unless id
       (user-error "No session at point"))
     (when (or (and (derived-mode-p 'omnigent-conversation-mode)

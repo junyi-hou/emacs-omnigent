@@ -120,10 +120,9 @@ conversation buffer.
 The WebSocket does not provide the initial session list. Its snapshot contains only the
 IDs in the watch set supplied by the client; an empty watch set gives an empty
 snapshot. Session management opens the WebSocket, fetches the initial list with REST,
-and watches only session IDs with live conversation buffers. The 500-ID server limit
-also limits open conversation buffers to 500. The WebSocket supplies updates, not a
-complete inventory. Reconcile with REST on reconnect, as described in
-[session-tree.md](session-tree.md).
+and builds the watch set from live conversation buffers and their known child
+sessions. The WebSocket supplies updates for watched IDs. Reconcile the lists
+with REST as described in [session-tree.md](session-tree.md).
 
 V1 supports one server at a time. Keep global connection state with the server URL, the
 session-updates handle, open session-stream handles, and a connection generation to
