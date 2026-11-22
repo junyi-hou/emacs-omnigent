@@ -1428,13 +1428,21 @@ Signal an error if point is not in a foldable block."
                          'omnigent-ui-error
                        'shadow)))))))
 
+(defun omnigent-ui--conversation-busy-p ()
+  "Return non-nil while the conversation has a response or is running."
+  (and (not omnigent-conversation--invalid)
+       (or omnigent-conversation--response-id
+           (equal
+            (alist-get
+             'status
+             (omnigent-sessions-row omnigent-conversation-session-id))
+            "running"))))
+
 (defun omnigent-ui--busy-tick (buffer)
   "Advance busy indicators in BUFFER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
-      (let* ((responding
-              (and omnigent-conversation--response-id
-                   (not omnigent-conversation--invalid)))
+      (let* ((responding (omnigent-ui--conversation-busy-p))
              (frame
               (aref
                ["|" "/" "-" "\\"] (mod omnigent-ui--busy-frame 4))))
@@ -1452,11 +1460,11 @@ Signal an error if point is not in a foldable block."
   "Update the transcript and prompt busy indicators."
   (cond
    ((and (not omnigent-conversation--invalid)
-         (or omnigent-conversation--response-id
+         (or (omnigent-ui--conversation-busy-p)
              (omnigent-ui--sandbox-animating-p)))
     (if omnigent-ui--busy-timer
         (progn
-          (unless omnigent-conversation--response-id
+          (unless (omnigent-ui--conversation-busy-p)
             (overlay-put
              omnigent-ui--busy-overlay 'before-string " "))
           (omnigent-ui--sandbox-render
@@ -1471,6 +1479,14 @@ Signal an error if point is not in a foldable block."
       (cancel-timer omnigent-ui--busy-timer)
       (setq omnigent-ui--busy-timer nil))
     (omnigent-ui--busy-tick (current-buffer)))))
+
+(defun omnigent-ui--busy-update-sessions ()
+  "Update busy indicators when session statuses change."
+  (dolist (entry omnigent-sessions--buffers)
+    (when (buffer-live-p (cdr entry))
+      (with-current-buffer (cdr entry)
+        (when omnigent-ui--busy-overlay
+          (omnigent-ui--busy-update))))))
 
 (defun omnigent-ui--busy-stop ()
   "Stop the prompt animation when the conversation closes."
@@ -1927,6 +1943,8 @@ CHOICES is a widget choice list; REQUIRED and SECRET control input handling."
  'omnigent-conversation-mode-hook #'omnigent-ui-conversation-setup)
 (add-hook
  'omnigent-sessions-change-hook #'omnigent-ui-sessions-render)
+(add-hook
+ 'omnigent-sessions-change-hook #'omnigent-ui--busy-update-sessions)
 (add-hook 'omnigent-sessions-frame-hook #'omnigent-ui--frame)
 (add-hook 'window-selection-change-functions #'omnigent-ui--selection)
 (add-hook

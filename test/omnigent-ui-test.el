@@ -437,6 +437,34 @@
           (should-not omnigent-ui--busy-timer))
       (omnigent-ui--busy-stop))))
 
+(ert-deftest omnigent-ui-busy-indicator-survives-follow-up-completion
+    ()
+  "Keep animating after a follow-up while the session is still running."
+  (omnigent-ui-test--conversation
+    (let ((omnigent-sessions
+           '(((id . "conv_test") (status . "idle"))))
+          (omnigent-sessions--buffers
+           (list (cons "conv_test" (current-buffer))))
+          (omnigent-sessions--revision 0))
+      (omnigent-sessions--frame
+       '((type . "changed")
+         (items . [((id . "conv_test") (status . "running"))])))
+      (should (timerp omnigent-ui--busy-timer))
+      (omnigent-conversation--event
+       "response.created" '((response . ((id . "follow-up")))))
+      (should (timerp omnigent-ui--busy-timer))
+      (omnigent-conversation--event
+       "response.completed" '((response . ((id . "follow-up")))))
+      (should (timerp omnigent-ui--busy-timer))
+      (omnigent-ui--busy-tick (current-buffer))
+      (should-not
+       (equal
+        (overlay-get omnigent-ui--busy-overlay 'before-string) " "))
+      (omnigent-sessions--frame
+       '((type . "changed")
+         (items . [((id . "conv_test") (status . "idle"))])))
+      (should-not omnigent-ui--busy-timer))))
+
 (ert-deftest omnigent-ui-sandbox-progress-recovers-and-clears ()
   "Render snapshot and live sandbox progress without writing transcript items."
   (omnigent-ui-test--conversation
