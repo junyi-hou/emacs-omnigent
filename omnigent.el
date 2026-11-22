@@ -2859,10 +2859,14 @@ Call ON-SEND, if non-nil, when the fork is ready to submit the question."
         (finish nil (error-message-string err)))))))
 
 (defun omnigent-ui-delete ()
-  "Delete the selected session after confirmation."
+  "Delete the selected session and its descendants after confirmation."
   (interactive)
   (pcase-let ((`(,id . ,title) (omnigent-ui--action-target)))
-    (when (y-or-n-p (format "Permanently delete session %s? " title))
+    (when
+        (y-or-n-p
+         (format
+          "Permanently delete session %s and all its child sessions? "
+          title))
       (omnigent-sessions-delete
        id
        (apply-partially #'omnigent-ui--action-result

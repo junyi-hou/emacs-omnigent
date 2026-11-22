@@ -1292,10 +1292,73 @@ The source session must have a connected runner."
                               body)))
                  `(("runner_id" . ,runner))))))))))))))
 
+(defun omnigent-sessions--mutate-subtree (id mutate close callback)
+  "Discover ID's subtree, then call MUTATE on each ID, descendants first.
+When CLOSE is non-nil, close each successfully updated conversation.
+Pass the first failure or the selected session's result to CALLBACK."
+  (let ((pending (list id))
+        (seen (make-hash-table :test 'equal))
+        order)
+    (puthash id t seen)
+    (cl-labels
+     ((finish
+       (status body)
+       (unwind-protect
+           (omnigent-sessions-refresh)
+         (funcall callback status body)))
+      (write-next
+       ()
+       (let ((session (pop order)))
+         (funcall mutate
+                  session
+                  (lambda (status body)
+                    (let ((success
+                           (omnigent-transport-success-p status)))
+                      (when (and success close)
+                        (omnigent-sessions--close-conversation
+                         session))
+                      (if (and success order)
+                          (write-next)
+                        (finish status body)))))))
+      (read-next
+       ()
+       (if pending
+           (let ((session (pop pending)))
+             (push session order)
+             (read-page session nil))
+         (write-next)))
+      (read-page
+       (session cursors)
+       (omnigent-transport-list-child-sessions
+        session
+        (lambda (status body)
+          (cond
+           ((not (omnigent-transport-success-p status))
+            (funcall callback status body))
+           ((not (omnigent-sessions--rows-p body 'data 'id))
+            (funcall callback nil "Invalid child session list"))
+           (t
+            (seq-doseq (row (alist-get 'data body))
+              (let ((child (alist-get 'id row)))
+                (unless (gethash child seen)
+                  (puthash child t seen)
+                  (push child pending))))
+            (if (eq (alist-get 'has_more body) t)
+                (let ((cursor (alist-get 'last_id body)))
+                  (if (and (stringp cursor)
+                           (not (string-empty-p cursor))
+                           (not (member cursor cursors)))
+                      (read-page session (cons cursor cursors))
+                    (funcall callback
+                             nil
+                             "Invalid child session pagination")))
+              (read-next)))))
+        (car cursors))))
+     (read-next))))
+
 (defun omnigent-sessions-toggle-archive (id callback)
-  "Toggle ID's current server archive state and invoke CALLBACK with the result.
-CALLBACK receives the HTTP status and response body.  Refresh the session list
-after the update completes."
+  "Toggle ID's server archive state and apply it to all descendants.
+CALLBACK receives the HTTP status and response body."
   (omnigent-transport-get-session
    id
    (lambda (status body)
@@ -1307,28 +1370,20 @@ after the update completes."
              (memq (alist-get 'archived body) '(t :json-false))))
        (funcall callback nil "Invalid session archive state"))
       (t
-       (omnigent-transport-set-session-archived
-        id (not (eq (alist-get 'archived body) t))
-        (lambda (update-status update-body)
-          (when (and (omnigent-transport-success-p update-status)
-                     (not (eq (alist-get 'archived body) t)))
-            (omnigent-sessions--close-conversation id))
-          (unwind-protect
-              (omnigent-sessions-refresh)
-            (funcall callback update-status update-body)))))))))
+       (let ((archived (not (eq (alist-get 'archived body) t))))
+         (omnigent-sessions--mutate-subtree
+          id
+          (lambda (session done)
+            (omnigent-transport-set-session-archived
+             session archived done))
+          archived callback)))))))
 
 (defun omnigent-sessions-delete (id callback)
-  "Delete session ID and invoke CALLBACK with the result.
-CALLBACK receives the HTTP status and response body.  Refresh the session list
-after the request completes.  The caller must obtain confirmation first."
-  (omnigent-transport-delete-session
-   id
-   (lambda (status body)
-     (when (omnigent-transport-success-p status)
-       (omnigent-sessions--close-conversation id))
-     (unwind-protect
-         (omnigent-sessions-refresh)
-       (funcall callback status body)))))
+  "Delete session ID and all its descendants.
+CALLBACK receives the HTTP status and response body.
+The caller must obtain confirmation first."
+  (omnigent-sessions--mutate-subtree
+   id #'omnigent-transport-delete-session t callback))
 
 (provide 'omnigent-sessions)
 ;;; omnigent-sessions.el ends here

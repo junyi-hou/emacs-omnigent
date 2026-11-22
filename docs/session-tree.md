@@ -33,14 +33,21 @@ Use the session row's `project_id` to identify its project. Send an empty
 `project_id` string to remove the assignment. Refresh sessions after a move
 succeeds.
 
-Toggle Archive reads the current server state and archives or unarchives the
-session. Both operations preserve history. Include archived sessions when
+Toggle Archive reads the selected session’s current server state. It archives
+or unarchives that session and all its descendants. Both operations preserve
+history and parent-child links. Include archived sessions when
 `omnigent-fetch-archived-sessions` is non-nil. The server controls agent cleanup.
 Archive does not request worktree deletion. Session management does not expose a Stop command;
 use Interrupt to cancel the current turn.
 
-Delete permanently removes the conversation; request confirmation with
-`y-or-n-p` before deleting it. Do not use deletion as a close operation.
+Delete permanently removes the selected session and all its descendants.
+Request confirmation with `y-or-n-p` before deleting the subtree.
+Do not use deletion as a close operation.
+
+Both commands fetch all pages of the subtree before making changes. They
+update descendants before their parents and stop at the first failure. The
+server applies each request separately, so earlier changes can remain after
+a failure.
 
 ### Session creation
 

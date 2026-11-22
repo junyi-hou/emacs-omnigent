@@ -838,6 +838,108 @@
       (should-error (omnigent-sessions-create) :type 'user-error)
       (should-not posted))))
 
+(ert-deftest omnigent-sessions-mutate-complete-subtree ()
+  "Apply each operation to all descendants, including later pages."
+  (dolist (operation '(archive unarchive delete))
+    (let (writes
+          result)
+      (cl-letf (((symbol-function 'omnigent-transport-get-session)
+                 (lambda (_id callback)
+                   (funcall callback
+                            200
+                            `((archived
+                               .
+                               ,(if (eq operation 'unarchive)
+                                    t
+                                  :json-false))))))
+                ((symbol-function
+                  'omnigent-transport-list-child-sessions)
+                 (lambda (id callback &optional after)
+                   (funcall callback
+                            200
+                            (cond
+                             ((equal id "root")
+                              (if after
+                                  '((data
+                                     .
+                                     [((id . "sibling")
+                                       (archived . t))]))
+                                '((data . [((id . "child"))])
+                                  (has_more . t)
+                                  (last_id . "child"))))
+                             ((equal id "child")
+                              '((data . [((id . "grandchild"))])))
+                             (t
+                              '((data . [])))))))
+                ((symbol-function
+                  'omnigent-transport-set-session-archived)
+                 (lambda (id archived callback)
+                   (push (cons id archived) writes)
+                   (funcall callback 204 nil)))
+                ((symbol-function 'omnigent-transport-delete-session)
+                 (lambda (id callback)
+                   (push id writes)
+                   (funcall callback 204 nil)))
+                ((symbol-function 'omnigent-sessions-refresh)
+                 #'ignore))
+        (funcall (if (eq operation 'delete)
+                     #'omnigent-sessions-delete
+                   #'omnigent-sessions-toggle-archive)
+                 "root" (lambda (status _body) (setq result status)))
+        (should (equal result 204))
+        (let ((ids
+               (if (eq operation 'delete)
+                   writes
+                 (mapcar #'car writes))))
+          (should
+           (equal
+            (sort (copy-sequence ids) #'string<)
+            '("child" "grandchild" "root" "sibling")))
+          (when (eq operation 'delete)
+            (should (equal (car ids) "root"))
+            (should
+             (< (cl-position "child" ids :test #'equal)
+                (cl-position "grandchild" ids :test #'equal)))))
+        (unless (eq operation 'delete)
+          (should
+           (cl-every
+            (lambda (write)
+              (eq (cdr write) (eq operation 'archive)))
+            writes)))))))
+
+(ert-deftest omnigent-sessions-delete-stops-on-subtree-failure ()
+  "Keep the parent when discovery or deletion of a child fails."
+  (dolist (discovery-fails '(nil t))
+    (let (writes
+          result)
+      (cl-letf (((symbol-function
+                  'omnigent-transport-list-child-sessions)
+                 (lambda (id callback &optional _after)
+                   (cond
+                    ((equal id "root")
+                     (funcall callback
+                              200
+                              '((data . [((id . "child"))]))))
+                    (discovery-fails
+                     (funcall callback 403 "Denied"))
+                    (t
+                     (funcall callback 200 '((data . [])))))))
+                ((symbol-function 'omnigent-transport-delete-session)
+                 (lambda (id callback)
+                   (push id writes)
+                   (funcall callback 403 "Denied")))
+                ((symbol-function 'omnigent-sessions-refresh)
+                 #'ignore))
+        (omnigent-sessions-delete
+         "root"
+         (lambda (status body) (setq result (list status body))))
+        (should (equal result '(403 "Denied")))
+        (should
+         (equal
+          writes
+          (unless discovery-fails
+            '("child"))))))))
+
 (ert-deftest
     omnigent-sessions-toggle-archive-and-delete-forward-results
     ()
@@ -849,7 +951,11 @@
             callback
             received
             (body '((result . "server result"))))
-        (cl-letf (((symbol-function 'omnigent-transport--request)
+        (cl-letf (((symbol-function
+                    'omnigent-transport-list-child-sessions)
+                   (lambda (_id callback &optional _after)
+                     (funcall callback 200 '((data . [])))))
+                  ((symbol-function 'omnigent-transport--request)
                    (lambda (_session-id method path cb &optional data)
                      (if (equal method "GET")
                          (funcall cb 200 '((archived . :json-false)))
@@ -891,6 +997,10 @@
             (let ((window (split-window-right)))
               (set-window-buffer window buffer)
               (cl-letf (((symbol-function
+                          'omnigent-transport-list-child-sessions)
+                         (lambda (_id callback &optional _after)
+                           (funcall callback 200 '((data . [])))))
+                        ((symbol-function
                           'omnigent-transport-delete-session)
                          (lambda (_id cb) (setq callback cb)))
                         ((symbol-function 'omnigent-sessions-refresh)
@@ -916,6 +1026,10 @@
             (let ((window (split-window-right)))
               (set-window-buffer window buffer)
               (cl-letf (((symbol-function
+                          'omnigent-transport-list-child-sessions)
+                         (lambda (_id callback &optional _after)
+                           (funcall callback 200 '((data . [])))))
+                        ((symbol-function
                           'omnigent-transport-get-session)
                          (lambda (_id callback)
                            (funcall callback
@@ -940,7 +1054,11 @@
   (dolist (state '(t :json-false))
     (let (payload
           result)
-      (cl-letf (((symbol-function 'omnigent-transport--request)
+      (cl-letf (((symbol-function
+                  'omnigent-transport-list-child-sessions)
+                 (lambda (_id callback &optional _after)
+                   (funcall callback 200 '((data . [])))))
+                ((symbol-function 'omnigent-transport--request)
                  (lambda (_session-id
                           method _path callback &optional data)
                    (if (equal method "GET")
@@ -1411,6 +1529,10 @@
     (let (callback
           received)
       (cl-letf (((symbol-function
+                  'omnigent-transport-list-child-sessions)
+                 (lambda (_id callback &optional _after)
+                   (funcall callback 200 '((data . [])))))
+                ((symbol-function
                   'omnigent-transport-set-session-archived)
                  (lambda (_id _archived cb) (setq callback cb)))
                 ((symbol-function 'omnigent-transport-get-session)
