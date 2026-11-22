@@ -361,11 +361,13 @@
       (should (equal (alist-get 'id created) "new")))))
 
 (ert-deftest omnigent-sessions-create-from-project-heading ()
-  "Send the project at point with a new session in both creation paths."
+  "Inherit the project from a heading or a session row."
   (let ((omnigent-session-default-host-type "external")
         (omnigent-session-default-host "host")
         (omnigent-session-default-workspace "/repo")
         (omnigent-session-default-agent "Agent")
+        (omnigent-sessions
+         '(((id . "source") (project_id . "project-1"))))
         payload
         menu)
     (cl-letf (((symbol-function 'omnigent-transport-request)
@@ -397,6 +399,13 @@
          (equal (cdr (assoc "project_id" payload)) "project-1"))
         (should (equal (cdr (assoc "agent_id" payload)) "agent"))
         (should-not (assoc "agent_reference" payload))
+        (omnigent-sessions-create '(4))
+        (should
+         (equal (alist-get 'project_id (cdr menu)) "project-1"))
+        (remove-text-properties
+         (point-min) (point-max) '(omnigent-ui-project nil))
+        (put-text-property
+         (point-min) (point-max) 'omnigent-ui-session-id "source")
         (omnigent-sessions-create '(4))
         (should
          (equal (alist-get 'project_id (cdr menu)) "project-1"))

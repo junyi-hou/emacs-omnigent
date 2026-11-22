@@ -288,7 +288,8 @@ With a prefix argument EDIT, open the session creation menu."
                     'workspace omnigent-conversation-header-data))))
          (project
           (and (derived-mode-p 'omnigent-ui-sessions-mode)
-               (omnigent-ui--project-at-point)))
+               (or (omnigent-ui--project-at-point)
+                   (omnigent-sessions-project-key session))))
          (fields (omnigent--create-default-fields))
          (configured-host (alist-get 'host_id fields)))
     (when (stringp project)
