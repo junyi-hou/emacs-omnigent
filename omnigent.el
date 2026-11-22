@@ -19,6 +19,15 @@
 
 (add-hook 'omnigent-sessions-open-hook #'omnigent-ui-created)
 
+(defun omnigent-conversation-follow-link (&optional event)
+  "Follow the Markdown link at point or at the mouse EVENT."
+  (interactive (list
+                (when (mouse-event-p last-command-event)
+                  last-command-event)))
+  (when event
+    (mouse-set-point event))
+  (markdown-follow-thing-at-point nil))
+
 ;;;###autoload
 (defun omnigent-conversation-open-block ()
   "Open the fold for the transcript block at point."

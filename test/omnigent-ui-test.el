@@ -2369,6 +2369,38 @@
        (point-min) omnigent-ui--request-start)
       "Agent:\nc\n\nAgent:\na\n\n"))))
 
+(ert-deftest omnigent-ui-markdown-opens-transcript-links ()
+  "Open a rendered agent link with RET or a mouse click."
+  (omnigent-ui-test--conversation
+    (omnigent-conversation--put-item
+     '((id . "link")
+       (type . "message")
+       (content . "[Example](https://example.com)")))
+    (omnigent-ui--transcript-render)
+    (goto-char (point-min))
+    (search-forward "Example")
+    (backward-char)
+    (omnigent-ui--markdown-fontify (point-min) (point-max))
+    (let ((link-position (point))
+          (link-map (get-text-property (point) 'keymap))
+          opened)
+      (should (eq (lookup-key link-map [follow-link]) 'mouse-face))
+      (cl-letf (((symbol-function 'browse-url)
+                 (lambda (url &rest _) (push url opened))))
+        (let ((last-command-event ?\r))
+          (call-interactively (key-binding (kbd "RET"))))
+        (save-window-excursion
+          (set-window-buffer (selected-window) (current-buffer))
+          (goto-char (point-min))
+          (let ((last-command-event
+                 (list
+                  'mouse-2
+                  (list (selected-window) link-position '(0 . 0) 0))))
+            (call-interactively (lookup-key link-map [mouse-2])))))
+      (should
+       (equal
+        opened '("https://example.com" "https://example.com"))))))
+
 (ert-deftest omnigent-ui-markdown-waits-for-message-completion ()
   "Keep active text plain and render completed text only when requested."
   (omnigent-ui-test--conversation

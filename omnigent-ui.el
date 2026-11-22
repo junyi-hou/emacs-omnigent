@@ -973,6 +973,14 @@ Signal an error if point is not in a foldable block."
       (not omnigent-conversation--response-id)
       (not (equal id omnigent-conversation--section-id))))
 
+(defvar omnigent-ui--markdown-link-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [follow-link] 'mouse-face)
+    (define-key map [mouse-2] #'omnigent-conversation-follow-link)
+    (define-key map (kbd "RET") #'omnigent-conversation-follow-link)
+    map)
+  "Keymap for Markdown links in rendered conversation text.")
+
 (defun omnigent-ui--markdown-apply (begin end hide)
   "Apply Markdown properties between BEGIN and END; HIDE conceals markup."
   (let ((text (buffer-substring-no-properties begin end)))
@@ -989,7 +997,11 @@ Signal an error if point is not in a foldable block."
         (lambda (rule)
           (eq (car-safe rule) 'markdown-match-declarative-metadata))
         markdown-mode-font-lock-keywords))
-      (font-lock-ensure)
+      (let ((markdown-mode-mouse-map
+             (if hide
+                 omnigent-ui--markdown-link-map
+               markdown-mode-mouse-map)))
+        (font-lock-ensure))
       (unless hide
         (remove-text-properties
          (point-min) (point-max) '(invisible nil)))
@@ -1010,6 +1022,14 @@ Signal an error if point is not in a foldable block."
              (+ begin next)
              property
              (get-text-property offset property text)))
+          (when (eq
+                 (get-text-property offset 'keymap text)
+                 omnigent-ui--markdown-link-map)
+            (put-text-property
+             (+ begin offset)
+             (+ begin next)
+             'keymap
+             omnigent-ui--markdown-link-map))
           (setq offset next))))
     (let ((pos begin))
       (while (< pos end)
