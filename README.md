@@ -126,7 +126,9 @@ the stream when the exchange ends. The server retains the private fork and
 its history. See [Side chat](docs/conversation-buffer.md#side-chat) for
 connection and turn handling.
 
-To set up and run the unit tests, use these commands.
+## Tests
+
+To install test dependencies and run the unit tests, use these commands.
 
 ```sh
 make test-deps
