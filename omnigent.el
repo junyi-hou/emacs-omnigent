@@ -469,17 +469,23 @@ When MENU is non-nil, restore the draft after a failed request."
      (car draft)
      (lambda (agent)
        (when (eq draft omnigent--create-draft)
-         (when (and agent
-                    (not
-                     (equal agent (alist-get 'agent_id (cdr draft)))))
-           (dolist (field
-                    '(model_override
-                      reasoning_effort terminal_launch_args))
-             (setf (alist-get field (cdr draft)) nil))
-           (setf
-            (alist-get 'agent_id (cdr draft)) agent
-            (alist-get 'agent_reference (cdr draft)) nil))
-         (omnigent--create-menu))))))
+         (when agent
+           (let ((id (alist-get 'id agent))
+                 (name (alist-get 'name agent)))
+             (unless (equal id (alist-get 'agent_id (cdr draft)))
+               (dolist (field
+                        '(model_override
+                          reasoning_effort terminal_launch_args))
+                 (setf (alist-get field (cdr draft)) nil)))
+             (dolist (field
+                      (alist-get name omnigent-session-agent-overrides
+                                 nil nil #'equal))
+               (setf (alist-get (car field) (cdr draft)) (cdr field)))
+             (setf
+              (alist-get 'agent_id (cdr draft)) id
+              (alist-get 'agent_reference (cdr draft)) nil)))
+         (omnigent--create-menu)))
+     nil nil t)))
 
 (defun omnigent--create-edit-field
     (field label &optional choices parse)

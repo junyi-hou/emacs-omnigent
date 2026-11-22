@@ -53,6 +53,19 @@ Nil prompts for an agent."
   :type '(choice (const :tag "Use default" nil) string)
   :group 'omnigent-session-creation)
 
+(defcustom omnigent-session-agent-overrides nil
+  "Session fields to apply when you select an agent in the creation menu.
+Each entry is (AGENT-NAME . FIELDS).  AGENT-NAME is the registered name.
+FIELDS is an alist of session field symbols and values.  For example,
+((\"Codex\" . ((model_override . \"my-model\") (reasoning_effort . \"high\")))).
+Use nil to clear a field.  The selection supplies the agent ID and takes
+precedence over any agent identity fields in FIELDS."
+  :type
+  '(alist
+    :key-type string
+    :value-type (alist :key-type symbol :value-type sexp))
+  :group 'omnigent-session-creation)
+
 (defcustom omnigent-session-default-model nil
   "Model ID for new sessions.  Nil uses the agent default."
   :type '(choice (const :tag "Use default" nil) string)

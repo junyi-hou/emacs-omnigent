@@ -471,6 +471,58 @@
          (equal
           (alist-get 'agent_reference (cdr menu)) "configured"))))))
 
+(ert-deftest omnigent-sessions-create-applies-selected-agent-overrides
+    ()
+  "Use the selected ID and apply draft fields by registered agent name."
+  (let ((omnigent-session-default-host "host")
+        (omnigent-session-default-workspace "/repo")
+        (omnigent-session-default-model "default")
+        (omnigent-session-default-title "Default title")
+        (omnigent-session-agent-overrides
+         '(("Codex" .
+            ((model_override . "override")
+             (reasoning_effort . "high")
+             (title . nil)
+             (agent_id . "wrong")))))
+        omnigent--create-draft
+        payload)
+    (cl-letf (((symbol-function 'omnigent--create-menu) #'ignore)
+              ((symbol-function 'completing-read)
+               (lambda (_prompt choices &rest _)
+                 (should (assoc "Codex [b]" choices))
+                 "Codex [b]"))
+              ((symbol-function 'omnigent-transport-request)
+               (lambda (method path callback &optional data)
+                 (if (equal path "/v1/agents")
+                     (funcall callback
+                              200
+                              '((data
+                                 .
+                                 [((id . "a") (name . "Codex"))
+                                  ((id . "b") (name . "Codex"))])))
+                   (should (equal method "POST"))
+                   (should (equal path "/v1/sessions"))
+                   (setq payload data)))))
+      (omnigent-sessions-create)
+      (should
+       (equal
+        (alist-get "model_override" payload
+                   nil
+                   nil
+                   #'equal)
+        "default"))
+      (omnigent-sessions-create '(4))
+      (omnigent--create-agent)
+      (should
+       (equal
+        (alist-get
+         'model_override (cdr omnigent--create-draft))
+        "override"))
+      (omnigent--create-submit)
+      (should (equal (cdr (assoc "agent_id" payload)) "b"))
+      (should (equal (cdr (assoc "reasoning_effort" payload)) "high"))
+      (should-not (assoc "title" payload)))))
+
 (ert-deftest omnigent-sessions-create-managed-uses-configured-defaults
     ()
   "Create a managed session without prompting for a connected host."

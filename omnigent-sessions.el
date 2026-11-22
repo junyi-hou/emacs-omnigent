@@ -1072,10 +1072,12 @@ Continue through CALLBACK after validating the path on GENERATION's server."
              (funcall callback (cons host-id workspace))))))))))
 
 (defun omnigent-sessions--read-agent
-    (generation callback &optional inherit reference after agents)
+    (generation
+     callback &optional inherit reference return-row after agents)
   "Pass the selected agent ID on GENERATION to CALLBACK.
 When INHERIT is a label, offer it and return the symbol inherit if selected.
 Resolve REFERENCE as an ID or name when it is non-nil.
+When RETURN-ROW is non-nil, pass the selected agent row for a choice.
 AFTER and AGENTS track the cursor and rows across pages."
   (omnigent-transport-request
    "GET"
@@ -1101,18 +1103,21 @@ AFTER and AGENTS track the cursor and rows across pages."
                    (omnigent-sessions--read-agent generation callback
                                                   inherit
                                                   reference
+                                                  return-row
                                                   next
                                                   rows)
                  (omnigent-sessions--error
                   "List agents" nil
                   "Invalid agent list cursor")))
            (omnigent-sessions--select-agent
-            callback inherit reference rows))))))))
+            callback inherit reference rows
+            return-row))))))))
 
 (defun omnigent-sessions--select-agent
-    (callback inherit reference agents)
+    (callback inherit reference agents &optional return-row)
   "Pass the ID selected from AGENTS to CALLBACK.
-Offer INHERIT when non-nil, or resolve a configured REFERENCE."
+Offer INHERIT when non-nil, or resolve a configured REFERENCE.
+When RETURN-ROW is non-nil, pass the selected agent row for a choice."
   (let ((names (make-hash-table :test #'equal)))
     (dolist (agent agents)
       (let ((name (alist-get 'name agent)))
@@ -1152,7 +1157,9 @@ Offer INHERIT when non-nil, or resolve a configured REFERENCE."
                            (cdr (gethash name names)))
                        (format "%s [%s]" name id)
                      name)
-                   id)))
+                   (if return-row
+                       agent
+                     id))))
               agents)))
         (when inherit
           (push (cons inherit 'inherit) choices))
