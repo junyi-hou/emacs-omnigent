@@ -287,9 +287,13 @@ With a prefix argument EDIT, open the session creation menu."
                    (alist-get
                     'workspace omnigent-conversation-header-data))))
          (project
-          (and (derived-mode-p 'omnigent-ui-sessions-mode)
-               (or (omnigent-ui--project-at-point)
-                   (omnigent-sessions-project-key session))))
+          (cond
+           ((derived-mode-p 'omnigent-ui-sessions-mode)
+            (or (omnigent-ui--project-at-point)
+                (omnigent-sessions-project-key session)))
+           ((derived-mode-p 'omnigent-conversation-mode)
+            (omnigent-sessions-project-key
+             omnigent-conversation-header-data))))
          (fields (omnigent--create-default-fields))
          (configured-host (alist-get 'host_id fields)))
     (when (stringp project)
@@ -461,6 +465,27 @@ When MENU is non-nil, restore the draft after a failed request."
   (omnigent--create-pick-location
    omnigent--create-draft (lambda (_) (omnigent--create-menu))
    (cdr omnigent--create-draft)))
+
+(defun omnigent--create-project ()
+  "Choose a server project for this draft or leave it unassigned."
+  (interactive)
+  (let ((draft omnigent--create-draft))
+    (omnigent-sessions-read-projects
+     (lambda (projects)
+       (when (and (eq draft omnigent--create-draft)
+                  (= (car draft) omnigent-transport--generation))
+         (let ((project
+                (condition-case nil
+                    (omnigent-ui--read-project "Project: " projects t)
+                  (quit
+                   nil))))
+           (when (and (eq draft omnigent--create-draft)
+                      (= (car draft) omnigent-transport--generation))
+             (when project
+               (setf (alist-get 'project_id (cdr draft))
+                     (unless (eq project 'unassigned)
+                       (alist-get 'id project))))
+             (omnigent--create-menu))))))))
 
 (defun omnigent--create-agent ()
   "Choose a registered agent for this draft."
@@ -791,7 +816,26 @@ Call CANCEL when required selection does not complete."
    :description
    (lambda ()
      (omnigent--create-label 'workspaces "Git repositories")))]
- ["Session" ("a" omnigent--create-agent
+ ["Session" ("p" omnigent--create-project
+   :description
+   (lambda ()
+     (let* ((id (alist-get 'project_id (cdr omnigent--create-draft)))
+            (project
+             (and id
+                  (or (cl-find
+                       id omnigent-sessions--project-catalog
+                       :key
+                       (lambda (row) (alist-get 'id row))
+                       :test #'equal)
+                      (cl-find
+                       id
+                       omnigent-sessions-projects
+                       :key
+                       (lambda (row) (alist-get 'id row))
+                       :test #'equal)))))
+       (format "Project (%s)"
+               (or (alist-get 'name project) id "Unassigned")))))
+  ("a" omnigent--create-agent
    :description
    (lambda () (omnigent--create-label 'agent_id "Agent")))
   ("m"
