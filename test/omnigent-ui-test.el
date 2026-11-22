@@ -1925,6 +1925,38 @@
        (data
         . ((role . "user") (content . ,text) (is_meta . ,meta))))))))
 
+(ert-deftest omnigent-ui-hides-sub-agent-notices ()
+  "Hide sub-agent notices from live events and snapshots."
+  (omnigent-ui-test--conversation
+    (let
+        ((notice
+          "[System: sub-agent pi/inspect-upstream-mock-deps finished (completed) — 1 result waiting in inbox. Call sys_read_inbox to collect.]"))
+      (omnigent-ui-test--consume "live" notice)
+      (should-not (string-match-p "You:\n" (buffer-string)))
+      (should-not
+       (string-match-p (regexp-quote notice) (buffer-string)))
+      (omnigent-conversation--snapshot
+       200
+       '((items
+          .
+          [((id . "saved")
+            (type . "message")
+            (data
+             .
+             ((role . "user")
+              (content . "[System: sub-agent finished]"))))
+           ((id . "user")
+            (type . "message")
+            (role . "user")
+            (content . "[System: example]"))])
+         (pending_inputs . []) (pending_elicitations . [])))
+      (omnigent-ui--transcript-render)
+      (should
+       (equal
+        (buffer-substring-no-properties
+         (point-min) omnigent-ui--request-start)
+        "You:\n[System: example]\n\n")))))
+
 (ert-deftest omnigent-ui-pending-order-forms-and-draft ()
   "Keep output, forms, queued input and composer separate."
   (omnigent-ui-test--conversation

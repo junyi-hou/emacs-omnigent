@@ -934,6 +934,12 @@ Signal an error if point is not in a foldable block."
     (pcase type
       ((or "function_call_output" "resource_event") nil)
       ((guard (eq (alist-get 'is_meta item) t)) nil)
+      ((guard
+        (and (equal type "message")
+             (equal (alist-get 'role item) "user")
+             (string-prefix-p
+              "[System: sub-agent" (string-trim text))))
+       nil)
       ("reasoning"
        (omnigent-ui--fold id "Thinking" text 'omnigent-ui-reasoning))
       ("function_call" (omnigent-ui--tool-dispatch id item outputs))
