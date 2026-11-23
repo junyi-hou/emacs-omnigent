@@ -1,0 +1,40 @@
+name: CI
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Emacs ${{ matrix.emacs }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        emacs: ['30.2', '31.1']
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: purcell/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs }}
+
+      - name: Install Emacs test dependencies
+        id: emacs-deps
+        run: make test-deps
+
+      - name: Install integration dependencies
+        run: make integration-deps
+
+      - name: Run integration tests
+        run: make integration-test
+
+      - name: Run unit tests
+        if: ${{ !cancelled() && steps.emacs-deps.outcome == 'success' }}
+        run: make unit-test
