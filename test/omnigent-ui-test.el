@@ -437,6 +437,34 @@
           (should-not omnigent-ui--busy-timer))
       (omnigent-ui--busy-stop))))
 
+(ert-deftest omnigent-ui-busy-indicator-survives-follow-up-completion
+    ()
+  "Keep animating after a follow-up while the session is still running."
+  (omnigent-ui-test--conversation
+    (let ((omnigent-sessions
+           '(((id . "conv_test") (status . "idle"))))
+          (omnigent-sessions--buffers
+           (list (cons "conv_test" (current-buffer))))
+          (omnigent-sessions--revision 0))
+      (omnigent-sessions--frame
+       '((type . "changed")
+         (items . [((id . "conv_test") (status . "running"))])))
+      (should (timerp omnigent-ui--busy-timer))
+      (omnigent-conversation--event
+       "response.created" '((response . ((id . "follow-up")))))
+      (should (timerp omnigent-ui--busy-timer))
+      (omnigent-conversation--event
+       "response.completed" '((response . ((id . "follow-up")))))
+      (should (timerp omnigent-ui--busy-timer))
+      (omnigent-ui--busy-tick (current-buffer))
+      (should-not
+       (equal
+        (overlay-get omnigent-ui--busy-overlay 'before-string) " "))
+      (omnigent-sessions--frame
+       '((type . "changed")
+         (items . [((id . "conv_test") (status . "idle"))])))
+      (should-not omnigent-ui--busy-timer))))
+
 (ert-deftest omnigent-ui-sandbox-progress-recovers-and-clears ()
   "Render snapshot and live sandbox progress without writing transcript items."
   (omnigent-ui-test--conversation
@@ -1897,6 +1925,38 @@
        (data
         . ((role . "user") (content . ,text) (is_meta . ,meta))))))))
 
+(ert-deftest omnigent-ui-hides-sub-agent-notices ()
+  "Hide sub-agent notices from live events and snapshots."
+  (omnigent-ui-test--conversation
+    (let
+        ((notice
+          "[System: sub-agent pi/inspect-upstream-mock-deps finished (completed) — 1 result waiting in inbox. Call sys_read_inbox to collect.]"))
+      (omnigent-ui-test--consume "live" notice)
+      (should-not (string-match-p "You:\n" (buffer-string)))
+      (should-not
+       (string-match-p (regexp-quote notice) (buffer-string)))
+      (omnigent-conversation--snapshot
+       200
+       '((items
+          .
+          [((id . "saved")
+            (type . "message")
+            (data
+             .
+             ((role . "user")
+              (content . "[System: sub-agent finished]"))))
+           ((id . "user")
+            (type . "message")
+            (role . "user")
+            (content . "[System: example]"))])
+         (pending_inputs . []) (pending_elicitations . [])))
+      (omnigent-ui--transcript-render)
+      (should
+       (equal
+        (buffer-substring-no-properties
+         (point-min) omnigent-ui--request-start)
+        "You:\n[System: example]\n\n")))))
+
 (ert-deftest omnigent-ui-pending-order-forms-and-draft ()
   "Keep output, forms, queued input and composer separate."
   (omnigent-ui-test--conversation
@@ -2340,6 +2400,38 @@
       (buffer-substring-no-properties
        (point-min) omnigent-ui--request-start)
       "Agent:\nc\n\nAgent:\na\n\n"))))
+
+(ert-deftest omnigent-ui-markdown-opens-transcript-links ()
+  "Open a rendered agent link with RET or a mouse click."
+  (omnigent-ui-test--conversation
+    (omnigent-conversation--put-item
+     '((id . "link")
+       (type . "message")
+       (content . "[Example](https://example.com)")))
+    (omnigent-ui--transcript-render)
+    (goto-char (point-min))
+    (search-forward "Example")
+    (backward-char)
+    (omnigent-ui--markdown-fontify (point-min) (point-max))
+    (let ((link-position (point))
+          (link-map (get-text-property (point) 'keymap))
+          opened)
+      (should (eq (lookup-key link-map [follow-link]) 'mouse-face))
+      (cl-letf (((symbol-function 'browse-url)
+                 (lambda (url &rest _) (push url opened))))
+        (let ((last-command-event ?\r))
+          (call-interactively (key-binding (kbd "RET"))))
+        (save-window-excursion
+          (set-window-buffer (selected-window) (current-buffer))
+          (goto-char (point-min))
+          (let ((last-command-event
+                 (list
+                  'mouse-2
+                  (list (selected-window) link-position '(0 . 0) 0))))
+            (call-interactively (lookup-key link-map [mouse-2])))))
+      (should
+       (equal
+        opened '("https://example.com" "https://example.com"))))))
 
 (ert-deftest omnigent-ui-markdown-waits-for-message-completion ()
   "Keep active text plain and render completed text only when requested."

@@ -934,6 +934,12 @@ Signal an error if point is not in a foldable block."
     (pcase type
       ((or "function_call_output" "resource_event") nil)
       ((guard (eq (alist-get 'is_meta item) t)) nil)
+      ((guard
+        (and (equal type "message")
+             (equal (alist-get 'role item) "user")
+             (string-prefix-p
+              "[System: sub-agent" (string-trim text))))
+       nil)
       ("reasoning"
        (omnigent-ui--fold id "Thinking" text 'omnigent-ui-reasoning))
       ("function_call" (omnigent-ui--tool-dispatch id item outputs))
@@ -973,6 +979,14 @@ Signal an error if point is not in a foldable block."
       (not omnigent-conversation--response-id)
       (not (equal id omnigent-conversation--section-id))))
 
+(defvar omnigent-ui--markdown-link-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [follow-link] 'mouse-face)
+    (define-key map [mouse-2] #'omnigent-conversation-follow-link)
+    (define-key map (kbd "RET") #'omnigent-conversation-follow-link)
+    map)
+  "Keymap for Markdown links in rendered conversation text.")
+
 (defun omnigent-ui--markdown-apply (begin end hide)
   "Apply Markdown properties between BEGIN and END; HIDE conceals markup."
   (let ((text (buffer-substring-no-properties begin end)))
@@ -989,7 +1003,11 @@ Signal an error if point is not in a foldable block."
         (lambda (rule)
           (eq (car-safe rule) 'markdown-match-declarative-metadata))
         markdown-mode-font-lock-keywords))
-      (font-lock-ensure)
+      (let ((markdown-mode-mouse-map
+             (if hide
+                 omnigent-ui--markdown-link-map
+               markdown-mode-mouse-map)))
+        (font-lock-ensure))
       (unless hide
         (remove-text-properties
          (point-min) (point-max) '(invisible nil)))
@@ -1010,6 +1028,14 @@ Signal an error if point is not in a foldable block."
              (+ begin next)
              property
              (get-text-property offset property text)))
+          (when (eq
+                 (get-text-property offset 'keymap text)
+                 omnigent-ui--markdown-link-map)
+            (put-text-property
+             (+ begin offset)
+             (+ begin next)
+             'keymap
+             omnigent-ui--markdown-link-map))
           (setq offset next))))
     (let ((pos begin))
       (while (< pos end)
@@ -1428,13 +1454,21 @@ Signal an error if point is not in a foldable block."
                          'omnigent-ui-error
                        'shadow)))))))
 
+(defun omnigent-ui--conversation-busy-p ()
+  "Return non-nil while the conversation has a response or is running."
+  (and (not omnigent-conversation--invalid)
+       (or omnigent-conversation--response-id
+           (equal
+            (alist-get
+             'status
+             (omnigent-sessions-row omnigent-conversation-session-id))
+            "running"))))
+
 (defun omnigent-ui--busy-tick (buffer)
   "Advance busy indicators in BUFFER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
-      (let* ((responding
-              (and omnigent-conversation--response-id
-                   (not omnigent-conversation--invalid)))
+      (let* ((responding (omnigent-ui--conversation-busy-p))
              (frame
               (aref
                ["|" "/" "-" "\\"] (mod omnigent-ui--busy-frame 4))))
@@ -1452,11 +1486,11 @@ Signal an error if point is not in a foldable block."
   "Update the transcript and prompt busy indicators."
   (cond
    ((and (not omnigent-conversation--invalid)
-         (or omnigent-conversation--response-id
+         (or (omnigent-ui--conversation-busy-p)
              (omnigent-ui--sandbox-animating-p)))
     (if omnigent-ui--busy-timer
         (progn
-          (unless omnigent-conversation--response-id
+          (unless (omnigent-ui--conversation-busy-p)
             (overlay-put
              omnigent-ui--busy-overlay 'before-string " "))
           (omnigent-ui--sandbox-render
@@ -1471,6 +1505,14 @@ Signal an error if point is not in a foldable block."
       (cancel-timer omnigent-ui--busy-timer)
       (setq omnigent-ui--busy-timer nil))
     (omnigent-ui--busy-tick (current-buffer)))))
+
+(defun omnigent-ui--busy-update-sessions ()
+  "Update busy indicators when session statuses change."
+  (dolist (entry omnigent-sessions--buffers)
+    (when (buffer-live-p (cdr entry))
+      (with-current-buffer (cdr entry)
+        (when omnigent-ui--busy-overlay
+          (omnigent-ui--busy-update))))))
 
 (defun omnigent-ui--busy-stop ()
   "Stop the prompt animation when the conversation closes."
@@ -1927,6 +1969,8 @@ CHOICES is a widget choice list; REQUIRED and SECRET control input handling."
  'omnigent-conversation-mode-hook #'omnigent-ui-conversation-setup)
 (add-hook
  'omnigent-sessions-change-hook #'omnigent-ui-sessions-render)
+(add-hook
+ 'omnigent-sessions-change-hook #'omnigent-ui--busy-update-sessions)
 (add-hook 'omnigent-sessions-frame-hook #'omnigent-ui--frame)
 (add-hook 'window-selection-change-functions #'omnigent-ui--selection)
 (add-hook

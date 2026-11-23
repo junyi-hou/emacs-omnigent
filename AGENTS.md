@@ -23,7 +23,9 @@
 
 ## Tests
 
-- Run `make unit-test` for unit tests.
+- Run `make test-deps` to install test dependencies in `.tools/test-elpa`.
+- Run `make unit-test` to run the unit tests. This target does not install dependencies.
+- After the first dependency setup, run `make unit-test` for later test runs.
 
 ## Markdown
 

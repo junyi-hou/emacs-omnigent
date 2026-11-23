@@ -642,6 +642,7 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
          omnigent-conversation-agent-name (alist-get 'agent_name body)
          omnigent-conversation-header-data
          `((workspace . ,(alist-get 'workspace body))
+           (project_id . ,(alist-get 'project_id body))
            (harness . ,(alist-get 'harness body))
            (llm_model . ,(alist-get 'llm_model body))
            (reasoning_effort . ,(alist-get 'reasoning_effort body))

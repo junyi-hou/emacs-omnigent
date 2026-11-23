@@ -123,7 +123,7 @@ chat](docs/conversation-buffer.md#side-chat) for connection and turn handling.
 
 ## Tests
 
-Run unit tests with these commands.
+To install test dependencies and run the unit tests, use these commands.
 
 ```sh
 make test-deps
