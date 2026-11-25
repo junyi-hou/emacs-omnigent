@@ -287,6 +287,9 @@ The process group keeps ownership of children if COMMAND exits first."
     (push group-id (omnigent-integration-run-process-groups run)))
   process)
 
+(defvar omnigent-integration--server-environment nil
+  "Extra environment entries for the Omnigent server process.")
+
 (defun omnigent-integration-start ()
   "Start isolated official mock and real Omnigent server resources.
 
@@ -406,7 +409,10 @@ an `unwind-protect' cleanup clause."
                    (lambda ()
                      (setq server-port
                            (omnigent-integration--free-port python))
-                     (let ((process-environment environment)
+                     (let ((process-environment
+                            (append
+                             omnigent-integration--server-environment
+                             environment))
                            (default-directory root))
                        (setq
                         server-process
