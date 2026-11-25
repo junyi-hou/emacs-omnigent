@@ -5,13 +5,14 @@ local mock LLM server. The integration tests cover service health and
 cleanup, session list setup, session creation, and the messaging
 journey. The messaging test checks the composer, queued messages,
 streamed replies, recovered history, and the running and idle states
-in the session list. Put the `codex` executable on `PATH` to run this
-test. The test uses the local mock model.
+in the session list. The test runs Codex with the local mock model.
 
 `make unit-test` checks that the integration test fixtures isolate each run and
 clean up its resources. These checks can run without either server.
 
 ## Dependencies and setup
+
+Install Node.js 24 with npm before you run the setup commands.
 
 ```sh
 make integration-deps
@@ -24,7 +25,9 @@ repository into `.tools/omnigent-upstream` if that checkout is missing. Set
 path.
 
 `make integration-deps` runs `make test-deps` to install Emacs packages in
-`.tools/test-elpa`. If `uv` is missing, the target uses `curl` to download its
+`.tools/test-elpa`. It uses npm to install Codex and Claude Code in
+`.tools/agents`. The test target adds both executables to `PATH`.
+If `uv` is missing, the target uses `curl` to download its
 installer and installs `uv` in `.tools/uv/bin`. The target uses the upstream
 lock file to install the server in `.tools/omnigent-server` and the mock
 dependencies in `.tools/omnigent-mock`. It stores managed Python and the

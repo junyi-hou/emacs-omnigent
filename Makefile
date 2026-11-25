@@ -21,6 +21,8 @@ integration-deps: test-deps
 	  git clone --depth 1 https://github.com/omnigent-ai/omnigent.git "$(OMNIGENT_REPO)"; \
 	fi
 	@test -f "$(OMNIGENT_REPO)/.python-version" || (echo "Set OMNIGENT_REPO to an official Omnigent checkout" >&2; exit 1)
+	npm install --prefix .tools/agents --no-save --no-package-lock --no-audit --no-fund \
+	  @openai/codex@0.142.0 @anthropic-ai/claude-code@2.1.295
 	@set -e; export PATH="$(UV_PYTHON_BIN_DIR):$$PATH"; \
 	if ! command -v uv >/dev/null; then \
 	  curl -fsSL https://astral.sh/uv/install.sh -o .tools/uv/install.sh; \
@@ -34,7 +36,7 @@ integration-deps: test-deps
 	  uv sync --locked --managed-python --project "$(OMNIGENT_REPO)"
 
 integration-test:
-	OMNIGENT_REPO="$(OMNIGENT_REPO)" PATH="$(CURDIR)/.tools/omnigent-server/bin:$$PATH" \
+	OMNIGENT_REPO="$(OMNIGENT_REPO)" PATH="$(CURDIR)/.tools/agents/node_modules/.bin:$(CURDIR)/.tools/omnigent-server/bin:$$PATH" \
 	  $(EMACS) -Q --batch \
 	  --eval '(require (quote package))' \
 	  --eval '(setq package-user-dir (expand-file-name ".tools/test-elpa"))' \
