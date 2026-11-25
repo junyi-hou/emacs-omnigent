@@ -16,7 +16,7 @@
         (concat
          "spec_version: 1\nexecutor:\n  type: omnigent\n"
          "  auth: {type: provider, name: test-mock}\n"
-         "  config: {harness: codex-native, yolo: true}\n"
+         "  config: {%s}\n"
          "llm: {model: mock-model}\n"
          "os_env: {type: caller_process, cwd: ., sandbox: {type: none}}\n")))
     (make-directory worker t)
@@ -28,11 +28,13 @@
        "\n"))
     (with-temp-file (expand-file-name "config.yaml" bundle)
       (insert
-       executor
+       (format executor "harness: openai-agents")
        "name: polly-ui-fixture\nprompt: Delegate work to Codex.\n"
        "tools: {agents: [codex]}\n"))
     (with-temp-file (expand-file-name "config.yaml" worker)
-      (insert executor "name: codex\nprompt: Report the result.\n"))
+      (insert
+       (format executor "harness: codex-native, yolo: true")
+       "name: codex\nprompt: Report the result.\n"))
     bundle))
 
 (defun omnigent-integration--polly-release (mock gate)
@@ -55,15 +57,13 @@
   (should (omnigent-integration--message-position meta-reply))
   (should
    (omnigent-integration--message-position "You:\n/fixture-context"))
-  ;; The native Codex forwarder omits MCP tool calls from session history.
-  (dolist (text
-           (list
-            meta-message
-            worker-reply
-            "[System: sub-agent"
-            "sys_session_send"
-            "sys_read_inbox"))
-    (should-not (omnigent-integration--message-position text))))
+  (should-not (omnigent-integration--message-position meta-message))
+  ;; The inbox can retain the worker reply and notice inside a collapsed tool block.
+  (dolist (text (list worker-reply "[System: sub-agent"))
+    (save-excursion
+      (goto-char (point-min))
+      (while (search-forward text nil t)
+        (should (invisible-p (match-beginning 0)))))))
 
 (ert-deftest omnigent-integration-polly ()
   "Follow a real child from dispatch through its completed conversation."
@@ -88,17 +88,14 @@
        (omnigent-integration--post-json
         (concat mock "/mock/configure")
         `((key . "mock-model")
-          (match . ,prompt) (required_tools . ["exec_command"])
+          (match . ,prompt) (required_tools . ["sys_session_send"])
           (responses
            .
            [((block . t)
              (gate . "dispatch")
-             (native_items
+             (tool_calls
               .
-              [((type . "function_call")
-                (id . "fc-polly-dispatch")
-                (call_id . "polly-dispatch")
-                (namespace . "mcp__omnigent")
+              [((call_id . "polly-dispatch")
                 (name . "sys_session_send")
                 (arguments
                  .
@@ -119,22 +116,19 @@
        (omnigent-integration--post-json
         (concat mock "/mock/configure")
         `((match . "Call sys_read_inbox to collect.")
-          (required_tools . ["exec_command"])
+          (required_tools . ["sys_read_inbox"])
           (responses
            .
-           [((native_items
+           [((tool_calls
               .
-              [((type . "function_call")
-                (id . "fc-polly-inbox")
-                (call_id . "polly-inbox")
-                (namespace . "mcp__omnigent")
+              [((call_id . "polly-inbox")
                 (name . "sys_read_inbox")
                 (arguments . "{}"))]))
             ((text . ,parent-reply))])))
        (omnigent-integration--post-json
         (concat mock "/mock/configure")
         `((match . ,meta-message)
-          (required_tools . ["exec_command"])
+          (required_tools . ["sys_session_send"])
           (responses . [((text . ,meta-reply))])))
        (save-window-excursion
          (unwind-protect
