@@ -544,13 +544,14 @@ an `unwind-protect' cleanup clause."
       (get-text-property position 'face))))
 
 (defun omnigent-integration--mock-session
-    (run title &optional agent-name)
+    (run title &optional agent-name workspace)
   "Create a mock session with TITLE for RUN and return its ID.
-AGENT-NAME defaults to codex-native-ui."
+AGENT-NAME defaults to codex-native-ui.  WORKSPACE defaults to the run root."
   (let* ((process-environment
           (omnigent-integration-run-environment run))
          (default-directory (omnigent-integration-run-root run))
-         (omnigent-session-default-workspace default-directory)
+         (omnigent-session-default-workspace
+          (or workspace default-directory))
          (omnigent-session-default-model "mock-model")
          (omnigent-session-default-title title)
          (omnigent-session-default-agent
