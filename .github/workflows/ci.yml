@@ -55,6 +55,10 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Install tmux on macOS
+        if: runner.os == 'macOS'
+        run: brew install tmux
+
       - name: Install integration dependencies
         run: make integration-deps
 
