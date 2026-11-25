@@ -251,6 +251,21 @@ The process group keeps ownership of children if COMMAND exits first."
           (push pid members))))
     members))
 
+(defun omnigent-integration--descendants (parents)
+  "Return the process IDs descended from PARENTS."
+  (let ((children (make-hash-table :test #'eql))
+        descendants)
+    (dolist (pid (list-system-processes))
+      (when-let* ((attributes (process-attributes pid))
+                  (parent (alist-get 'ppid attributes)))
+        (push pid (gethash parent children))))
+    (while parents
+      (let ((direct (gethash (pop parents) children)))
+        (setq
+         descendants (append direct descendants)
+         parents (append direct parents))))
+    descendants))
+
 (defun omnigent-integration--stop-process-group (group-id)
   "Terminate all processes in GROUP-ID, even when its leader has exited."
   (ignore-errors
@@ -466,15 +481,33 @@ an `unwind-protect' cleanup clause."
 
 (defun omnigent-integration-stop (run)
   "Stop all processes and remove temporary resources owned by RUN."
-  (dolist (group-id (omnigent-integration-run-process-groups run))
-    (omnigent-integration--stop-process-group group-id))
-  (dolist (process (omnigent-integration-run-processes run))
-    (omnigent-integration--stop-process process))
-  (dolist (log (omnigent-integration-run-logs run))
-    (when (buffer-live-p log)
-      (kill-buffer log)))
-  (when (file-directory-p (omnigent-integration-run-root run))
-    (delete-directory (omnigent-integration-run-root run) t)))
+  (let*
+      ((groups (omnigent-integration-run-process-groups run))
+       ;; Runners can use separate process groups and finish cleanup
+       ;; after the host exits. Record their PIDs before reparenting.
+       (descendants
+        (when groups
+          (omnigent-integration--descendants groups))))
+    (dolist (group-id groups)
+      (omnigent-integration--stop-process-group group-id))
+    (dolist (process (omnigent-integration-run-processes run))
+      (omnigent-integration--stop-process process))
+    (dolist (log (omnigent-integration-run-logs run))
+      (when (buffer-live-p log)
+        (kill-buffer log)))
+    (when descendants
+      (omnigent-integration--wait
+       (lambda ()
+         (setq descendants
+               (seq-filter
+                (lambda (pid)
+                  (let ((state
+                         (alist-get 'state (process-attributes pid))))
+                    (and state (not (equal state "Z")))))
+                descendants))
+         (null descendants))))
+    (when (file-directory-p (omnigent-integration-run-root run))
+      (delete-directory (omnigent-integration-run-root run) t))))
 
 (defun omnigent-integration--session-row (id)
   "Return the position of the session list row for ID."
