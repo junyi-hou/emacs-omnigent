@@ -60,6 +60,13 @@ conventions for other bindings where applicable. Use `a` to toggle archive and
 confirmation before permanent deletion with `y-or-n-p`. The conversation
 commands use `C-c C-a` to toggle archive and `C-c C-d` for Delete.
 
+In the session list, press `u` to undo the last completed move or archive
+change. A move undo restores the previous project assignment.  An archive
+undo restores the prior archive states of affected sessions.  Press `u`
+again to undo an earlier change. Press `C-r` to redo an undone change. A new
+move or archive change clears the redo history. The undo and redo history
+lasts until the session list buffer closes or the server changes.
+
 On connection, fetch the configured global session limit. The default is 20
 sessions total. Load project details for the sessions in that list. Press
 `/` to find a project, show its heading, and fetch its sessions. Search and

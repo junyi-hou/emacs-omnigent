@@ -2480,23 +2480,161 @@ When UNASSIGN is non-nil, offer to remove the project assignment."
                           (equal id (omnigent-ui--project-at-point))))
                (forward-line 1)))))))))
 
+(defvar-local omnigent-ui--session-undo-history nil
+  "Undo actions for moves and archive changes in this session list.")
+
+(defvar-local omnigent-ui--session-redo-history nil
+  "Redo actions for moves and archive changes in this session list.")
+
+(defvar-local omnigent-ui--session-undo-generation nil
+  "Server generation for this session list's undo and redo history.")
+
+(defvar-local omnigent-ui--session-action-pending nil
+  "Non-nil while a move, archive change, undo, or redo is pending.")
+
+(defun omnigent-ui--check-session-action ()
+  "Reset undo state after a server change and check for a pending action."
+  (unless (eql
+           omnigent-ui--session-undo-generation
+           omnigent-transport--generation)
+    (setq
+     omnigent-ui--session-undo-generation
+     omnigent-transport--generation
+     omnigent-ui--session-undo-history nil
+     omnigent-ui--session-redo-history nil
+     omnigent-ui--session-action-pending nil))
+  (when omnigent-ui--session-action-pending
+    (user-error "Wait for the current session change to finish")))
+
+(defun omnigent-ui--run-session-action
+    (action request &optional direction)
+  "Run REQUEST for ACTION and process its result in the session list.
+For a new change, a successful REQUEST supplies an undo and redo pair.
+When DIRECTION is undo or redo, move the entry between history lists."
+  (omnigent-ui--check-session-action)
+  (let ((buffer (current-buffer))
+        (generation omnigent-transport--generation)
+        dispatched)
+    (setq omnigent-ui--session-action-pending t)
+    (unwind-protect
+        (progn
+          (funcall
+           request
+           (lambda (status body)
+             (when (and (buffer-live-p buffer)
+                        (= generation omnigent-transport--generation))
+               (with-current-buffer buffer
+                 (setq omnigent-ui--session-action-pending nil)
+                 (if (omnigent-transport-success-p status)
+                     (pcase direction
+                       ('undo
+                        (push (pop omnigent-ui--session-undo-history)
+                              omnigent-ui--session-redo-history)
+                        (message
+                         "Session change undone. Press C-r to redo"))
+                       ('redo
+                        (push (pop omnigent-ui--session-redo-history)
+                              omnigent-ui--session-undo-history)
+                        (message
+                         "Session change redone. Press u to undo"))
+                       (_
+                        (when body
+                          (push
+                           body omnigent-ui--session-undo-history)
+                          (setq omnigent-ui--session-redo-history nil)
+                          (message "%s complete. Press u to undo"
+                                   action))))
+                   (message "%s"
+                            (omnigent-transport-error-message
+                             action status body)))))))
+          (setq dispatched t))
+      (unless dispatched
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (setq omnigent-ui--session-action-pending nil)))))))
+
+(defun omnigent-ui-undo-session-action ()
+  "Undo the latest move or archive change in this session list."
+  (interactive)
+  (unless (derived-mode-p 'omnigent-ui-sessions-mode)
+    (user-error "Open the Omnigent session list first"))
+  (omnigent-ui--check-session-action)
+  (unless omnigent-ui--session-undo-history
+    (user-error "No session change to undo"))
+  (omnigent-ui--run-session-action "Undo session change"
+                                   (caar
+                                    omnigent-ui--session-undo-history)
+                                   'undo))
+
+(defun omnigent-ui-redo-session-action ()
+  "Redo the latest undone move or archive change in this session list."
+  (interactive)
+  (unless (derived-mode-p 'omnigent-ui-sessions-mode)
+    (user-error "Open the Omnigent session list first"))
+  (omnigent-ui--check-session-action)
+  (unless omnigent-ui--session-redo-history
+    (user-error "No session change to redo"))
+  (omnigent-ui--run-session-action "Redo session change"
+                                   (cdar
+                                    omnigent-ui--session-redo-history)
+                                   'redo))
+
 (defun omnigent-ui-move-session ()
   "Move the session at point to a server project."
   (interactive)
-  (let ((id (omnigent-ui--session-id-at-point)))
+  (omnigent-ui--check-session-action)
+  (let ((id (omnigent-ui--session-id-at-point))
+        (buffer (current-buffer)))
     (unless id
       (user-error "No session at point"))
     (omnigent-sessions-read-projects
      (lambda (projects)
-       (when-let* ((destination
+       (when-let* (((buffer-live-p buffer))
+                   (destination
                     (omnigent-ui--read-project
                      "Move session to: " projects
-                     t)))
-         (omnigent-sessions-move
-          id
-          (if (eq destination 'unassigned)
-              ""
-            (alist-get 'id destination))))))))
+                     t))
+                   ((buffer-live-p buffer)))
+         (with-current-buffer buffer
+           (let ((project
+                  (if (eq destination 'unassigned)
+                      ""
+                    (alist-get 'id destination))))
+             (omnigent-ui--run-session-action
+              "Move session"
+              (lambda (done)
+                (omnigent-transport-get-session
+                 id
+                 (lambda (status body)
+                   (let ((previous
+                          (and (listp body)
+                               (alist-get 'project_id body))))
+                     (cond
+                      ((not (omnigent-transport-success-p status))
+                       (funcall done status body))
+                      ((not
+                        (and (listp body)
+                             (equal id (alist-get 'id body))
+                             (or (null previous) (stringp previous))))
+                       (funcall done nil "Invalid session project"))
+                      ((equal project (or previous ""))
+                       (funcall done status nil))
+                      (t
+                       (omnigent-sessions-move
+                        id project
+                        (lambda (status body)
+                          (funcall done
+                                   status
+                                   (if (omnigent-transport-success-p
+                                        status)
+                                       (cons
+                                        (apply-partially
+                                         #'omnigent-sessions-move
+                                         id (or previous ""))
+                                        (apply-partially
+                                         #'omnigent-sessions-move
+                                         id project))
+                                     body))))))))))))))))))
 
 (define-derived-mode
  omnigent-ui-sessions-mode
@@ -2688,25 +2826,51 @@ When UNASSIGN is non-nil, offer to remove the project assignment."
                         (progn
                           (forward-line -2)
                           (omnigent-ui--session-id-at-point)))))))
-    (omnigent-sessions-toggle-archive
-     id
-     (lambda (status body)
-       (when (and next-id
-                  (omnigent-transport-success-p status)
-                  (buffer-live-p buffer))
-         (with-current-buffer buffer
-           (when (equal id (omnigent-ui--session-id-at-point))
-             (goto-char (point-min))
-             (while (and (not (eobp))
-                         (not
-                          (equal
-                           next-id
-                           (omnigent-ui--session-id-at-point))))
-               (forward-line 1))
-             (when (eobp)
-               (goto-char (point-min))))))
-       (omnigent-ui--action-result
-        "Toggle archive" title status body)))))
+    (if (derived-mode-p 'omnigent-ui-sessions-mode)
+        (omnigent-ui--run-session-action
+         "Toggle archive"
+         (lambda (done)
+           (omnigent-sessions-toggle-archive
+            id
+            (lambda (status body)
+              (when (and next-id
+                         (omnigent-transport-success-p status)
+                         (buffer-live-p buffer))
+                (with-current-buffer buffer
+                  (when (equal id (omnigent-ui--session-id-at-point))
+                    (goto-char (point-min))
+                    (while (and
+                            (not (eobp))
+                            (not
+                             (equal
+                              next-id
+                              (omnigent-ui--session-id-at-point))))
+                      (forward-line 1))
+                    (when (eobp)
+                      (goto-char (point-min))))))
+              (funcall done
+                       status
+                       (if (omnigent-transport-success-p status)
+                           (cons
+                            (apply-partially
+                             #'omnigent-sessions-restore-archive
+                             body)
+                            (apply-partially
+                             #'omnigent-sessions-restore-archive
+                             (mapcar
+                              (lambda (entry)
+                                (cons
+                                 (car entry)
+                                 (if (eq (cdr entry) t)
+                                     :json-false t)))
+                              body)))
+                         body)))
+            t)))
+      (omnigent-sessions-toggle-archive
+       id
+       (lambda (status body)
+         (omnigent-ui--action-result
+          "Toggle archive" title status body))))))
 
 (defun omnigent-ui-rename-session ()
   "Change the title of the current session or the session at point."

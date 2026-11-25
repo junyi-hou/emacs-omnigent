@@ -165,6 +165,8 @@ Nil leaves the conversation buffer undisplayed."
     (define-key map (kbd "TAB") #'omnigent-ui-toggle-tree)
     (define-key map (kbd "<tab>") #'omnigent-ui-toggle-tree)
     (define-key map (kbd "m") #'omnigent-ui-move-session)
+    (define-key map (kbd "u") #'omnigent-ui-undo-session-action)
+    (define-key map (kbd "C-r") #'omnigent-ui-redo-session-action)
     (define-key map (kbd "/") #'omnigent-ui-find-project)
     (define-key map (kbd "g") #'omnigent-ui-refresh)
     (define-key map (kbd "+") #'omnigent-ui-increase-session-limit)

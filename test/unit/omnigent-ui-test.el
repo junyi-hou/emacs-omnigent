@@ -502,6 +502,116 @@
          omnigent-conversation--prompt-start (point-max))
         "draft")))))
 
+(ert-deftest omnigent-ui-undo-and-redo-move-and-archive ()
+  "Undo and redo a move and a mixed archive branch in order."
+  (with-temp-buffer
+    (omnigent-ui-sessions-mode)
+    (let ((inhibit-read-only t))
+      (insert
+       (propertize "Parent\n" 'omnigent-ui-session-id "parent")))
+    (goto-char (point-min))
+    (let ((omnigent-sessions '(((id . "parent") (title . "Parent"))))
+          (states
+           (copy-tree
+            '(("parent" . :json-false)
+              ("active" . :json-false)
+              ("archived" . t))))
+          project
+          fail-archive-write)
+      (cl-letf (((symbol-function 'omnigent-sessions-read-projects)
+                 (lambda (done)
+                   (funcall done
+                            '(((id . "project")
+                               (name . "Project"))))))
+                ((symbol-function 'completing-read)
+                 (lambda (&rest _) "Project"))
+                ((symbol-function 'omnigent-transport-get-session)
+                 (lambda (id done)
+                   (funcall done
+                            200
+                            `((id . ,id)
+                              (project_id . ,project)
+                              (archived
+                               . ,(cdr (assoc id states)))))))
+                ((symbol-function
+                  'omnigent-transport-list-child-sessions)
+                 (lambda (id done &optional _after)
+                   (funcall done
+                            200
+                            (if (equal id "parent")
+                                '((data
+                                   .
+                                   [((id . "active"))
+                                    ((id . "archived"))]))
+                              '((data . []))))))
+                ((symbol-function 'omnigent-transport--request)
+                 (lambda (_id method _path done body)
+                   (should (equal method "PATCH"))
+                   (setq project (cdr (assoc "project_id" body)))
+                   (funcall done 200 nil)))
+                ((symbol-function
+                  'omnigent-transport-set-session-archived)
+                 (lambda (id archived done)
+                   (if fail-archive-write
+                       (funcall done 500 "Write failed")
+                     (setcdr
+                      (assoc id states)
+                      (if archived
+                          t
+                        :json-false))
+                     (funcall done 200 nil))))
+                ((symbol-function 'omnigent-sessions-refresh)
+                 #'ignore))
+        (omnigent-ui-move-session)
+        (should (equal project "project"))
+        (omnigent-ui-archive-at-point)
+        (should
+         (seq-every-p (lambda (entry) (eq (cdr entry) t)) states))
+        (setq fail-archive-write t)
+        (call-interactively (key-binding (kbd "u")))
+        (should (= (length omnigent-ui--session-undo-history) 2))
+        (setq fail-archive-write nil)
+        (omnigent-ui-undo-session-action)
+        (should
+         (equal
+          states
+          '(("parent" . :json-false)
+            ("active" . :json-false)
+            ("archived" . t))))
+        (should (equal project "project"))
+        (omnigent-ui-undo-session-action)
+        (should (equal project ""))
+        (should-error
+         (omnigent-ui-undo-session-action)
+         :type 'user-error)
+        (call-interactively (key-binding (kbd "C-r")))
+        (should (equal project "project"))
+        (setq fail-archive-write t)
+        (omnigent-ui-redo-session-action)
+        (should (= (length omnigent-ui--session-redo-history) 1))
+        (setq fail-archive-write nil)
+        (omnigent-ui-redo-session-action)
+        (should
+         (seq-every-p (lambda (entry) (eq (cdr entry) t)) states))
+        (should-error
+         (omnigent-ui-redo-session-action)
+         :type 'user-error)
+        (omnigent-ui-undo-session-action)
+        (should (eq (cdr (assoc "active" states)) :json-false))
+        (omnigent-ui-archive-at-point)
+        (should-error
+         (omnigent-ui-redo-session-action)
+         :type 'user-error)
+        (omnigent-ui-undo-session-action)
+        (let ((omnigent-transport--generation
+               (1+ omnigent-transport--generation)))
+          (should-error
+           (omnigent-ui-redo-session-action)
+           :type 'user-error)
+          (should-error
+           (omnigent-ui-undo-session-action)
+           :type 'user-error))))))
+
 (ert-deftest omnigent-ui-session-archive-and-delete-commands ()
   "Archive the selected session and require confirmation for permanent deletion."
   (dolist (conversation '(nil t))
@@ -521,9 +631,13 @@
             deleted
             confirmation)
         (cl-letf (((symbol-function 'omnigent-sessions-toggle-archive)
-                   (lambda (id callback)
+                   (lambda (id callback &optional record)
                      (setq archived id)
-                     (funcall callback 200 '((archived . t)))))
+                     (funcall callback
+                              200
+                              (if record
+                                  '(("target" . :json-false))
+                                '((archived . t))))))
                   ((symbol-function 'omnigent-sessions-delete)
                    (lambda (id callback)
                      (setq deleted id)

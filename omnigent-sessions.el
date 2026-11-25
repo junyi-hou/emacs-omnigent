@@ -688,14 +688,19 @@ Signal a user error if ID already has a different live buffer or the
                   (append
                    omnigent-sessions--project-catalog nil))))))))
 
-(defun omnigent-sessions-move (id project-id)
-  "Move session ID to PROJECT-ID.  An empty string unassigns it."
+(defun omnigent-sessions-move (id project-id &optional callback)
+  "Move ID to PROJECT-ID.  An empty string unassigns it.
+Pass the status and response body to CALLBACK when supplied."
   (omnigent-transport--request
    id "PATCH" (omnigent-transport--session-path id)
    (lambda (status body)
-     (if (omnigent-transport-success-p status)
-         (omnigent-sessions-refresh)
-       (omnigent-sessions--error "Move session" status body)))
+     (unwind-protect
+         (when (omnigent-transport-success-p status)
+           (omnigent-sessions-refresh))
+       (if callback
+           (funcall callback status body)
+         (unless (omnigent-transport-success-p status)
+           (omnigent-sessions--error "Move session" status body)))))
    `(("project_id" . ,project-id))))
 
 (defun omnigent-sessions-reset ()
@@ -1299,41 +1304,54 @@ The source session must have a connected runner."
                               body)))
                  `(("runner_id" . ,runner))))))))))))))
 
-(defun omnigent-sessions--mutate-subtree (id mutate close callback)
+(defun omnigent-sessions--mutate-ordered (order mutate callback)
+  "Call MUTATE on each ID in ORDER, then refresh and call CALLBACK.
+Stop at the first failure and pass its status and body to CALLBACK."
+  (let ((session (pop order)))
+    (funcall mutate
+             session
+             (lambda (status body)
+               (if (and order (omnigent-transport-success-p status))
+                   (omnigent-sessions--mutate-ordered
+                    order mutate callback)
+                 (unwind-protect
+                     (omnigent-sessions-refresh)
+                   (funcall callback status body)))))))
+
+(defun omnigent-sessions--mutate-subtree
+    (id mutate close callback &optional prepare)
   "Discover ID's subtree, then call MUTATE on each ID, descendants first.
 When CLOSE is non-nil, close each successfully updated conversation.
-Pass the first failure or the selected session's result to CALLBACK."
+Pass the first failure or the selected session's result to CALLBACK.
+When PREPARE is supplied, pass it the ordered IDs and write continuation."
   (let ((pending (list id))
         (seen (make-hash-table :test 'equal))
         order)
     (puthash id t seen)
     (cl-labels
-     ((finish
-       (status body)
-       (unwind-protect
-           (omnigent-sessions-refresh)
-         (funcall callback status body)))
-      (write-next
+     ((write-next
        ()
-       (let ((session (pop order)))
-         (funcall mutate
-                  session
-                  (lambda (status body)
-                    (let ((success
-                           (omnigent-transport-success-p status)))
-                      (when (and success close)
-                        (omnigent-sessions--close-conversation
-                         session))
-                      (if (and success order)
-                          (write-next)
-                        (finish status body)))))))
+       (omnigent-sessions--mutate-ordered
+        order
+        (lambda (session done)
+          (funcall mutate
+                   session
+                   (lambda (status body)
+                     (when (and close
+                                (omnigent-transport-success-p status))
+                       (omnigent-sessions--close-conversation
+                        session))
+                     (funcall done status body))))
+        callback))
       (read-next
        ()
        (if pending
            (let ((session (pop pending)))
              (push session order)
              (read-page session nil))
-         (write-next)))
+         (if prepare
+             (funcall prepare order #'write-next)
+           (write-next))))
       (read-page
        (session cursors)
        (omnigent-transport-list-child-sessions
@@ -1363,9 +1381,11 @@ Pass the first failure or the selected session's result to CALLBACK."
         (car cursors))))
      (read-next))))
 
-(defun omnigent-sessions-toggle-archive (id callback)
+(defun omnigent-sessions-toggle-archive (id callback &optional record)
   "Toggle ID's server archive state and apply it to all descendants.
-CALLBACK receives the HTTP status and response body."
+CALLBACK receives the HTTP status and response body.  When RECORD is
+non-nil, the success body contains the prior states of changed sessions
+as an alist of session IDs and archive booleans in descendant-first order."
   (omnigent-transport-get-session
    id
    (lambda (status body)
@@ -1377,13 +1397,68 @@ CALLBACK receives the HTTP status and response body."
              (memq (alist-get 'archived body) '(t :json-false))))
        (funcall callback nil "Invalid session archive state"))
       (t
-       (let ((archived (not (eq (alist-get 'archived body) t))))
-         (omnigent-sessions--mutate-subtree
-          id
-          (lambda (session done)
-            (omnigent-transport-set-session-archived
-             session archived done))
-          archived callback)))))))
+       (let ((archived (not (eq (alist-get 'archived body) t)))
+             (root-state (alist-get 'archived body))
+             previous)
+         (cl-labels
+          ((record-next
+            (order write)
+            (let ((session (car order)))
+              (if (equal session id)
+                  (progn
+                    (push (cons id root-state) previous)
+                    (funcall write))
+                (omnigent-transport-get-session
+                 session
+                 (lambda (status body)
+                   (cond
+                    ((not (omnigent-transport-success-p status))
+                     (funcall callback status body))
+                    ((and (listp body)
+                          (memq
+                           (alist-get 'archived body)
+                           '(t :json-false)))
+                     (unless (eq
+                              archived
+                              (eq (alist-get 'archived body) t))
+                       (push (cons session (alist-get 'archived body))
+                             previous))
+                     (record-next (cdr order) write))
+                    (t
+                     (funcall callback
+                              nil
+                              "Invalid child archive state")))))))))
+          (omnigent-sessions--mutate-subtree
+           id
+           (lambda (session done)
+             (omnigent-transport-set-session-archived
+              session archived done))
+           archived
+           (lambda (status body)
+             (funcall
+              callback
+              status
+              (if (and record (omnigent-transport-success-p status))
+                  (nreverse previous)
+                body)))
+           (when record
+             #'record-next)))))))))
+
+(defun omnigent-sessions-restore-archive (states callback)
+  "Restore each session's prior archive state in STATES.
+Pass the HTTP status and response body to CALLBACK."
+  (omnigent-sessions--mutate-ordered
+   states
+   (lambda (entry done)
+     (let ((id (car entry))
+           (archived (eq (cdr entry) t)))
+       (omnigent-transport-set-session-archived
+        id archived
+        (lambda (status body)
+          (when (and archived (omnigent-transport-success-p status))
+            (omnigent-sessions--close-conversation id))
+          (funcall done status body)))))
+   callback))
 
 (defun omnigent-sessions-delete (id callback)
   "Delete session ID and all its descendants.
