@@ -35,17 +35,18 @@
       (insert executor "name: codex\nprompt: Report the result.\n"))
     bundle))
 
-(defun omnigent-integration--polly-release (mock)
-  "Wait for and release the next response gate on MOCK."
-  (let ((omnigent-server-url mock))
+(defun omnigent-integration--polly-release (mock gate)
+  "Wait for the named GATE on MOCK and release it."
+  (let ((omnigent-server-url mock)
+        (url-request-method "POST"))
     (omnigent-integration--wait
      (lambda ()
        (eq
         t
         (alist-get
-         'pending
-         (omnigent-integration--get-json "/gate/pending"))))))
-  (omnigent-integration--post-json (concat mock "/gate/release") nil))
+         'released
+         (omnigent-integration--get-json
+          (concat "/gate/release?gate=" gate))))))))
 
 (defun omnigent-integration--check-polly-transcript
     (parent-reply meta-reply meta-message worker-reply)
@@ -86,11 +87,12 @@
             (meta-reply "Polly received the context."))
        (omnigent-integration--post-json
         (concat mock "/mock/configure")
-        `((match . ,prompt)
-          (required_tools . ["exec_command"])
+        `((key . "mock-model")
+          (match . ,prompt) (required_tools . ["exec_command"])
           (responses
            .
            [((block . t)
+             (gate . "dispatch")
              (native_items
               .
               [((type . "function_call")
@@ -104,12 +106,16 @@
                    `((agent . "codex")
                      (title . "fixture-worker")
                      (args . ,child-prompt)))))]))
-            ((text . "Polly dispatched the worker."))])))
+            ((text . "Polly dispatched the worker.")
+             (block . t)
+             (gate . "polly-wait"))])))
        (omnigent-integration--post-json
         (concat mock "/mock/configure")
         `((match . ,child-prompt)
           (required_tools . ["exec_command"])
-          (responses . [((text . ,worker-reply) (block . t))])))
+          (responses
+           .
+           [((text . ,worker-reply) (block . t) (gate . "worker"))])))
        (omnigent-integration--post-json
         (concat mock "/mock/configure")
         `((match . "Call sys_read_inbox to collect.")
@@ -164,7 +170,8 @@
                               omnigent-ui--busy-overlay
                               'before-string)
                              '("|" "/" "-" "\\")))))))
-                     (omnigent-integration--polly-release mock)
+                     (omnigent-integration--polly-release
+                      mock "dispatch")
                      (ert-info
                       ("The running child appears without a refresh")
                       (setq
@@ -212,13 +219,41 @@
                          (omnigent-integration--session-row parent)))
                        (should
                         (omnigent-integration--session-row child)))
+                     (with-current-buffer parent-buffer
+                       (ert-info
+                        ("Polly's spinner advances while the child is running")
+                        (let ((frame
+                               (overlay-get
+                                omnigent-ui--busy-overlay
+                                'before-string))
+                              (frames '("|" "/" "-" "\\")))
+                          (should (member frame frames))
+                          (omnigent-integration--wait
+                           (lambda ()
+                             (let ((next
+                                    (overlay-get
+                                     omnigent-ui--busy-overlay
+                                     'before-string)))
+                               (should (member next frames))
+                               (should
+                                (eq
+                                 (omnigent-integration--session-row-face
+                                  parent)
+                                 'omnigent-ui-session-running))
+                               (should
+                                (eq
+                                 (omnigent-integration--session-row-face
+                                  child)
+                                 'omnigent-ui-session-running))
+                               (not (equal next frame))))))))
                      (let ((child-buffer
                             (omnigent-integration--open-session-row
                              child)))
                        (should
                         (get-buffer-window "*omnigent-sessions*"))
                        (should-not (eq parent-buffer child-buffer))
-                       (omnigent-integration--polly-release mock)
+                       (omnigent-integration--polly-release
+                        mock "worker")
                        (with-current-buffer child-buffer
                          (omnigent-integration--wait
                           (lambda ()
@@ -232,6 +267,8 @@
                          (should-not
                           (omnigent-integration--message-position
                            parent-reply))))
+                     (omnigent-integration--polly-release
+                      mock "polly-wait")
                      (with-current-buffer
                          (omnigent-integration--open-session-row
                           parent)
