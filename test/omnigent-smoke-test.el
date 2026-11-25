@@ -133,6 +133,11 @@
                    (string-trim (buffer-string)))))
           (should (process-attributes child-pid))
           (omnigent-smoke--stop-process process group-id)
+          ;; The child can still be visible briefly after the signal.
+          (let ((deadline (+ (float-time) 2)))
+            (while (and (process-attributes child-pid)
+                        (< (float-time) deadline))
+              (accept-process-output nil 0.05)))
           (should-not (process-attributes child-pid)))
       (omnigent-smoke--stop-process process group-id)
       (delete-directory root t))))
