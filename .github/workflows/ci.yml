@@ -6,10 +6,10 @@ permissions:
   contents: read
 
 jobs:
-  unit-test:
-    name: Unit tests (Emacs ${{ matrix.emacs }} on ${{ matrix.os }})
+  test:
+    name: Tests (Emacs ${{ matrix.emacs }} on ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: true
       matrix:
@@ -31,26 +31,6 @@ jobs:
       - name: Run unit tests
         run: make unit-test
 
-  integration-test:
-    name: Integration tests (Emacs ${{ matrix.emacs }} on ${{ matrix.os }})
-    needs: unit-test
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: true
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        emacs: ['30.2', '31.1']
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - uses: purcell/setup-emacs@master
-        with:
-          version: ${{ matrix.emacs }}
-
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -60,7 +40,8 @@ jobs:
         run: brew install tmux
 
       - name: Install integration dependencies
-        run: make integration-deps
+        # The unit test steps already ran test-deps on this runner.
+        run: make -o test-deps integration-deps
 
       - name: Run integration tests
         run: make integration-test
