@@ -54,6 +54,8 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
 (defvar-local omnigent-conversation--pending-inputs nil
   "Submitted inputs in queue order, separate from committed transcript items.")
 (defvar-local omnigent-conversation--response-id nil)
+(defvar-local omnigent-conversation--status nil
+  "Status from the session snapshot or event stream.")
 (defvar-local omnigent-conversation--section-id nil)
 (defvar-local omnigent-conversation-change-hook nil
   "Hook run after conversation state changes in this buffer.")
@@ -410,6 +412,8 @@ MESSAGE-ID identifies the native preview that ITEM finalizes."
               omnigent-conversation--event-handlers)
         (`(,_ . ,handler) (funcall handler data)))
       (pcase name
+        ("session.status" (setq omnigent-conversation--status
+               (alist-get 'status data)))
         ("session.sandbox_status"
          (when (stringp (alist-get 'stage data))
            (setq
@@ -705,6 +709,7 @@ MESSAGE-ID identifies the native preview that ITEM finalizes."
         (setq
          omnigent-conversation--response-id
          (alist-get 'active_response_id body)
+         omnigent-conversation--status (alist-get 'status body)
          omnigent-conversation--section-id nil
          omnigent-conversation--loading nil)
         (dolist (item (append (alist-get 'items body) nil))

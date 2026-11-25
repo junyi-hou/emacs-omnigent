@@ -1458,11 +1458,8 @@ Signal an error if point is not in a foldable block."
   "Return non-nil while the conversation has a response or is running."
   (and (not omnigent-conversation--invalid)
        (or omnigent-conversation--response-id
-           (equal
-            (alist-get
-             'status
-             (omnigent-sessions-row omnigent-conversation-session-id))
-            "running"))))
+           (member
+            omnigent-conversation--status '("running" "waiting")))))
 
 (defun omnigent-ui--busy-tick (buffer)
   "Advance busy indicators in BUFFER."
@@ -1505,14 +1502,6 @@ Signal an error if point is not in a foldable block."
       (cancel-timer omnigent-ui--busy-timer)
       (setq omnigent-ui--busy-timer nil))
     (omnigent-ui--busy-tick (current-buffer)))))
-
-(defun omnigent-ui--busy-update-sessions ()
-  "Update busy indicators when session statuses change."
-  (dolist (entry omnigent-sessions--buffers)
-    (when (buffer-live-p (cdr entry))
-      (with-current-buffer (cdr entry)
-        (when omnigent-ui--busy-overlay
-          (omnigent-ui--busy-update))))))
 
 (defun omnigent-ui--busy-stop ()
   "Stop the prompt animation when the conversation closes."
@@ -1969,8 +1958,6 @@ CHOICES is a widget choice list; REQUIRED and SECRET control input handling."
  'omnigent-conversation-mode-hook #'omnigent-ui-conversation-setup)
 (add-hook
  'omnigent-sessions-change-hook #'omnigent-ui-sessions-render)
-(add-hook
- 'omnigent-sessions-change-hook #'omnigent-ui--busy-update-sessions)
 (add-hook 'omnigent-sessions-frame-hook #'omnigent-ui--frame)
 (add-hook 'window-selection-change-functions #'omnigent-ui--selection)
 (add-hook

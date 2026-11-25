@@ -441,28 +441,57 @@
     ()
   "Keep animating after a follow-up while the session is still running."
   (omnigent-ui-test--conversation
+    (omnigent-conversation--event
+     "session.status" '((status . "running")))
+    (should (timerp omnigent-ui--busy-timer))
+    (omnigent-conversation--event
+     "response.created" '((response . ((id . "follow-up")))))
+    (should (timerp omnigent-ui--busy-timer))
+    (omnigent-conversation--event
+     "response.completed" '((response . ((id . "follow-up")))))
+    (should (timerp omnigent-ui--busy-timer))
+    (omnigent-ui--busy-tick (current-buffer))
+    (should-not
+     (equal
+      (overlay-get omnigent-ui--busy-overlay 'before-string) " "))
+    (omnigent-conversation--event
+     "session.status" '((status . "idle")))
+    (should-not omnigent-ui--busy-timer)))
+
+(ert-deftest omnigent-ui-busy-indicator-recovers-session-status ()
+  "Restore the prompt animation from the session snapshot."
+  (omnigent-ui-test--conversation
+    (let ((snapshot
+           '((items . [])
+             (pending_inputs . [])
+             (pending_elicitations . []))))
+      (omnigent-conversation--snapshot
+       200 (cons '(status . "running") snapshot))
+      (should (timerp omnigent-ui--busy-timer))
+      (omnigent-conversation--snapshot
+       200 (cons '(status . "idle") snapshot))
+      (should-not omnigent-ui--busy-timer))))
+
+(ert-deftest
+    omnigent-ui-busy-indicator-ignores-late-session-list-update
+    ()
+  "Keep the prompt idle when the session list reports running after a turn."
+  (omnigent-ui-test--conversation
     (let ((omnigent-sessions
            '(((id . "conv_test") (status . "idle"))))
           (omnigent-sessions--buffers
            (list (cons "conv_test" (current-buffer))))
           (omnigent-sessions--revision 0))
+      (omnigent-conversation--event
+       "session.status"
+       '((status . "running") (response_id . "turn")))
+      (should (timerp omnigent-ui--busy-timer))
+      (omnigent-conversation--event
+       "session.status" '((status . "idle") (response_id . "turn")))
+      (should-not omnigent-ui--busy-timer)
       (omnigent-sessions--frame
        '((type . "changed")
          (items . [((id . "conv_test") (status . "running"))])))
-      (should (timerp omnigent-ui--busy-timer))
-      (omnigent-conversation--event
-       "response.created" '((response . ((id . "follow-up")))))
-      (should (timerp omnigent-ui--busy-timer))
-      (omnigent-conversation--event
-       "response.completed" '((response . ((id . "follow-up")))))
-      (should (timerp omnigent-ui--busy-timer))
-      (omnigent-ui--busy-tick (current-buffer))
-      (should-not
-       (equal
-        (overlay-get omnigent-ui--busy-overlay 'before-string) " "))
-      (omnigent-sessions--frame
-       '((type . "changed")
-         (items . [((id . "conv_test") (status . "idle"))])))
       (should-not omnigent-ui--busy-timer))))
 
 (ert-deftest omnigent-ui-sandbox-progress-recovers-and-clears ()
