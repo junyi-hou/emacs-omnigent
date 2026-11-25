@@ -167,9 +167,10 @@ and explicitly configured test values are inherited from the parent."
           (json-parse-buffer :object-type 'alist :array-type 'list))
       (kill-buffer response))))
 
-(defun omnigent-integration--wait (predicate)
-  "Wait for PREDICATE to return a value."
-  (let ((deadline (+ (float-time) 20))
+(defun omnigent-integration--wait (predicate &optional timeout)
+  "Wait for PREDICATE to return a value within TIMEOUT seconds.
+The default timeout is 20 seconds."
+  (let ((deadline (+ (float-time) (or timeout 20)))
         value)
     (while (and (not (setq value (funcall predicate)))
                 (< (float-time) deadline))
