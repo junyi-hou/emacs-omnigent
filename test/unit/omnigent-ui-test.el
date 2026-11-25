@@ -1823,6 +1823,26 @@
        (point-min) omnigent-ui--request-start)
       "You:\nHello\n\n"))))
 
+(ert-deftest omnigent-ui-transcript-renders-error-messages ()
+  "Show committed diagnostic messages and live error text in the transcript."
+  (omnigent-ui-test--conversation
+    (omnigent-conversation--snapshot
+     200
+     '((items
+        .
+        [((id . "diagnostic")
+          (type . "error")
+          (message . "Model unavailable."))])
+       (pending_inputs . []) (pending_elicitations . [])))
+    (omnigent-conversation--event
+     "response.error" '((error . "Live stream error.")))
+    (omnigent-ui--transcript-render)
+    (should
+     (equal
+      (buffer-substring-no-properties
+       (point-min) omnigent-ui--request-start)
+      "Error:\nModel unavailable.\n\nError:\nLive stream error.\n\n"))))
+
 (ert-deftest omnigent-ui-scrolled-transcript-keeps-reading-position ()
   "Preserve point by item ID when transcript output is refreshed above the composer."
   (omnigent-ui-test--conversation

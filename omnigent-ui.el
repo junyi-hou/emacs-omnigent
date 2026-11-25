@@ -944,7 +944,9 @@ Signal an error if point is not in a foldable block."
        (omnigent-ui--fold id "Thinking" text 'omnigent-ui-reasoning))
       ("function_call" (omnigent-ui--tool-dispatch id item outputs))
       ("error" (insert
-        (propertize "Error:\n" 'face 'omnigent-ui-error) text "\n\n"))
+        (propertize "Error:\n" 'face 'omnigent-ui-error)
+        (or (alist-get 'message item) text)
+        "\n\n"))
       (_
        (let ((user (equal (alist-get 'role item) "user")))
          (insert
