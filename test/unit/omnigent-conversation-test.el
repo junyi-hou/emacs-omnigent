@@ -924,6 +924,38 @@
       "second"))))
 
 (ert-deftest
+    omnigent-conversation-finalizes-native-preview-after-reconnect
+    ()
+  "Replace a resumed preview when the final item has a different response ID."
+  (dolist (message-id '(nil "preview"))
+    (with-temp-buffer
+      (setq omnigent-conversation--items
+            (make-hash-table :test 'equal))
+      (omnigent-conversation--event
+       "response.created"
+       '((response . ((id . "snapshot-response")))))
+      (omnigent-conversation--event
+       "response.output_text.delta"
+       '((message_id . "preview")
+         (index . 2)
+         (delta . "reply suffix")))
+      (omnigent-conversation--event
+       "response.output_item.done"
+       `((message_id . ,message-id)
+         (item
+          .
+          ((id . "persisted")
+           (response_id . "native-response")
+           (type . "message")
+           (content . "Complete reply suffix")))))
+      (should (equal omnigent-conversation--order '("persisted")))
+      (should
+       (equal
+        (omnigent-conversation--text
+         (gethash "persisted" omnigent-conversation--items))
+        "Complete reply suffix")))))
+
+(ert-deftest
     omnigent-conversation-snapshot-and-terminal-events-reset-sections
     ()
   "A snapshot replaces provisional items; terminal events stop accumulation."

@@ -166,6 +166,10 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
            (content . ,(string))
            (response_id . ,omnigent-conversation--response-id)
            (omnigent-provisional . t)))
+        (when (and message-id
+                   (numberp (alist-get 'index data))
+                   (> (alist-get 'index data) 0))
+          (push '(omnigent-missing-prefix . t) item))
         (when (equal kind "message")
           (push '(role . "assistant") item))
         (omnigent-conversation--put-item item)
@@ -176,41 +180,59 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
              (omnigent-conversation--text item)
              (or (alist-get 'delta data) ""))))))
 
-(defun omnigent-conversation--stream-item (item &optional added)
-  "Reconcile stream ITEM in place; ADDED starts an identified section."
-  (let* ((item (omnigent-transport--output-item item))
-         (id (alist-get 'id item))
-         (kind (alist-get 'type item))
-         (response-id
-          (or (alist-get 'response_id item)
-              omnigent-conversation--response-id))
-         (active
-          (gethash
-           omnigent-conversation--section-id
-           omnigent-conversation--items))
-         (provisional
-          (and id
-               (not (gethash id omnigent-conversation--items))
-               (not (equal (alist-get 'role item) "user"))
-               (or (cl-find-if
-                    (lambda (old-id)
-                      (let ((old
-                             (gethash
-                              old-id omnigent-conversation--items)))
-                        (and (alist-get 'omnigent-provisional old)
-                             (equal
-                              (alist-get 'response_id old)
-                              response-id)
-                             (equal (alist-get 'type old) kind)
-                             (equal
-                              (omnigent-conversation--text old)
-                              (omnigent-conversation--text item)))))
-                    omnigent-conversation--order)
-                   (and (alist-get 'omnigent-provisional active)
-                        (equal
-                         (alist-get 'response_id active) response-id)
-                        (equal (alist-get 'type active) kind)
-                        omnigent-conversation--section-id)))))
+(defun omnigent-conversation--stream-item
+    (item &optional added message-id)
+  "Reconcile stream ITEM in place; ADDED starts an identified section.
+MESSAGE-ID identifies the native preview that ITEM finalizes."
+  (let*
+      ((item (omnigent-transport--output-item item))
+       (id (alist-get 'id item))
+       (kind (alist-get 'type item))
+       (response-id
+        (or (alist-get 'response_id item)
+            omnigent-conversation--response-id))
+       (active
+        (gethash
+         omnigent-conversation--section-id
+         omnigent-conversation--items))
+       (provisional
+        (and
+         id
+         (not (gethash id omnigent-conversation--items))
+         (not (equal (alist-get 'role item) "user"))
+         (if message-id
+             (when (alist-get
+                    'omnigent-provisional
+                    (gethash message-id omnigent-conversation--items))
+               message-id)
+           (or
+            (cl-find-if
+             (lambda (old-id)
+               (let ((old
+                      (gethash old-id omnigent-conversation--items)))
+                 (and (alist-get 'omnigent-provisional old)
+                      (equal (alist-get 'response_id old) response-id)
+                      (equal (alist-get 'type old) kind)
+                      (equal
+                       (omnigent-conversation--text old)
+                       (omnigent-conversation--text item)))))
+             omnigent-conversation--order)
+            (and
+             (alist-get 'omnigent-provisional active)
+             (equal (alist-get 'type active) kind)
+             (or
+              (equal (alist-get 'response_id active) response-id)
+              ;; A native snapshot can report a different response ID
+              ;; and leave the resumed stream with only a suffix.
+              (and (not added)
+                   (alist-get 'omnigent-missing-prefix active)
+                   (let ((suffix
+                          (omnigent-conversation--text active)))
+                     (and
+                      (not (string-empty-p suffix))
+                      (string-suffix-p
+                       suffix (omnigent-conversation--text item))))))
+             omnigent-conversation--section-id))))))
     (unless (and added
                  (alist-get
                   'omnigent-committed
@@ -219,11 +241,11 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
         (setf (alist-get 'omnigent-committed item) t))
       (when provisional
         (setf (alist-get 'omnigent-previous-id item) provisional)
-        (setcar (memq provisional omnigent-conversation--order) id)
+        (setcar (member provisional omnigent-conversation--order) id)
         (remhash provisional omnigent-conversation--items)
         (puthash id item omnigent-conversation--items))
       (when (or (equal id omnigent-conversation--section-id)
-                (eq provisional omnigent-conversation--section-id)
+                (equal provisional omnigent-conversation--section-id)
                 (not (member kind '("message" "reasoning"))))
         (setq omnigent-conversation--section-id nil))
       (omnigent-conversation--put-item item)
@@ -306,7 +328,10 @@ Bind this temporarily so the mode can set `omnigent-conversation-session-id'.")
     (("response.output_item.done")
      .
      ,(lambda (data)
-        (omnigent-conversation--stream-item (alist-get 'item data))))
+        (omnigent-conversation--stream-item (alist-get 'item data)
+                                            nil
+                                            (alist-get
+                                             'message_id data))))
     (("response.reasoning.started")
      .
      ,(lambda (_data) (setq omnigent-conversation--section-id nil)))
