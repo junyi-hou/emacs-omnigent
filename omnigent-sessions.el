@@ -1223,20 +1223,28 @@ When RETURN-ROW is non-nil, pass the selected agent row for a choice."
     session))
 
 (defun omnigent-sessions--created (status session)
-  "Refresh sessions and open SESSION after successful creation STATUS."
-  (unwind-protect
-      (omnigent-sessions-refresh)
-    (cond
-     ((not (omnigent-transport-success-p status))
-      (omnigent-sessions--error "Create session" status session))
-     ((not (and (listp session) (stringp (alist-get 'id session))))
-      (omnigent-sessions--error "Create session" nil
-                                "Invalid created session response"))
-     (omnigent-sessions-open-hook
-      (run-hook-with-args 'omnigent-sessions-open-hook session))
-     (t
-      (message
-       "Session created; conversation view is not available yet")))))
+  "Grow the fetch limit, refresh, and open SESSION after creation STATUS."
+  (let ((success (omnigent-transport-success-p status))
+        (valid
+         (and (listp session) (stringp (alist-get 'id session)))))
+    (when (and success
+               valid
+               (< omnigent-transport-session-limit 1000))
+      (setq omnigent-transport-session-limit
+            (1+ (max 1 omnigent-transport-session-limit))))
+    (unwind-protect
+        (omnigent-sessions-refresh)
+      (cond
+       ((not success)
+        (omnigent-sessions--error "Create session" status session))
+       ((not valid)
+        (omnigent-sessions--error "Create session" nil
+                                  "Invalid created session response"))
+       (omnigent-sessions-open-hook
+        (run-hook-with-args 'omnigent-sessions-open-hook session))
+       (t
+        (message
+         "Session created; conversation view is not available yet"))))))
 
 (defun omnigent-sessions-fork (id options callback)
   "Fork session ID with OPTIONS and call CALLBACK with status and body.

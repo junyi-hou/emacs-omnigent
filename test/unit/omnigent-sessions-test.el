@@ -1645,6 +1645,21 @@
         '(error "Refresh failed")))
       (should (equal opened '((id . "new")))))))
 
+(ert-deftest omnigent-sessions-create-grows-limit-before-refresh ()
+  "Fetch one more session after a valid create response, up to 1000."
+  (let ((omnigent-transport-session-limit 998)
+        (omnigent-sessions-open-hook (list #'ignore))
+        (omnigent-sessions-error-hook nil)
+        limits)
+    (cl-letf (((symbol-function 'omnigent-sessions-refresh)
+               (lambda ()
+                 (push omnigent-transport-session-limit limits))))
+      (omnigent-sessions--created 403 nil)
+      (omnigent-sessions--created 201 nil)
+      (dotimes (_ 3)
+        (omnigent-sessions--created 201 '((id . "new"))))
+      (should (equal (nreverse limits) '(998 998 999 1000 1000))))))
+
 (ert-deftest omnigent-sessions-errors-retain-server-details ()
   "Retain server details when list, agent, and creation handlers report errors."
   (let ((omnigent-sessions--refresh-number 0)
