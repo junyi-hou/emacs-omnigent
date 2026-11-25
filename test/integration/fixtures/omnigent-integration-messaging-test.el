@@ -87,12 +87,15 @@
       (concat "You:\n" prompt)))
     (should (string-suffix-p "> " (buffer-string)))
     (ert-info
-     ("Wait for the running session row")
+     ("Wait for the running session row and conversation spinner")
      (omnigent-integration--wait
       (lambda ()
-        (eq
-         (omnigent-integration--messaging-row-face id)
-         'omnigent-ui-session-running))))
+        (and (eq
+              (omnigent-integration--messaging-row-face id)
+              'omnigent-ui-session-running)
+             (member
+              (overlay-get omnigent-ui--busy-overlay 'before-string)
+              '("|" "/" "-" "\\"))))))
     (goto-char (point-max))
     (insert follow-up)
     (backward-char 2)
@@ -113,13 +116,16 @@
       (should (= (point) reading))
       (should (= (window-start window) reading)))
     (ert-info
-     ("Wait for the first completed reply")
+     ("Wait for the first completed reply and spinner to clear")
      (omnigent-integration--wait
       (lambda ()
         (and (omnigent-integration--message-position first-reply)
              (eq
               (omnigent-integration--messaging-row-face id)
-              'omnigent-ui-session-idle)))))
+              'omnigent-ui-session-idle)
+             (equal
+              (overlay-get omnigent-ui--busy-overlay 'before-string)
+              " ")))))
     (font-lock-ensure)
     (let ((bold-word
            (+ 2
