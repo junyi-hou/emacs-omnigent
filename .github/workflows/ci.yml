@@ -6,12 +6,12 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Emacs ${{ matrix.emacs }} on ${{ matrix.os }}
+  unit-test:
+    name: Unit tests (Emacs ${{ matrix.emacs }} on ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         os: [ubuntu-latest, macos-latest]
         emacs: ['30.2', '31.1']
@@ -26,15 +26,37 @@ jobs:
           version: ${{ matrix.emacs }}
 
       - name: Install Emacs test dependencies
-        id: emacs-deps
         run: make test-deps
+
+      - name: Run unit tests
+        run: make unit-test
+
+  integration-test:
+    name: Integration tests (Emacs ${{ matrix.emacs }} on ${{ matrix.os }})
+    needs: unit-test
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        emacs: ['30.2', '31.1']
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: purcell/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
 
       - name: Install integration dependencies
         run: make integration-deps
 
       - name: Run integration tests
         run: make integration-test
-
-      - name: Run unit tests
-        if: ${{ !cancelled() && steps.emacs-deps.outcome == 'success' }}
-        run: make unit-test
