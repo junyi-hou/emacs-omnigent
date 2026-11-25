@@ -290,6 +290,9 @@ The process group keeps ownership of children if COMMAND exits first."
 (defvar omnigent-integration--server-environment nil
   "Extra environment entries for the Omnigent server process.")
 
+(defvar omnigent-integration--server-agent nil
+  "Function that writes a test agent under a run root and returns its path.")
+
 (defun omnigent-integration-start ()
   "Start isolated official mock and real Omnigent server resources.
 
@@ -420,20 +423,27 @@ an `unwind-protect' cleanup clause."
                          run
                          (omnigent-integration--start-owned-process
                           "omnigent-integration-server"
-                          (list
-                           omnigent
-                           "server"
-                           "--host"
-                           "127.0.0.1"
-                           "--port"
-                           (number-to-string server-port)
-                           "--database-uri"
-                           (concat
-                            "sqlite:///"
-                            (expand-file-name "server.db" root))
-                           "--artifact-location"
-                           (expand-file-name "artifacts" root)
-                           "--no-open")
+                          (append
+                           (list
+                            omnigent
+                            "server"
+                            "--host"
+                            "127.0.0.1"
+                            "--port"
+                            (number-to-string server-port)
+                            "--database-uri"
+                            (concat
+                             "sqlite:///"
+                             (expand-file-name "server.db" root))
+                            "--artifact-location"
+                            (expand-file-name "artifacts" root)
+                            "--no-open")
+                           (when omnigent-integration--server-agent
+                             (list
+                              "--agent"
+                              (funcall
+                               omnigent-integration--server-agent
+                               root))))
                           server-log))))
                      (let ((server-url
                             (format "http://127.0.0.1:%d"
@@ -466,8 +476,43 @@ an `unwind-protect' cleanup clause."
   (when (file-directory-p (omnigent-integration-run-root run))
     (delete-directory (omnigent-integration-run-root run) t)))
 
-(defun omnigent-integration--mock-session (run title)
-  "Create a local Codex session with TITLE for RUN and return its ID."
+(defun omnigent-integration--session-row (id)
+  "Return the position of the session list row for ID."
+  (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
+    (with-current-buffer buffer
+      (save-excursion
+        (goto-char (point-min))
+        (when-let* ((match
+                     (text-property-search-forward
+                      'omnigent-ui-session-id id t)))
+          (prop-match-beginning match))))))
+
+(defun omnigent-integration--open-session-row (id)
+  "Open session ID through the session list key binding."
+  (let ((position
+         (omnigent-integration--wait
+          (lambda () (omnigent-integration--session-row id)))))
+    (select-window (get-buffer-window "*omnigent-sessions*"))
+    (goto-char position)
+    (call-interactively (key-binding (kbd "RET"))))
+  (let ((buffer (omnigent-sessions-buffer id)))
+    (should (eq (window-buffer (selected-window)) buffer))
+    (omnigent-integration--wait
+     (lambda ()
+       (with-current-buffer buffer
+         (not buffer-read-only))))
+    buffer))
+
+(defun omnigent-integration--session-row-face (id)
+  "Return the status face of the session list row for ID."
+  (when-let* ((position (omnigent-integration--session-row id)))
+    (with-current-buffer "*omnigent-sessions*"
+      (get-text-property position 'face))))
+
+(defun omnigent-integration--mock-session
+    (run title &optional agent-name)
+  "Create a mock session with TITLE for RUN and return its ID.
+AGENT-NAME defaults to codex-native-ui."
   (let* ((process-environment
           (omnigent-integration-run-environment run))
          (default-directory (omnigent-integration-run-root run))
@@ -478,9 +523,10 @@ an `unwind-protect' cleanup clause."
           (alist-get
            'id
            (seq-find
-            (lambda
-              (agent)
-              (equal (alist-get 'name agent) "codex-native-ui"))
+            (lambda (agent)
+              (equal
+               (alist-get 'name agent)
+               (or agent-name "codex-native-ui")))
             (alist-get
              'data (omnigent-integration--get-json "/v1/agents")))))
          created

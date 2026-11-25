@@ -1,0 +1,312 @@
+;;; omnigent-integration-polly-test.el --- Follow a child session -*- lexical-binding: t; -*-
+
+;;; Code:
+
+(require 'ert)
+(require 'omnigent)
+(require 'omnigent-integration-fixture)
+
+(defun omnigent-integration--write-polly (root meta-message)
+  "Write a Polly bundle with one worker and a skill using META-MESSAGE under ROOT."
+  (let*
+      ((bundle (expand-file-name "polly" root))
+       (worker (expand-file-name "agents/codex" bundle))
+       (skill (expand-file-name "skills/fixture-context" bundle))
+       (executor
+        (concat
+         "spec_version: 1\nexecutor:\n  type: omnigent\n"
+         "  auth: {type: provider, name: test-mock}\n"
+         "  config: {harness: codex-native, yolo: true}\n"
+         "llm: {model: mock-model}\n"
+         "os_env: {type: caller_process, cwd: ., sandbox: {type: none}}\n")))
+    (make-directory worker t)
+    (make-directory skill t)
+    (with-temp-file (expand-file-name "SKILL.md" skill)
+      (insert
+       "---\nname: fixture-context\ndescription: Supply test context.\n---\n"
+       meta-message
+       "\n"))
+    (with-temp-file (expand-file-name "config.yaml" bundle)
+      (insert
+       executor
+       "name: polly-ui-fixture\nprompt: Delegate work to Codex.\n"
+       "tools: {agents: [codex]}\n"))
+    (with-temp-file (expand-file-name "config.yaml" worker)
+      (insert executor "name: codex\nprompt: Report the result.\n"))
+    bundle))
+
+(defun omnigent-integration--polly-release (mock)
+  "Wait for and release the next response gate on MOCK."
+  (let ((omnigent-server-url mock))
+    (omnigent-integration--wait
+     (lambda ()
+       (eq
+        t
+        (alist-get
+         'pending
+         (omnigent-integration--get-json "/gate/pending"))))))
+  (omnigent-integration--post-json (concat mock "/gate/release") nil))
+
+(defun omnigent-integration--check-polly-transcript
+    (parent-reply meta-reply meta-message worker-reply)
+  "Check visible replies and hidden work messages in Polly's transcript."
+  (should (omnigent-integration--message-position parent-reply))
+  (should (omnigent-integration--message-position meta-reply))
+  (should
+   (omnigent-integration--message-position "You:\n/fixture-context"))
+  ;; The native Codex forwarder omits MCP tool calls from session history.
+  (dolist (text
+           (list
+            meta-message
+            worker-reply
+            "[System: sub-agent"
+            "sys_session_send"
+            "sys_read_inbox"))
+    (should-not (omnigent-integration--message-position text))))
+
+(ert-deftest omnigent-integration-polly ()
+  "Follow a real child from dispatch through its completed conversation."
+  (let*
+      ((meta-message
+        "Polly fixture internal context, hidden from the transcript")
+       (omnigent-integration--server-agent
+        (lambda (root)
+          (omnigent-integration--write-polly root meta-message))))
+    (omnigent-integration-with-run
+     run
+     (let* ((omnigent-server-url
+             (omnigent-integration-run-server-url run))
+            (omnigent-auth-method 'none)
+            (omnigent-open-session-list-on-connect t)
+            (mock (omnigent-integration-run-mock-url run))
+            (prompt "Polly fixture delegate one task")
+            (child-prompt "Polly fixture worker task")
+            (worker-reply "The worker found the answer.")
+            (parent-reply "Polly collected the answer.")
+            (meta-reply "Polly received the context."))
+       (omnigent-integration--post-json
+        (concat mock "/mock/configure")
+        `((match . ,prompt)
+          (required_tools . ["exec_command"])
+          (responses
+           .
+           [((block . t)
+             (native_items
+              .
+              [((type . "function_call")
+                (id . "fc-polly-dispatch")
+                (call_id . "polly-dispatch")
+                (namespace . "mcp__omnigent")
+                (name . "sys_session_send")
+                (arguments
+                 .
+                 ,(json-encode
+                   `((agent . "codex")
+                     (title . "fixture-worker")
+                     (args . ,child-prompt)))))]))
+            ((text . "Polly dispatched the worker."))])))
+       (omnigent-integration--post-json
+        (concat mock "/mock/configure")
+        `((match . ,child-prompt)
+          (required_tools . ["exec_command"])
+          (responses . [((text . ,worker-reply) (block . t))])))
+       (omnigent-integration--post-json
+        (concat mock "/mock/configure")
+        `((match . "Call sys_read_inbox to collect.")
+          (required_tools . ["exec_command"])
+          (responses
+           .
+           [((native_items
+              .
+              [((type . "function_call")
+                (id . "fc-polly-inbox")
+                (call_id . "polly-inbox")
+                (namespace . "mcp__omnigent")
+                (name . "sys_read_inbox")
+                (arguments . "{}"))]))
+            ((text . ,parent-reply))])))
+       (omnigent-integration--post-json
+        (concat mock "/mock/configure")
+        `((match . ,meta-message)
+          (required_tools . ["exec_command"])
+          (responses . [((text . ,meta-reply))])))
+       (save-window-excursion
+         (unwind-protect
+             (condition-case err
+                 (progn
+                   (omnigent-connect omnigent-server-url)
+                   (let* ((parent
+                           (omnigent-integration--mock-session
+                            run "Polly journey" "polly-ui-fixture"))
+                          (parent-buffer
+                           (omnigent-integration--open-session-row
+                            parent))
+                          (children-path
+                           (format "/v1/sessions/%s/child_sessions"
+                                   parent))
+                          child)
+                     (with-current-buffer parent-buffer
+                       (goto-char (point-max))
+                       (insert prompt)
+                       (call-interactively
+                        (key-binding (kbd "C-c C-c")))
+                       (ert-info
+                        ("Polly shows a busy row and spinner")
+                        (omnigent-integration--wait
+                         (lambda ()
+                           (and
+                            (eq
+                             (omnigent-integration--session-row-face
+                              parent)
+                             'omnigent-ui-session-running)
+                            (member
+                             (overlay-get
+                              omnigent-ui--busy-overlay
+                              'before-string)
+                             '("|" "/" "-" "\\")))))))
+                     (omnigent-integration--polly-release mock)
+                     (ert-info
+                      ("The running child appears without a refresh")
+                      (setq
+                       child
+                       (omnigent-integration--wait
+                        (lambda ()
+                          (let* ((rows
+                                  (alist-get
+                                   'data
+                                   (omnigent-integration--get-json
+                                    children-path)))
+                                 (id (alist-get 'id (car rows))))
+                            (when
+                                (and
+                                 id
+                                 (eq
+                                  (omnigent-integration--session-row-face
+                                   id)
+                                  'omnigent-ui-session-running))
+                              id))))))
+                     (save-selected-window
+                       (select-window
+                        (get-buffer-window "*omnigent-sessions*"))
+                       (goto-char
+                        (omnigent-integration--session-row parent))
+                       (should (looking-at "  ▾ Polly"))
+                       (should
+                        (= (omnigent-integration--session-row child)
+                           (line-beginning-position 2)))
+                       (should
+                        (save-excursion
+                          (forward-line 1)
+                          (looking-at "    codex:fixt")))
+                       (call-interactively (key-binding (kbd "TAB")))
+                       (should
+                        (eq
+                         (point)
+                         (omnigent-integration--session-row parent)))
+                       (should-not
+                        (omnigent-integration--session-row child))
+                       (call-interactively (key-binding (kbd "TAB")))
+                       (should
+                        (eq
+                         (point)
+                         (omnigent-integration--session-row parent)))
+                       (should
+                        (omnigent-integration--session-row child)))
+                     (let ((child-buffer
+                            (omnigent-integration--open-session-row
+                             child)))
+                       (should
+                        (get-buffer-window "*omnigent-sessions*"))
+                       (should-not (eq parent-buffer child-buffer))
+                       (omnigent-integration--polly-release mock)
+                       (with-current-buffer child-buffer
+                         (omnigent-integration--wait
+                          (lambda ()
+                            (and
+                             (omnigent-integration--message-position
+                              worker-reply)
+                             (eq
+                              (omnigent-integration--session-row-face
+                               child)
+                              'omnigent-ui-session-idle))))
+                         (should-not
+                          (omnigent-integration--message-position
+                           parent-reply))))
+                     (with-current-buffer
+                         (omnigent-integration--open-session-row
+                          parent)
+                       (ert-info
+                        ("Polly shows its own reply and returns to idle")
+                        (omnigent-integration--wait
+                         (lambda ()
+                           (and
+                            (omnigent-integration--message-position
+                             parent-reply)
+                            (eq
+                             (omnigent-integration--session-row-face
+                              parent)
+                             'omnigent-ui-session-idle)
+                            (equal
+                             (overlay-get
+                              omnigent-ui--busy-overlay
+                              'before-string)
+                             " ")))))
+                       (omnigent-integration--post-json
+                        (format "%s/v1/sessions/%s/events"
+                                omnigent-server-url parent)
+                        '((type . "slash_command")
+                          (data
+                           .
+                           ((kind . "skill")
+                            (name . "fixture-context")))))
+                       (ert-info
+                        ("Hidden context reaches Polly and the server history")
+                        (omnigent-integration--wait
+                         (lambda ()
+                           (omnigent-integration--message-position
+                            meta-reply)))
+                        (let ((items
+                               (alist-get
+                                'data
+                                (omnigent-integration--get-json
+                                 (format "/v1/sessions/%s/items"
+                                         parent)))))
+                          (should
+                           (string-search
+                            "[System: sub-agent codex/fixture-worker finished (completed)"
+                            (json-encode items)))
+                          (should
+                           (seq-some
+                            (lambda (item)
+                              (and (eq
+                                    (alist-get 'is_meta item) t)
+                                   (string-search
+                                    meta-message (json-encode item))))
+                            items))))
+                       (omnigent-integration--check-polly-transcript
+                        parent-reply
+                        meta-reply
+                        meta-message
+                        worker-reply))
+                     (kill-buffer parent-buffer)
+                     (with-current-buffer
+                         (omnigent-integration--open-session-row
+                          parent)
+                       (omnigent-integration--check-polly-transcript
+                        parent-reply
+                        meta-reply
+                        meta-message
+                        worker-reply))))
+               (error
+                (message "Session list:\n%s"
+                         (with-current-buffer "*omnigent-sessions*"
+                           (buffer-string)))
+                (message "Current buffer:\n%s" (buffer-string))
+                (dolist (log (omnigent-integration-run-logs run))
+                  (message "%s:\n%s"
+                           (buffer-name log)
+                           (omnigent-integration--log-text log)))
+                (signal (car err) (cdr err))))
+           (omnigent-disconnect)))))))
+
+;;; omnigent-integration-polly-test.el ends here

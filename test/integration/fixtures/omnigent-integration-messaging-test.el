@@ -6,39 +6,6 @@
 (require 'omnigent)
 (require 'omnigent-integration-fixture)
 
-(defun omnigent-integration--messaging-row (id)
-  "Return the position of the session list row for ID."
-  (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
-    (with-current-buffer buffer
-      (save-excursion
-        (goto-char (point-min))
-        (when-let* ((match
-                     (text-property-search-forward
-                      'omnigent-ui-session-id id t)))
-          (prop-match-beginning match))))))
-
-(defun omnigent-integration--open-messaging-row (id)
-  "Open session ID through the session list key binding."
-  (let ((position
-         (omnigent-integration--wait
-          (lambda () (omnigent-integration--messaging-row id)))))
-    (select-window (get-buffer-window "*omnigent-sessions*"))
-    (goto-char position)
-    (call-interactively (key-binding (kbd "RET"))))
-  (let ((buffer (omnigent-sessions-buffer id)))
-    (should (eq (window-buffer (selected-window)) buffer))
-    (omnigent-integration--wait
-     (lambda ()
-       (with-current-buffer buffer
-         (not buffer-read-only))))
-    buffer))
-
-(defun omnigent-integration--messaging-row-face (id)
-  "Return the status face of the session list row for ID."
-  (when-let* ((position (omnigent-integration--messaging-row id)))
-    (with-current-buffer "*omnigent-sessions*"
-      (get-text-property position 'face))))
-
 (defun omnigent-integration--check-message-history (texts)
   "Check that each of TEXTS appears once, in order, in read-only history."
   (let ((previous (point-min)))
@@ -91,7 +58,7 @@
      (omnigent-integration--wait
       (lambda ()
         (and (eq
-              (omnigent-integration--messaging-row-face id)
+              (omnigent-integration--session-row-face id)
               'omnigent-ui-session-running)
              (member
               (overlay-get omnigent-ui--busy-overlay 'before-string)
@@ -121,7 +88,7 @@
       (lambda ()
         (and (omnigent-integration--message-position first-reply)
              (eq
-              (omnigent-integration--messaging-row-face id)
+              (omnigent-integration--session-row-face id)
               'omnigent-ui-session-idle)
              (equal
               (overlay-get omnigent-ui--busy-overlay 'before-string)
@@ -189,7 +156,7 @@
       (lambda ()
         (and (omnigent-integration--message-position final-reply)
              (eq
-              (omnigent-integration--messaging-row-face id)
+              (omnigent-integration--session-row-face id)
               'omnigent-ui-session-idle)))))
     (should-not (omnigent-integration--message-position "[queued] >"))
     (omnigent-integration--check-message-history history)
@@ -243,7 +210,7 @@
                      (omnigent-integration--mock-session
                       run "Messaging journey"))
                     (buffer
-                     (omnigent-integration--open-messaging-row id))
+                     (omnigent-integration--open-session-row id))
                     (history
                      (list
                       prompt
@@ -261,7 +228,7 @@
                     (signal (car err) (cdr err))))
                  (kill-buffer buffer))
                (with-current-buffer
-                   (omnigent-integration--open-messaging-row id)
+                   (omnigent-integration--open-session-row id)
                  (omnigent-integration--check-message-history history)
                  (should (string-suffix-p "> " (buffer-string))))))
          (omnigent-disconnect))))))
