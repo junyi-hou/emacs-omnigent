@@ -1,8 +1,12 @@
 # Integration testing
 
-`make integration-test` starts a real Omnigent server and the official local
-mock LLM server. The integration tests cover service health and cleanup,
-session list setup, and session creation.
+`make integration-test` starts a real Omnigent server and the official
+local mock LLM server. The integration tests cover service health and
+cleanup, session list setup, session creation, and the messaging
+journey. The messaging test checks the composer, queued messages,
+streamed replies, recovered history, and the running and idle states
+in the session list. Put the `codex` executable on `PATH` to run this
+test. The test uses the local mock model.
 
 `make unit-test` checks that the integration test fixtures isolate each run and
 clean up its resources. These checks can run without either server.

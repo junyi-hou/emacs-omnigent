@@ -2141,11 +2141,16 @@
              (500)))
     (omnigent-ui-test--conversation
       (insert "message")
-      (cl-letf (((symbol-function
-                  'omnigent-transport-post-session-event)
-                 (lambda (_id _event callback)
-                   (funcall callback (car response) (cdr response)))))
-        (omnigent-conversation-send))
+      (let ((requests 0))
+        (cl-letf (((symbol-function
+                    'omnigent-transport-post-session-event)
+                   (lambda (_id _event callback)
+                     (cl-incf requests)
+                     (funcall callback
+                              (car response)
+                              (cdr response)))))
+          (call-interactively (key-binding (kbd "C-c C-c")))
+          (should (= requests 1))))
       (cond
        ((alist-get 'item_id (cdr response))
         (should (equal omnigent-conversation--order '("saved")))
@@ -2160,7 +2165,11 @@
         (should
          (string-match-p "server may have accepted" (buffer-string))))
        (t
-        (should-not omnigent-conversation--pending-inputs)))
+        (should-not
+         (string-match-p "\\[queued\\] > message" (buffer-string)))
+        (should-not
+         (string-match-p
+          "\\[unconfirmed\\] > message" (buffer-string)))))
       (should
        (equal
         (buffer-substring-no-properties

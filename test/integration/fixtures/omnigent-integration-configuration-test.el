@@ -39,29 +39,6 @@
         (when omnigent-sessions-updates
           (omnigent-disconnect))))))
 
-(defun omnigent-integration--get-json (path)
-  "Read a JSON object from PATH on the test server."
-  (let ((response
-         (url-retrieve-synchronously
-          (concat omnigent-server-url path) t t 5)))
-    (should response)
-    (unwind-protect
-        (with-current-buffer response
-          (should (= url-http-response-status 200))
-          (goto-char url-http-end-of-headers)
-          (json-parse-buffer :object-type 'alist :array-type 'list))
-      (kill-buffer response))))
-
-(defun omnigent-integration--wait (predicate)
-  "Wait for PREDICATE to return a value."
-  (let ((deadline (+ (float-time) 20))
-        value)
-    (while (and (not (setq value (funcall predicate)))
-                (< (float-time) deadline))
-      (accept-process-output nil 0.05))
-    (should value)
-    value))
-
 (defun omnigent-integration--check-agent-options (run)
   "Check that the server for RUN stores defaults and selected overrides."
   (let* ((omnigent-server-url
@@ -72,8 +49,6 @@
          (omnigent-session-default-model "mock-model")
          (omnigent-session-default-reasoning-effort "low")
          (omnigent--create-draft nil)
-         (host-log
-          (generate-new-buffer " *omnigent-integration-host*"))
          (agents
           (alist-get
            'data (omnigent-integration--get-json "/v1/agents")))
@@ -100,36 +75,10 @@
           (list
            (lambda (session)
              (setq created (alist-get 'id session))))))
-    (push host-log (omnigent-integration-run-logs run))
     (should default-agent)
     (should selected-agent)
-    (let ((process-environment
-           (omnigent-integration-run-environment run))
-          (default-directory omnigent-session-default-workspace))
-      (omnigent-integration--register-process
-       run
-       (omnigent-integration--start-owned-process
-        "omnigent-integration-host"
-        (list
-         (executable-find "omnigent")
-         "host"
-         "--server"
-         omnigent-server-url
-         "--no-open"
-         "--non-interactive")
-        host-log)))
     (let ((omnigent-session-default-host
-           (alist-get
-            'host_id
-            (omnigent-integration--wait
-             (lambda ()
-               (seq-find
-                (lambda
-                  (host)
-                  (equal (alist-get 'status host) "online"))
-                (alist-get
-                 'hosts
-                 (omnigent-integration--get-json "/v1/hosts"))))))))
+           (omnigent-integration--start-host run)))
       (unwind-protect
           (with-temp-buffer
             (dolist (select-agent '(nil t))

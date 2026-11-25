@@ -1,0 +1,306 @@
+;;; omnigent-integration-messaging-test.el --- Check the messaging journey -*- lexical-binding: t; -*-
+
+;;; Code:
+
+(require 'ert)
+(require 'omnigent)
+(require 'omnigent-integration-fixture)
+
+(defun omnigent-integration--messaging-session (run)
+  "Create a session on the local host for RUN and return its ID."
+  (let* ((process-environment
+          (omnigent-integration-run-environment run))
+         (default-directory (omnigent-integration-run-root run))
+         (omnigent-session-default-workspace default-directory)
+         (omnigent-session-default-model "mock-model")
+         (omnigent-session-default-title "Messaging journey")
+         (omnigent-session-default-agent
+          (alist-get
+           'id
+           (seq-find
+            (lambda
+              (agent)
+              (equal (alist-get 'name agent) "codex-native-ui"))
+            (alist-get
+             'data (omnigent-integration--get-json "/v1/agents")))))
+         created
+         (omnigent-sessions-open-hook
+          (list
+           (lambda (session)
+             (setq created (alist-get 'id session))))))
+    (should omnigent-session-default-agent)
+    (with-temp-file (expand-file-name "config.yaml"
+                                      (getenv "OMNIGENT_CONFIG_HOME"))
+      (insert
+       (format
+        (concat
+         "providers:\n  test-mock:\n    kind: key\n"
+         "    default: [openai]\n    openai:\n"
+         "      base_url: %s/v1\n      api_key: mock-key\n"
+         "      wire_api: responses\n      models: {default: mock-model}\n")
+        (omnigent-integration-run-mock-url run))))
+    (let ((omnigent-session-default-host
+           (omnigent-integration--start-host run)))
+      (omnigent-sessions-create)
+      (omnigent-integration--wait (lambda () created)))))
+
+(defun omnigent-integration--messaging-row (id)
+  "Return the position of the session list row for ID."
+  (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
+    (with-current-buffer buffer
+      (save-excursion
+        (goto-char (point-min))
+        (when-let* ((match
+                     (text-property-search-forward
+                      'omnigent-ui-session-id id t)))
+          (prop-match-beginning match))))))
+
+(defun omnigent-integration--open-messaging-row (id)
+  "Open session ID through the session list key binding."
+  (let ((position
+         (omnigent-integration--wait
+          (lambda () (omnigent-integration--messaging-row id)))))
+    (select-window (get-buffer-window "*omnigent-sessions*"))
+    (goto-char position)
+    (call-interactively (key-binding (kbd "RET"))))
+  (let ((buffer (omnigent-sessions-buffer id)))
+    (should (eq (window-buffer (selected-window)) buffer))
+    (omnigent-integration--wait
+     (lambda ()
+       (with-current-buffer buffer
+         (not buffer-read-only))))
+    buffer))
+
+(defun omnigent-integration--message-position (text)
+  "Return the start of TEXT in the current conversation buffer."
+  (save-excursion
+    (goto-char (point-min))
+    (when (search-forward text nil t)
+      (match-beginning 0))))
+
+(defun omnigent-integration--messaging-row-face (id)
+  "Return the status face of the session list row for ID."
+  (when-let* ((position (omnigent-integration--messaging-row id)))
+    (with-current-buffer "*omnigent-sessions*"
+      (get-text-property position 'face))))
+
+(defun omnigent-integration--check-message-history (texts)
+  "Check that each of TEXTS appears once, in order, in read-only history."
+  (let ((previous (point-min)))
+    (dolist (text texts)
+      (let ((position (omnigent-integration--message-position text)))
+        (should position)
+        (should (<= previous position))
+        (should
+         (= (how-many (regexp-quote text) (point-min) (point-max)) 1))
+        (should (get-text-property position 'read-only))
+        (setq previous (+ position (length text)))))))
+
+(defun omnigent-integration--check-live-messaging (id history)
+  "Send and receive HISTORY in the current conversation for ID."
+  (pcase-let ((`(,prompt
+                 ,first-reply ,follow-up ,queued-prompt ,final-reply)
+               history))
+    (goto-char (point-max))
+    (should (equal (buffer-substring (- (point) 2) (point)) "> "))
+    (should-error
+     (delete-region (- (point) 2) (- (point) 1))
+     :type 'text-read-only)
+    (insert "Messaging fixture first prompt")
+    (call-interactively (key-binding (kbd "RET")))
+    (insert "  Keep this indentation")
+    (call-interactively (key-binding (kbd "C-c C-c")))
+    (ert-info
+     ("Wait for the first partial reply")
+     (omnigent-integration--wait
+      (lambda ()
+        (omnigent-integration--message-position
+         "**Streaming reply**"))))
+    (should-not (omnigent-integration--message-position first-reply))
+    (should
+     (omnigent-integration--message-position
+      "codex-native-ui:\n**Streaming reply**"))
+    (font-lock-ensure)
+    (should-not
+     (get-text-property
+      (+
+       2
+       (omnigent-integration--message-position "**Streaming reply**"))
+      'font-lock-face))
+    (should
+     (omnigent-integration--message-position
+      (concat "You:\n" prompt)))
+    (should (string-suffix-p "> " (buffer-string)))
+    (ert-info
+     ("Wait for the running session row")
+     (omnigent-integration--wait
+      (lambda ()
+        (eq
+         (omnigent-integration--messaging-row-face id)
+         'omnigent-ui-session-running))))
+    (goto-char (point-max))
+    (insert follow-up)
+    (backward-char 2)
+    (omnigent-integration--wait
+     (lambda ()
+       (omnigent-integration--message-position
+        "**Streaming reply** gives Emacs time")))
+    (should (string-suffix-p (concat "> " follow-up) (buffer-string)))
+    (should (= (- (point-max) (point)) 2))
+    (let* ((window (selected-window))
+           (reading (omnigent-integration--message-position prompt)))
+      (goto-char reading)
+      (set-window-start window reading)
+      (omnigent-integration--wait
+       (lambda ()
+         (omnigent-integration--message-position
+          "show an update while")))
+      (should (= (point) reading))
+      (should (= (window-start window) reading)))
+    (ert-info
+     ("Wait for the first completed reply")
+     (omnigent-integration--wait
+      (lambda ()
+        (and (omnigent-integration--message-position first-reply)
+             (eq
+              (omnigent-integration--messaging-row-face id)
+              'omnigent-ui-session-idle)))))
+    (font-lock-ensure)
+    (let ((bold-word
+           (+ 2
+              (omnigent-integration--message-position
+               "**Streaming reply**"))))
+      (should
+       (memq
+        'markdown-bold-face
+        (append
+         (ensure-list (get-text-property bold-word 'face))
+         (ensure-list
+          (get-text-property bold-word 'font-lock-face))))))
+    (goto-char (point-max))
+    (call-interactively (key-binding (kbd "C-c C-c")))
+    (ert-info
+     ("Wait for the follow-up to start streaming")
+     (omnigent-integration--wait
+      (lambda ()
+        (omnigent-integration--message-position
+         "Queue phase starts"))))
+    (goto-char (point-max))
+    (insert queued-prompt)
+    (call-interactively (key-binding (kbd "C-c C-c")))
+    (ert-info
+     ("Observe the message in the queue")
+     (let ((queued
+            (omnigent-integration--wait
+             (lambda ()
+               (omnigent-integration--message-position
+                (concat "[queued] > " queued-prompt))))))
+       (should (get-text-property queued 'read-only))
+       (should
+        (< (omnigent-integration--message-position
+            "Queue phase starts")
+           queued))
+       (should
+        (string-suffix-p
+         (concat
+          "[queued] > " queued-prompt "\n\n> ")
+         (buffer-string)))))
+    (ert-info
+     ("Reconnect during the final reply")
+     (omnigent-integration--wait
+      (lambda ()
+        (omnigent-integration--message-position
+         "Final reply starts")))
+     (should-not (omnigent-integration--message-position final-reply))
+     (goto-char (point-max))
+     (insert "Unsent recovery draft")
+     (call-interactively (key-binding (kbd "C-c C-r")))
+     (should buffer-read-only)
+     (should-error
+      (call-interactively (key-binding (kbd "C-c C-c")))
+      :type 'user-error)
+     (omnigent-integration--wait (lambda () (not buffer-read-only)))
+     (should
+      (string-suffix-p "> Unsent recovery draft" (buffer-string))))
+    (ert-info
+     ("Wait for both replies and the idle session row")
+     (omnigent-integration--wait
+      (lambda ()
+        (and (omnigent-integration--message-position final-reply)
+             (eq
+              (omnigent-integration--messaging-row-face id)
+              'omnigent-ui-session-idle)))))
+    (should-not (omnigent-integration--message-position "[queued] >"))
+    (omnigent-integration--check-message-history history)
+    (should
+     (= (how-many "before the last part of this reply arrives"
+                  (point-min)
+                  (point-max))
+        1))))
+
+
+(ert-deftest omnigent-integration-messaging ()
+  "Send messages, watch replies stream, and reopen the same session."
+  (unless (executable-find "codex")
+    (error "The messaging integration test requires codex on PATH"))
+  (omnigent-integration-with-run
+   run
+   (let*
+       ((omnigent-server-url
+         (omnigent-integration-run-server-url run))
+        (omnigent-auth-method 'none)
+        (omnigent-open-session-list-on-connect t)
+        (prompt
+         "Messaging fixture first prompt\n  Keep this indentation")
+        (follow-up "Messaging fixture follow-up")
+        (queued-prompt "Messaging fixture queued prompt")
+        (queue-reply
+         "Queue phase starts and leaves time for another message to arrive while this model response is still streaming.")
+        (first-reply
+         "**Streaming reply** gives Emacs time to show an update while the user edits a draft and then reads the final reply.")
+        (final-reply
+         "Final reply starts and gives Emacs time to reconnect before the last part of this reply arrives.")
+        (mock (omnigent-integration-run-mock-url run)))
+     (omnigent-integration--post-json
+      (concat mock "/mock/configure")
+      `((match . "Messaging fixture")
+        (required_tools . ["exec_command"])
+        (responses
+         .
+         [((text . ,first-reply)
+           (stream . t)
+           (chunk_delay . 0.35))
+          ((text . ,queue-reply) (stream . t) (chunk_delay . 0.35))
+          ((text . ,final-reply)
+           (stream . t)
+           (chunk_delay . 0.35))])))
+     (save-window-excursion
+       (unwind-protect
+           (progn
+             (omnigent-connect omnigent-server-url)
+             (let* ((id (omnigent-integration--messaging-session run))
+                    (buffer
+                     (omnigent-integration--open-messaging-row id))
+                    (history
+                     (list
+                      prompt
+                      first-reply
+                      follow-up
+                      queued-prompt
+                      final-reply)))
+               (with-current-buffer buffer
+                 (condition-case err
+                     (omnigent-integration--check-live-messaging
+                      id history)
+                   (error
+                    (message "Conversation transcript:\n%s"
+                             (buffer-string))
+                    (signal (car err) (cdr err))))
+                 (kill-buffer buffer))
+               (with-current-buffer
+                   (omnigent-integration--open-messaging-row id)
+                 (omnigent-integration--check-message-history history)
+                 (should (string-suffix-p "> " (buffer-string))))))
+         (omnigent-disconnect))))))
+
+;;; omnigent-integration-messaging-test.el ends here

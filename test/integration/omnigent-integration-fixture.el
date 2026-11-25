@@ -9,9 +9,13 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'ert)
+(require 'seq)
 (require 'url)
 (require 'url-http)
 (require 'json)
+
+(defvar omnigent-server-url)
 
 (cl-defstruct
  (omnigent-integration-run
@@ -150,6 +154,29 @@ and explicitly configured test values are inherited from the parent."
       (error "Service did not become healthy: %s"
              (omnigent-integration--log-text log)))))
 
+(defun omnigent-integration--get-json (path)
+  "Read a JSON object from PATH on the test server."
+  (let ((response
+         (url-retrieve-synchronously
+          (concat omnigent-server-url path) t t 5)))
+    (should response)
+    (unwind-protect
+        (with-current-buffer response
+          (should (= url-http-response-status 200))
+          (goto-char url-http-end-of-headers)
+          (json-parse-buffer :object-type 'alist :array-type 'list))
+      (kill-buffer response))))
+
+(defun omnigent-integration--wait (predicate)
+  "Wait for PREDICATE to return a value."
+  (let ((deadline (+ (float-time) 20))
+        value)
+    (while (and (not (setq value (funcall predicate)))
+                (< (float-time) deadline))
+      (accept-process-output nil 0.05))
+    (should value)
+    value))
+
 (defun omnigent-integration--post-json (url data)
   "POST DATA as JSON to URL and require a successful response."
   (let* ((url-request-method "POST")
@@ -179,6 +206,36 @@ The process group keeps ownership of children if COMMAND exits first."
    :stderr buffer
    :noquery t
    :connection-type 'pipe))
+
+(defun omnigent-integration--start-host (run)
+  "Start the execution host for RUN and return its online host ID."
+  (let ((process-environment
+         (omnigent-integration-run-environment run))
+        (default-directory (omnigent-integration-run-root run))
+        (server (omnigent-integration-run-server-url run))
+        (log (generate-new-buffer " *omnigent-integration-host*")))
+    (push log (omnigent-integration-run-logs run))
+    (omnigent-integration--register-process
+     run
+     (omnigent-integration--start-owned-process
+      "omnigent-integration-host"
+      (list
+       (executable-find "omnigent")
+       "host"
+       "--server"
+       server
+       "--no-open"
+       "--non-interactive")
+      log))
+    (let ((omnigent-server-url server))
+      (omnigent-integration--wait
+       (lambda ()
+         (seq-some
+          (lambda (host)
+            (when (equal (alist-get 'status host) "online")
+              (alist-get 'host_id host)))
+          (alist-get
+           'hosts (omnigent-integration--get-json "/v1/hosts"))))))))
 
 (defun omnigent-integration--group-members (group-id)
   "Return live operating system process IDs in GROUP-ID."
@@ -258,17 +315,23 @@ an `unwind-protect' cleanup clause."
     (unless (file-executable-p python)
       (error
        "Run make integration-deps to install mock Python dependencies"))
-    (let* ((root (make-temp-file "omnigent-integration-" t))
-           (home (expand-file-name "home" root))
-           (config (expand-file-name "config" root))
-           (data (expand-file-name "data" root))
-           mock-url
-           mock-log
-           (environment nil)
-           (completed nil)
-           server-process
-           server-port
-           run)
+    (let*
+        ((root
+          ;; Native runner sockets must fit the Unix socket path limit.
+          (make-temp-file (if (eq system-type 'darwin)
+                              "/tmp/omnigent-integration-"
+                            "omnigent-integration-")
+                          t))
+         (home (expand-file-name "home" root))
+         (config (expand-file-name "config" root))
+         (data (expand-file-name "data" root))
+         mock-url
+         mock-log
+         (environment nil)
+         (completed nil)
+         server-process
+         server-port
+         run)
       (unwind-protect
           (condition-case error-data
               (progn
