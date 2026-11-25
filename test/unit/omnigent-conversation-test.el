@@ -1767,13 +1767,31 @@
 (ert-deftest
     omnigent-conversation-command-completion-at-composer-start
     ()
-  "Complete local commands and cached skills only at the composer start."
+  "Complete and describe commands only at the composer start."
   (with-temp-buffer
     (insert "transcript\n/re")
-    (let ((omnigent-conversation--prompt-start (copy-marker 12))
-          (omnigent--conversation-command-skills '("review")))
-      (let ((capf (omnigent--conversation-command-capf)))
-        (should (member "/review" (nth 2 capf)))
-        (should (member "/model" (nth 2 capf))))
+    (let ((omnigent-conversation--prompt-start (copy-marker 12)))
+      (omnigent--conversation-command-catalog-result
+       (current-buffer) 200
+       '((skills
+          .
+          [((name . "review") (description . "Review\nchanges."))
+           ((name . "model") (description . "Skill description."))
+           ((name . "report"))])
+         (warnings . [])))
+      (let* ((capf (omnigent--conversation-command-capf))
+             (candidates (nth 2 capf))
+             (annotate
+              (plist-get (nthcdr 3 capf) :annotation-function)))
+        (should (member "/review" candidates))
+        (should (= 1 (cl-count "/model" candidates :test #'equal)))
+        (should
+         (equal (funcall annotate "/review") "  Review changes."))
+        (should
+         (equal
+          (funcall annotate "/model")
+          "  [name] Select or set the session model."))
+        (should (member "/report" candidates))
+        (should-not (funcall annotate "/report")))
       (insert " ")
       (should-not (omnigent--conversation-command-capf)))))

@@ -791,15 +791,13 @@ Call CANCEL when required selection does not complete."
              (or (alist-get 'host_id (cdr omnigent--create-draft))
                  "Choose host")))
    :if-not omnigent--create-managed-p)
-  ("w"
-   omnigent--create-workspace
+  ("w" omnigent--create-workspace
    :description
    (lambda ()
      (format "Workspace (%s)"
              (or (alist-get 'workspace (cdr omnigent--create-draft))
                  "Choose workspace")))
-   :inapt-if
-   (lambda () (not (alist-get 'host_id (cdr omnigent--create-draft))))
+   :inapt-if (lambda () (not (alist-get 'host_id (cdr omnigent--create-draft))))
    :if-not omnigent--create-managed-p)
   ("g" omnigent--create-worktree
    :if-not omnigent--create-managed-p
@@ -844,21 +842,19 @@ Call CANCEL when required selection does not complete."
                        :test #'equal)))))
        (format "Project (%s)"
                (or (alist-get 'name project) id "Unassigned")))))
-  ("a" omnigent--create-agent
-   :description
-   (lambda () (omnigent--create-label 'agent_id "Agent")))
+  ("a"
+   omnigent--create-agent
+   :description (lambda () (omnigent--create-label 'agent_id "Agent")))
   ("m"
    omnigent--create-model
-   :description
-   (lambda () (omnigent--create-label 'model_override "Model ID")))
+   :description (lambda () (omnigent--create-label 'model_override "Model ID")))
   ("e" omnigent--create-effort
    :description
    (lambda ()
      (omnigent--create-label 'reasoning_effort "Reasoning effort")))
   ("T"
    omnigent--create-title
-   :description
-   (lambda () (omnigent--create-label 'title "Title")))
+   :description (lambda () (omnigent--create-label 'title "Title")))
   ("l" omnigent--create-args
    :description
    (lambda ()
@@ -1531,11 +1527,12 @@ AFTER is the cursor used for the current page."
 (defvar omnigent--conversation-submitted-draft nil)
 
 (defvar-local omnigent--conversation-command-catalog-requested nil)
-(defvar-local omnigent--conversation-command-skills nil)
+(defvar-local omnigent--conversation-command-skills nil
+  "Alist of cached skill commands and their descriptions.")
 
 (defun omnigent--conversation-command-catalog-result
     (buffer status body)
-  "Cache skill names from STATUS and BODY in BUFFER."
+  "Cache skill commands and descriptions from STATUS and BODY in BUFFER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (if (and (omnigent-transport-success-p status)
@@ -1548,7 +1545,10 @@ AFTER is the cursor used for the current page."
           (progn
             (setq omnigent--conversation-command-skills
                   (mapcar
-                   (lambda (skill) (alist-get 'name skill))
+                   (lambda (skill)
+                     (cons
+                      (concat "/" (alist-get 'name skill))
+                      (alist-get 'description skill)))
                    (append (alist-get 'skills body) nil)))
             (when (> (length (alist-get 'warnings body)) 0)
               (message "Skill discovery incomplete: %s"
@@ -1566,20 +1566,30 @@ AFTER is the cursor used for the current page."
                (string-match-p
                 "\\`/[^[:space:]/]*\\'"
                 (buffer-substring-no-properties start (point))))
-      (list
-       start (point)
-       (mapcar
-        (lambda (name) (concat "/" name))
-        (append
-         '("model"
-           "effort"
-           "new"
-           "clear"
-           "compact"
-           "btw"
-           "side")
-         omnigent--conversation-command-skills))
-       :exclusive 'no))))
+      (let ((commands
+             (append
+              '(("/model" . "[name] Select or set the session model.")
+                ("/effort"
+                 .
+                 "[level] Select or set the reasoning effort.")
+                ("/new" . "Create a session.")
+                ("/clear"
+                 .
+                 "Start a fresh session in the same workspace.")
+                ("/compact" . "Compact the session context.")
+                ("/btw" . "[question] Open a private side chat.")
+                ("/side" . "[question] Open a private side chat."))
+              omnigent--conversation-command-skills)))
+        (list
+         start (point) (delete-dups (mapcar #'car commands))
+         :annotation-function
+         (lambda (candidate)
+           (let ((description (cdr (assoc candidate commands))))
+             (when (stringp description)
+               (let ((words (split-string description)))
+                 (when words
+                   (concat "  " (string-join words " ")))))))
+         :exclusive 'no)))))
 
 (define-key
  omnigent-conversation-mode-map
