@@ -6,44 +6,6 @@
 (require 'omnigent)
 (require 'omnigent-integration-fixture)
 
-(defun omnigent-integration--messaging-session (run)
-  "Create a session on the local host for RUN and return its ID."
-  (let* ((process-environment
-          (omnigent-integration-run-environment run))
-         (default-directory (omnigent-integration-run-root run))
-         (omnigent-session-default-workspace default-directory)
-         (omnigent-session-default-model "mock-model")
-         (omnigent-session-default-title "Messaging journey")
-         (omnigent-session-default-agent
-          (alist-get
-           'id
-           (seq-find
-            (lambda
-              (agent)
-              (equal (alist-get 'name agent) "codex-native-ui"))
-            (alist-get
-             'data (omnigent-integration--get-json "/v1/agents")))))
-         created
-         (omnigent-sessions-open-hook
-          (list
-           (lambda (session)
-             (setq created (alist-get 'id session))))))
-    (should omnigent-session-default-agent)
-    (with-temp-file (expand-file-name "config.yaml"
-                                      (getenv "OMNIGENT_CONFIG_HOME"))
-      (insert
-       (format
-        (concat
-         "providers:\n  test-mock:\n    kind: key\n"
-         "    default: [openai]\n    openai:\n"
-         "      base_url: %s/v1\n      api_key: mock-key\n"
-         "      wire_api: responses\n      models: {default: mock-model}\n")
-        (omnigent-integration-run-mock-url run))))
-    (let ((omnigent-session-default-host
-           (omnigent-integration--start-host run)))
-      (omnigent-sessions-create)
-      (omnigent-integration--wait (lambda () created)))))
-
 (defun omnigent-integration--messaging-row (id)
   "Return the position of the session list row for ID."
   (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
@@ -70,13 +32,6 @@
        (with-current-buffer buffer
          (not buffer-read-only))))
     buffer))
-
-(defun omnigent-integration--message-position (text)
-  "Return the start of TEXT in the current conversation buffer."
-  (save-excursion
-    (goto-char (point-min))
-    (when (search-forward text nil t)
-      (match-beginning 0))))
 
 (defun omnigent-integration--messaging-row-face (id)
   "Return the status face of the session list row for ID."
@@ -278,7 +233,9 @@
        (unwind-protect
            (progn
              (omnigent-connect omnigent-server-url)
-             (let* ((id (omnigent-integration--messaging-session run))
+             (let* ((id
+                     (omnigent-integration--mock-session
+                      run "Messaging journey"))
                     (buffer
                      (omnigent-integration--open-messaging-row id))
                     (history

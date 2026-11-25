@@ -460,6 +460,51 @@ an `unwind-protect' cleanup clause."
   (when (file-directory-p (omnigent-integration-run-root run))
     (delete-directory (omnigent-integration-run-root run) t)))
 
+(defun omnigent-integration--mock-session (run title)
+  "Create a local Codex session with TITLE for RUN and return its ID."
+  (let* ((process-environment
+          (omnigent-integration-run-environment run))
+         (default-directory (omnigent-integration-run-root run))
+         (omnigent-session-default-workspace default-directory)
+         (omnigent-session-default-model "mock-model")
+         (omnigent-session-default-title title)
+         (omnigent-session-default-agent
+          (alist-get
+           'id
+           (seq-find
+            (lambda
+              (agent)
+              (equal (alist-get 'name agent) "codex-native-ui"))
+            (alist-get
+             'data (omnigent-integration--get-json "/v1/agents")))))
+         created
+         (omnigent-sessions-open-hook
+          (list
+           (lambda (session)
+             (setq created (alist-get 'id session))))))
+    (should omnigent-session-default-agent)
+    (with-temp-file (expand-file-name "config.yaml"
+                                      (getenv "OMNIGENT_CONFIG_HOME"))
+      (insert
+       (format
+        (concat
+         "providers:\n  test-mock:\n    kind: key\n"
+         "    default: [openai]\n    openai:\n"
+         "      base_url: %s/v1\n      api_key: mock-key\n"
+         "      wire_api: responses\n      models: {default: mock-model}\n")
+        (omnigent-integration-run-mock-url run))))
+    (let ((omnigent-session-default-host
+           (omnigent-integration--start-host run)))
+      (omnigent-sessions-create)
+      (omnigent-integration--wait (lambda () created)))))
+
+(defun omnigent-integration--message-position (text)
+  "Return the start of TEXT in the current conversation buffer."
+  (save-excursion
+    (goto-char (point-min))
+    (when (search-forward text nil t)
+      (match-beginning 0))))
+
 (defun omnigent-integration-run-harness (run harness agent prompt)
   "Run HARNESS for AGENT with PROMPT against RUN's real Omnigent server.
 
