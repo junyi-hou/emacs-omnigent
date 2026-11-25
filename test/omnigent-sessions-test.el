@@ -495,10 +495,12 @@
 
 (ert-deftest omnigent-sessions-create-applies-selected-agent-overrides
     ()
-  "Use the selected ID and apply draft fields by registered agent name."
+  "Send global defaults on quick creation and overrides after agent selection."
   (let ((omnigent-session-default-host "host")
         (omnigent-session-default-workspace "/repo")
+        (omnigent-session-default-agent "a")
         (omnigent-session-default-model "default")
+        (omnigent-session-default-reasoning-effort "low")
         (omnigent-session-default-title "Default title")
         (omnigent-session-agent-overrides
          '(("Codex" .
@@ -526,6 +528,8 @@
                    (should (equal path "/v1/sessions"))
                    (setq payload data)))))
       (omnigent-sessions-create)
+      (should (equal (cdr (assoc "agent_id" payload)) "a"))
+      (should (equal (cdr (assoc "reasoning_effort" payload)) "low"))
       (should
        (equal
         (alist-get "model_override" payload
@@ -542,6 +546,8 @@
         "override"))
       (omnigent--create-submit)
       (should (equal (cdr (assoc "agent_id" payload)) "b"))
+      (should
+       (equal (cdr (assoc "model_override" payload)) "override"))
       (should (equal (cdr (assoc "reasoning_effort" payload)) "high"))
       (should-not (assoc "title" payload)))))
 
