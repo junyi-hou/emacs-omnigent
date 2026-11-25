@@ -130,10 +130,22 @@ make test-deps
 make unit-test
 ```
 
-`make test-deps` installs the Emacs test packages in `.tools/test-elpa`. To run
-the integration tests, run `make integration-deps` and then
-`make integration-test`. The [integration testing guide](docs/integration-testing.md)
-lists the required tools and checkout.
+`make test-deps` installs the Emacs test packages in `.tools/test-elpa`.
+Use these commands to set up and run the live integration tests.
+
+```sh
+make integration-deps
+make integration-test
+```
+
+The [integration testing guide](docs/integration-testing.md) lists the required
+tools and checkout.
+
+Add unit tests to `test/unit/` in files named `*-test.el`. Add each live
+integration test to its own `*-test.el` file in `test/integration/fixtures/`.
+Define one `ert-deftest` per integration file. Use `omnigent-integration-with-run`
+once per test to start an isolated environment and clean up its resources.
+See [AGENTS.md](AGENTS.md#tests) for test development instructions.
 
 The client can open at most 500 conversation buffers at once, because the server limits
 the WebSocket watch set to 500 sessions. This should be more than enough for normal use.
