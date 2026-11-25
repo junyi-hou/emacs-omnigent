@@ -1,4 +1,4 @@
-;;; omnigent-smoke.el --- Isolated real-server smoke test fixtures -*- lexical-binding: t; -*-
+;;; omnigent-integration-fixture.el --- Isolated real-server integration test fixtures -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026
 
@@ -14,7 +14,8 @@
 (require 'json)
 
 (cl-defstruct
- (omnigent-smoke-run (:constructor omnigent-smoke--make-run))
+ (omnigent-integration-run
+  (:constructor omnigent-integration--make-run))
  "Resources owned by one isolated CUJ invocation."
  root
  server-url
@@ -24,20 +25,20 @@
  process-groups
  logs)
 
-(defconst omnigent-smoke--mock-relative-path
+(defconst omnigent-integration--mock-relative-path
   "tests/server/integration/mock_llm_server.py"
   "Relative path to the official Omnigent local mock LLM fixture.")
 
-(defconst omnigent-smoke--model "mock-model"
+(defconst omnigent-integration--model "mock-model"
   "Model name served by the official Omnigent integration fixture.")
 
-(defconst omnigent-smoke--harness-timeout 120
+(defconst omnigent-integration--harness-timeout 120
   "Maximum time in seconds to wait for a harness invocation.")
 
-(defvar-local omnigent-smoke-exit-status nil
-  "Exit status from an Omnigent smoke harness process.")
+(defvar-local omnigent-integration-exit-status nil
+  "Exit status from an integration test harness process.")
 
-(defun omnigent-smoke--isolated-environment
+(defun omnigent-integration--isolated-environment
     (root repo &optional mock-url)
   "Build a clean process environment rooted at ROOT and using MOCK-URL.
 
@@ -72,7 +73,7 @@ and explicitly configured test values are inherited from the parent."
       (setenv "NO_COLOR" "1")
       (copy-sequence process-environment))))
 
-(defun omnigent-smoke--log-text (log)
+(defun omnigent-integration--log-text (log)
   "Return the contents of LOG, which can be a buffer or file name."
   (if (bufferp log)
       (with-current-buffer log
@@ -85,7 +86,7 @@ and explicitly configured test values are inherited from the parent."
            (max (point-min) (- (point-max) 4000)) (point-max)))
       "no log")))
 
-(defun omnigent-smoke--free-port (python)
+(defun omnigent-integration--free-port (python)
   "Return an available loopback port selected with PYTHON."
   (with-temp-buffer
     (unless
@@ -101,10 +102,10 @@ and explicitly configured test values are inherited from the parent."
       (error "Could not select a loopback port"))
     (string-to-number (string-trim (buffer-string)))))
 
-(defun omnigent-smoke--with-port-lock (function)
+(defun omnigent-integration--with-port-lock (function)
   "Call FUNCTION while holding a cross-process fixture port lock."
   (let ((lock-directory
-         (expand-file-name "omnigent-smoke-port-lock"
+         (expand-file-name "omnigent-integration-port-lock"
                            temporary-file-directory))
         (deadline (+ (float-time) 30))
         locked)
@@ -123,7 +124,7 @@ and explicitly configured test values are inherited from the parent."
       (when locked
         (delete-directory lock-directory t)))))
 
-(defun omnigent-smoke--wait-for-health
+(defun omnigent-integration--wait-for-health
     (url process log &optional endpoint)
   "Wait until PROCESS serves ENDPOINT at URL, or signal with LOG contents."
   (let ((deadline (+ (float-time) 20))
@@ -147,9 +148,9 @@ and explicitly configured test values are inherited from the parent."
         (sleep-for 0.1)))
     (unless ready
       (error "Service did not become healthy: %s"
-             (omnigent-smoke--log-text log)))))
+             (omnigent-integration--log-text log)))))
 
-(defun omnigent-smoke--post-json (url data)
+(defun omnigent-integration--post-json (url data)
   "POST DATA as JSON to URL and require a successful response."
   (let* ((url-request-method "POST")
          (url-request-extra-headers
@@ -166,7 +167,7 @@ and explicitly configured test values are inherited from the parent."
             (error "POST %s failed: %s" url url-http-response-status))
         (kill-buffer buffer)))))
 
-(defun omnigent-smoke--start-owned-process (name command buffer)
+(defun omnigent-integration--start-owned-process (name command buffer)
   "Start COMMAND in its own Emacs process group and return the process.
 
 NAME names the Emacs process.  BUFFER receives standard output and error.
@@ -179,7 +180,7 @@ The process group keeps ownership of children if COMMAND exits first."
    :noquery t
    :connection-type 'pipe))
 
-(defun omnigent-smoke--group-members (group-id)
+(defun omnigent-integration--group-members (group-id)
   "Return live operating system process IDs in GROUP-ID."
   (let (members)
     (dolist (pid (list-system-processes))
@@ -193,31 +194,31 @@ The process group keeps ownership of children if COMMAND exits first."
           (push pid members))))
     members))
 
-(defun omnigent-smoke--stop-process-group (group-id)
+(defun omnigent-integration--stop-process-group (group-id)
   "Terminate all processes in GROUP-ID, even when its leader has exited."
   (ignore-errors
     (signal-process (- group-id) 'SIGTERM))
   (let ((deadline (+ (float-time) 2))
-        (members (omnigent-smoke--group-members group-id)))
+        (members (omnigent-integration--group-members group-id)))
     (while (and members (< (float-time) deadline))
       (sleep-for 0.05)
-      (setq members (omnigent-smoke--group-members group-id)))
+      (setq members (omnigent-integration--group-members group-id)))
     (when members
       (ignore-errors
         (signal-process (- group-id) 'SIGKILL))
       (let ((kill-deadline (+ (float-time) 1)))
-        (while (and (omnigent-smoke--group-members group-id)
+        (while (and (omnigent-integration--group-members group-id)
                     (< (float-time) kill-deadline))
           (sleep-for 0.05))))))
 
-(defun omnigent-smoke--stop-process (process &optional group-id)
+(defun omnigent-integration--stop-process (process &optional group-id)
   "Stop PROCESS and its owned GROUP-ID, even if PROCESS has exited."
   (when group-id
-    (omnigent-smoke--stop-process-group group-id))
+    (omnigent-integration--stop-process-group group-id))
   (when (and (processp process) (process-live-p process))
     (delete-process process)))
 
-(defun omnigent-smoke--register-process (run process)
+(defun omnigent-integration--register-process (run process)
   "Register PROCESS and its process group with RUN, then return PROCESS."
   (let* ((pid (process-id process))
          (attributes (process-attributes pid))
@@ -225,21 +226,22 @@ The process group keeps ownership of children if COMMAND exits first."
     (unless (= group-id pid)
       (delete-process process)
       (error "Emacs did not isolate process %s in its own group" pid))
-    (push process (omnigent-smoke-run-processes run))
-    (push group-id (omnigent-smoke-run-process-groups run)))
+    (push process (omnigent-integration-run-processes run))
+    (push group-id (omnigent-integration-run-process-groups run)))
   process)
 
-(defun omnigent-smoke-start ()
+(defun omnigent-integration-start ()
   "Start isolated official mock and real Omnigent server resources.
 
-The caller must pass the returned run to `omnigent-smoke-stop', usually in
+The caller must pass the returned run to `omnigent-integration-stop', usually in
 an `unwind-protect' cleanup clause."
   (let* ((repo (getenv "OMNIGENT_REPO"))
          (repo (and repo (expand-file-name repo)))
          (mock-script
           (and repo
-               (expand-file-name omnigent-smoke--mock-relative-path
-                                 repo)))
+               (expand-file-name
+                omnigent-integration--mock-relative-path
+                repo)))
          (omnigent (executable-find "omnigent"))
          (python
           (expand-file-name ".tools/omnigent-mock/bin/python"
@@ -251,11 +253,12 @@ an `unwind-protect' cleanup clause."
       (error "Official Omnigent mock server not found: %s"
              mock-script))
     (unless omnigent
-      (error "The omnigent executable is required for smoke tests"))
+      (error
+       "The omnigent executable is required for integration tests"))
     (unless (file-executable-p python)
       (error
        "Run make integration-deps to install mock Python dependencies"))
-    (let* ((root (make-temp-file "omnigent-smoke-" t))
+    (let* ((root (make-temp-file "omnigent-integration-" t))
            (home (expand-file-name "home" root))
            (config (expand-file-name "config" root))
            (data (expand-file-name "data" root))
@@ -270,16 +273,16 @@ an `unwind-protect' cleanup clause."
           (condition-case error-data
               (progn
                 (setq run
-                      (omnigent-smoke--make-run
+                      (omnigent-integration--make-run
                        :root root
                        :processes nil
                        :process-groups nil
                        :logs nil))
                 (setq mock-log
                       (generate-new-buffer
-                       " *omnigent-smoke-mock-log*"))
-                (push mock-log (omnigent-smoke-run-logs run))
-                (setf (omnigent-smoke-run-mock-url run) nil)
+                       " *omnigent-integration-mock-log*"))
+                (push mock-log (omnigent-integration-run-logs run))
+                (setf (omnigent-integration-run-mock-url run) nil)
                 (dolist (directory
                          (list
                           home
@@ -291,80 +294,84 @@ an `unwind-protect' cleanup clause."
                           (expand-file-name "tmp" root)))
                   (make-directory directory t))
                 (setq environment
-                      (omnigent-smoke--isolated-environment
+                      (omnigent-integration--isolated-environment
                        root repo))
-                (omnigent-smoke--with-port-lock
+                (omnigent-integration--with-port-lock
                  (lambda ()
                    (let* ((mock-port
-                           (omnigent-smoke--free-port python))
+                           (omnigent-integration--free-port python))
                           (process-environment environment)
                           (default-directory repo))
                      (setq mock-url
                            (format "http://127.0.0.1:%d" mock-port))
-                     (omnigent-smoke--register-process
+                     (omnigent-integration--register-process
                       run
-                      (omnigent-smoke--start-owned-process
-                       "omnigent-smoke-mock"
+                      (omnigent-integration--start-owned-process
+                       "omnigent-integration-mock"
                        (list
                         python
                         mock-script
                         (number-to-string mock-port))
                        mock-log)))
-                   (setf (omnigent-smoke-run-mock-url run) mock-url)
-                   (omnigent-smoke--wait-for-health
+                   (setf (omnigent-integration-run-mock-url run)
+                         mock-url)
+                   (omnigent-integration--wait-for-health
                     mock-url
-                    (car (omnigent-smoke-run-processes run))
+                    (car (omnigent-integration-run-processes run))
                     mock-log
                     "/v1/models")))
-                (omnigent-smoke--post-json
+                (omnigent-integration--post-json
                  (concat mock-url "/mock/served_models")
                  '((models . ["mock-model"])))
-                (omnigent-smoke--post-json
+                (omnigent-integration--post-json
                  (concat mock-url "/mock/configure")
                  '((key . "mock-model")
                    (responses
-                    . [((text . "OMNIGENT_SMOKE_RESPONSE"))])))
+                    . [((text . "OMNIGENT_INTEGRATION_RESPONSE"))])))
                 (setq environment
-                      (omnigent-smoke--isolated-environment root repo
-                                                            mock-url))
-                (setf (omnigent-smoke-run-environment run)
+                      (omnigent-integration--isolated-environment
+                       root repo
+                       mock-url))
+                (setf (omnigent-integration-run-environment run)
                       environment)
                 (let* ((server-log
                         (generate-new-buffer
-                         " *omnigent-smoke-server-log*")))
-                  (push server-log (omnigent-smoke-run-logs run))
-                  (omnigent-smoke--with-port-lock
+                         " *omnigent-integration-server-log*")))
+                  (push
+                   server-log (omnigent-integration-run-logs run))
+                  (omnigent-integration--with-port-lock
                    (lambda ()
                      (setq server-port
-                           (omnigent-smoke--free-port python))
+                           (omnigent-integration--free-port python))
                      (let ((process-environment environment)
                            (default-directory root))
-                       (setq server-process
-                             (omnigent-smoke--register-process
-                              run
-                              (omnigent-smoke--start-owned-process
-                               "omnigent-smoke-server"
-                               (list
-                                omnigent
-                                "server"
-                                "--host"
-                                "127.0.0.1"
-                                "--port"
-                                (number-to-string server-port)
-                                "--database-uri"
-                                (concat
-                                 "sqlite:///"
-                                 (expand-file-name "server.db" root))
-                                "--artifact-location"
-                                (expand-file-name "artifacts" root)
-                                "--no-open")
-                               server-log))))
+                       (setq
+                        server-process
+                        (omnigent-integration--register-process
+                         run
+                         (omnigent-integration--start-owned-process
+                          "omnigent-integration-server"
+                          (list
+                           omnigent
+                           "server"
+                           "--host"
+                           "127.0.0.1"
+                           "--port"
+                           (number-to-string server-port)
+                           "--database-uri"
+                           (concat
+                            "sqlite:///"
+                            (expand-file-name "server.db" root))
+                           "--artifact-location"
+                           (expand-file-name "artifacts" root)
+                           "--no-open")
+                          server-log))))
                      (let ((server-url
                             (format "http://127.0.0.1:%d"
                                     server-port)))
-                       (setf (omnigent-smoke-run-server-url run)
+                       (setf (omnigent-integration-run-server-url run)
                              server-url)
-                       (omnigent-smoke--wait-for-health
+                       (omnigent-integration--wait-for-health
                         server-url server-process server-log))))
                   (setq completed t)
                   run))
@@ -372,90 +379,94 @@ an `unwind-protect' cleanup clause."
              (signal (car error-data) (cdr error-data))))
         (unless completed
           (if run
-              (omnigent-smoke-stop run)
+              (omnigent-integration-stop run)
             (when (buffer-live-p mock-log)
               (kill-buffer mock-log))
             (when (file-directory-p root)
               (delete-directory root t))))))))
 
-(defun omnigent-smoke-stop (run)
+(defun omnigent-integration-stop (run)
   "Stop all processes and remove temporary resources owned by RUN."
-  (dolist (group-id (omnigent-smoke-run-process-groups run))
-    (omnigent-smoke--stop-process-group group-id))
-  (dolist (process (omnigent-smoke-run-processes run))
-    (omnigent-smoke--stop-process process))
-  (dolist (log (omnigent-smoke-run-logs run))
+  (dolist (group-id (omnigent-integration-run-process-groups run))
+    (omnigent-integration--stop-process-group group-id))
+  (dolist (process (omnigent-integration-run-processes run))
+    (omnigent-integration--stop-process process))
+  (dolist (log (omnigent-integration-run-logs run))
     (when (buffer-live-p log)
       (kill-buffer log)))
-  (when (file-directory-p (omnigent-smoke-run-root run))
-    (delete-directory (omnigent-smoke-run-root run) t)))
+  (when (file-directory-p (omnigent-integration-run-root run))
+    (delete-directory (omnigent-integration-run-root run) t)))
 
-(defun omnigent-smoke-run-harness (run harness agent prompt)
+(defun omnigent-integration-run-harness (run harness agent prompt)
   "Run HARNESS for AGENT with PROMPT against RUN's real Omnigent server.
 
 AGENT is an agent YAML file or directory accepted by `omnigent run'.
 Return the output buffer.  Its exit status is in
-`omnigent-smoke-exit-status'.  RUN owns the buffer and process for teardown."
+`omnigent-integration-exit-status'.  RUN owns the buffer and process for teardown."
   (let ((omnigent (executable-find "omnigent")))
     (unless omnigent
-      (error "The omnigent executable is required for smoke tests"))
-    (let ((buffer (generate-new-buffer " *omnigent-smoke-harness*")))
-      (push buffer (omnigent-smoke-run-logs run))
+      (error
+       "The omnigent executable is required for integration tests"))
+    (let ((buffer
+           (generate-new-buffer " *omnigent-integration-harness*")))
+      (push buffer (omnigent-integration-run-logs run))
       (let ((process-environment
-             (copy-sequence (omnigent-smoke-run-environment run)))
-            (default-directory (omnigent-smoke-run-root run))
+             (copy-sequence
+              (omnigent-integration-run-environment run)))
+            (default-directory (omnigent-integration-run-root run))
             (completed nil)
             process)
         (unwind-protect
             (progn
               (setq process
-                    (omnigent-smoke--register-process
+                    (omnigent-integration--register-process
                      run
-                     (omnigent-smoke--start-owned-process
-                      "omnigent-smoke-harness"
+                     (omnigent-integration--start-owned-process
+                      "omnigent-integration-harness"
                       (list
                        omnigent
                        "run"
                        agent
                        "--server"
-                       (omnigent-smoke-run-server-url run)
+                       (omnigent-integration-run-server-url run)
                        "--harness"
                        harness
                        "--model"
-                       omnigent-smoke--model
+                       omnigent-integration--model
                        "-p"
                        prompt)
                       buffer)))
               (let ((deadline
                      (+ (float-time)
-                        omnigent-smoke--harness-timeout)))
+                        omnigent-integration--harness-timeout)))
                 (while (and (process-live-p process)
                             (< (float-time) deadline))
                   (accept-process-output process 0.1)))
               (when (process-live-p process)
                 (error "Harness timed out after %s seconds"
-                       omnigent-smoke--harness-timeout))
+                       omnigent-integration--harness-timeout))
               (with-current-buffer buffer
-                (setq-local omnigent-smoke-exit-status
+                (setq-local omnigent-integration-exit-status
                             (process-exit-status process)))
               (setq completed t)
               buffer)
           (unless completed
             (when process
-              (omnigent-smoke--stop-process process
-                                            (process-id process)))
+              (omnigent-integration--stop-process process
+                                                  (process-id
+                                                   process)))
             (when (buffer-live-p buffer)
               (kill-buffer buffer))))))))
 
-(defmacro omnigent-smoke-with-run (variable &rest body)
+(defmacro omnigent-integration-with-run (variable &rest body)
   "Bind VARIABLE to an isolated run while evaluating BODY, then clean up."
   (declare (indent 1) (debug (symbolp body)))
-  `(let ((,variable (omnigent-smoke-start)))
+  `(let ((,variable (omnigent-integration-start)))
      (unwind-protect
          (progn
            ,@body)
-       (omnigent-smoke-stop ,variable))))
+       (omnigent-integration-stop ,variable))))
 
-(provide 'omnigent-smoke)
+(provide 'omnigent-integration-fixture)
 
-;;; omnigent-smoke.el ends here
+;;; omnigent-integration-fixture.el ends here

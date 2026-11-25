@@ -1,9 +1,11 @@
 # Integration testing
 
 `make integration-test` starts a real Omnigent server and the official local
-mock LLM server. The smoke test checks service health, checks that the mock serves the
-configured model, and checks cleanup. It does not run a harness request. `make
-unit-test` covers fixture mechanics without starting either server.
+mock LLM server. The integration tests cover service health and cleanup,
+session list setup, and session creation.
+
+`make unit-test` checks that the integration test fixtures isolate each run and
+clean up its resources. These checks can run without either server.
 
 ## Dependencies and setup
 

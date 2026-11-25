@@ -49,4 +49,4 @@ unit-test:
 	  --eval '(require (quote package))' \
 	  --eval '(setq package-user-dir (expand-file-name ".tools/test-elpa"))' \
 	  --eval '(package-initialize)' \
-	  -L . -L test -L test/integration -l test/omnigent-transport-test.el -l test/omnigent-test.el -l test/omnigent-sessions-test.el -l test/omnigent-conversation-test.el -l test/omnigent-workspace-test.el -l test/omnigent-ui-test.el -l test/omnigent-smoke-test.el -f ert-run-tests-batch-and-exit
+	  -L . -L test -L test/integration -l test/omnigent-transport-test.el -l test/omnigent-test.el -l test/omnigent-sessions-test.el -l test/omnigent-conversation-test.el -l test/omnigent-workspace-test.el -l test/omnigent-ui-test.el -l test/omnigent-integration-fixture-test.el -f ert-run-tests-batch-and-exit

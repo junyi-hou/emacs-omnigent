@@ -130,10 +130,10 @@ make test-deps
 make unit-test
 ```
 
-`make test-deps` installs the Emacs test packages in `.tools/test-elpa`.  For the live
-smoke test, run `make integration-deps` and then `make integration-test`. See the
-[integration testing guide](docs/integration-testing.md) for the required tools and
-checkout.
+`make test-deps` installs the Emacs test packages in `.tools/test-elpa`. To run
+the integration tests, run `make integration-deps` and then
+`make integration-test`. The [integration testing guide](docs/integration-testing.md)
+lists the required tools and checkout.
 
 The client can open at most 500 conversation buffers at once, because the server limits
 the WebSocket watch set to 500 sessions. This should be more than enough for normal use.
