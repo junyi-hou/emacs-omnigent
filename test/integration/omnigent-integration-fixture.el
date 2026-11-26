@@ -309,6 +309,10 @@ The process group keeps ownership of children if COMMAND exits first."
 (defvar omnigent-integration--server-agent nil
   "Function that writes a test agent under a run root and returns its path.")
 
+(defvar omnigent-integration--server-command nil
+  "Function that takes the Omnigent executable, run root, and port.
+Return the server command as a list of strings.  Nil uses the server CLI.")
+
 (defun omnigent-integration-start ()
   "Start isolated official mock and real Omnigent server resources.
 
@@ -439,27 +443,31 @@ an `unwind-protect' cleanup clause."
                          run
                          (omnigent-integration--start-owned-process
                           "omnigent-integration-server"
-                          (append
-                           (list
-                            omnigent
-                            "server"
-                            "--host"
-                            "127.0.0.1"
-                            "--port"
-                            (number-to-string server-port)
-                            "--database-uri"
-                            (concat
-                             "sqlite:///"
-                             (expand-file-name "server.db" root))
-                            "--artifact-location"
-                            (expand-file-name "artifacts" root)
-                            "--no-open")
-                           (when omnigent-integration--server-agent
-                             (list
-                              "--agent"
+                          (if omnigent-integration--server-command
                               (funcall
-                               omnigent-integration--server-agent
-                               root))))
+                               omnigent-integration--server-command
+                               omnigent root server-port)
+                            (append
+                             (list
+                              omnigent
+                              "server"
+                              "--host"
+                              "127.0.0.1"
+                              "--port"
+                              (number-to-string server-port)
+                              "--database-uri"
+                              (concat
+                               "sqlite:///"
+                               (expand-file-name "server.db" root))
+                              "--artifact-location"
+                              (expand-file-name "artifacts" root)
+                              "--no-open")
+                             (when omnigent-integration--server-agent
+                               (list
+                                "--agent"
+                                (funcall
+                                 omnigent-integration--server-agent
+                                 root)))))
                           server-log))))
                      (let ((server-url
                             (format "http://127.0.0.1:%d"
