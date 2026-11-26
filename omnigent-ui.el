@@ -7,8 +7,6 @@
 
 (require 'cl-lib)
 (require 'comint)
-(require 'color)
-(require 'svg)
 (require 'omnigent-conversation)
 (require 'omnigent-workspace)
 (require 'omnigent-options)
@@ -1346,103 +1344,64 @@ Signal an error if point is not in a foldable block."
              "m"
            "k"))))))
 
-(defun omnigent-ui--conversation-header-image (settings location)
-  "Draw the SETTINGS and LOCATION rows in a header image."
-  (let* ((height (frame-char-height))
-         (size (max 1 (/ (* height 4) 5)))
-         (width
-          (min (frame-pixel-width)
-               (+ 8
-                  (* size
-                     (max (string-width settings)
-                          (string-width location))))))
-         (foreground (face-foreground 'diff-header nil 'default))
-         (rgb (color-name-to-rgb foreground))
-         (fill
-          (if rgb
-              (apply #'color-rgb-to-hex (append rgb '(2)))
-            "#000000"))
-         (svg (svg-create width (+ (* 2 height) 3))))
-    (svg-text
-     svg
-     settings
-     :x 4
-     :y size
-     :font-family "monospace"
-     :font-size size
-     :fill fill)
-    (svg-text
-     svg
-     location
-     :x 4
-     :y (+ height size)
-     :font-family "monospace"
-     :font-size size
-     :fill fill)
-    (svg-image svg :ascent 'center)))
-
 (defun omnigent-ui--conversation-header ()
-  "Update the header from the current session settings and workspace."
+  "Update the header from the current session settings and context usage."
   (let* ((data omnigent-conversation-header-data)
          (workspace (alist-get 'workspace data))
-         (host
-          (and (stringp omnigent-conversation-host-id)
-               (ignore-errors
-                 (funcall omnigent-host-address-function
-                          omnigent-conversation-host-id))))
-         (address
-          (if (equal host "localhost")
-              (url-host (url-generic-parse-url omnigent-server-url))
-            host))
-         (role
-          (pcase (alist-get 'permission_level data)
-            (1 "[R] ")
-            (2 "[E] ")
-            ((or 3 4) "[M] ")
-            (_ "")))
-         (used (alist-get 'last_total_tokens data))
-         (window (alist-get 'context_window data))
-         (usage
-          (cond
-           ((and (numberp used) (numberp window) (> window 0))
-            (format "%s / %s (%.0f%%)"
-                    (omnigent-ui--token-count used)
-                    (omnigent-ui--token-count window)
-                    (* 100.0 (/ (float used) window))))
-           ((numberp used)
-            (format "%s / unknown" (omnigent-ui--token-count used)))
-           ((and (numberp window) (> window 0))
-            (format "unknown / %s" (omnigent-ui--token-count window)))
-           (t
-            "unknown")))
-         (settings
-          (format "%s | %s | %s | %s"
-                  (or (alist-get 'llm_model data) "unknown")
-                  (or (alist-get 'reasoning_effort data) "unknown")
-                  (or (alist-get 'access_mode data) "unknown")
-                  usage))
-         (location
-          (format "%s%s | %s"
-                  role
-                  (if (and (stringp address)
-                           (not (string-empty-p address)))
-                      address
-                    "unknown")
-                  (if (and (stringp workspace)
-                           (not (string-empty-p workspace)))
-                      workspace
-                    "unknown"))))
+         (folder
+          (and (stringp workspace)
+               (not (string-empty-p workspace))
+               (file-name-nondirectory
+                (directory-file-name workspace)))))
     (setq header-line-format
-          (if (and (display-graphic-p) (image-type-available-p 'svg))
-              (propertize " "
-                          'face 'diff-header 'display
-                          (omnigent-ui--conversation-header-image
-                           settings location)
-                          'help-echo (concat settings "\n" location))
-            (propertize (replace-regexp-in-string
-                         "%" "%%"
-                         (concat " " settings " | " location))
-                        'face 'diff-header 'line-spacing 3)))
+          (propertize (format " %s%s | %s | %s | %s | %s"
+                              (if (and folder
+                                       (not (string-empty-p folder)))
+                                  folder
+                                (if (equal workspace "/")
+                                    "/"
+                                  "unknown"))
+                              (pcase (alist-get
+                                      'permission_level data)
+                                (1 " [R]")
+                                (2 " [E]")
+                                ((or 3 4) " [M]")
+                                (_ ""))
+                              (or (alist-get 'llm_model data)
+                                  "unknown")
+                              (or (alist-get 'reasoning_effort data)
+                                  "unknown")
+                              (or (alist-get 'access_mode data)
+                                  "unknown")
+                              (let ((used
+                                     (alist-get
+                                      'last_total_tokens data))
+                                    (window
+                                     (alist-get
+                                      'context_window data)))
+                                (cond
+                                 ((and (numberp used)
+                                       (numberp window)
+                                       (> window 0))
+                                  (format "%s / %s (%.0f%%%%)"
+                                          (omnigent-ui--token-count
+                                           used)
+                                          (omnigent-ui--token-count
+                                           window)
+                                          (* 100.0
+                                             (/ (float used)
+                                                window))))
+                                 ((numberp used)
+                                  (format "%s / unknown"
+                                          (omnigent-ui--token-count
+                                           used)))
+                                 ((and (numberp window) (> window 0))
+                                  (format "unknown / %s"
+                                          (omnigent-ui--token-count
+                                           window)))
+                                 (t
+                                  "unknown"))))
+                      'face 'diff-header 'line-spacing 3))
     (force-mode-line-update)))
 
 (defvar-local omnigent-ui--busy-overlay nil)

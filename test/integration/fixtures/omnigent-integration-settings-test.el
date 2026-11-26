@@ -6,22 +6,15 @@
 (require 'omnigent)
 (require 'omnigent-integration-fixture)
 
-(defun omnigent-integration--wait-for-setting (id field value)
-  "Wait for session ID and the conversation header data to report VALUE for FIELD."
-  (let ((path (omnigent-transport--session-path id))
-        (header-field
-         (if (eq field 'model_override)
-             'llm_model
-           field)))
+(defun omnigent-integration--wait-for-setting (id field value header)
+  "Wait for session ID to report FIELD as VALUE and display HEADER."
+  (let ((path (omnigent-transport--session-path id)))
     (omnigent-integration--wait
      (lambda ()
-       (and
-        (equal
-         (alist-get header-field omnigent-conversation-header-data)
-         value)
-        (equal
-         (alist-get field (omnigent-integration--get-json path))
-         value))))))
+       (and (string-prefix-p header header-line-format)
+            (equal
+             (alist-get field (omnigent-integration--get-json path))
+             value))))))
 
 (defun omnigent-integration--send-slash (command)
   "Submit slash COMMAND from the conversation composer."
@@ -142,19 +135,29 @@
                    (omnigent-integration--wait-for-setting
                     id
                     'model_override
-                    (omnigent-integration--wait (lambda () model)))
+                    (omnigent-integration--wait (lambda () model))
+                    (format " %s | " model))
                    (call-interactively
                     #'omnigent-conversation-set-effort)
                    (omnigent-integration--wait-for-setting
-                    id 'reasoning_effort "high"))
+                    id
+                    'reasoning_effort
+                    "high"
+                    (format " %s | high | " model)))
                  (omnigent-integration--send-slash "/effort low")
                  (omnigent-integration--wait-for-setting
-                  id 'reasoning_effort "low")
+                  id
+                  'reasoning_effort
+                  "low"
+                  (format " %s | low | " model))
                  (should alternate-model)
                  (omnigent-integration--send-slash
                   (concat "/model " alternate-model))
                  (omnigent-integration--wait-for-setting
-                  id 'model_override alternate-model)
+                  id
+                  'model_override
+                  alternate-model
+                  (format " %s | " alternate-model))
                  (should (string-suffix-p "> " (buffer-string)))
                  (omnigent-integration--check-other-slash-commands
                   id))))
