@@ -488,7 +488,9 @@ MESSAGE-ID identifies the native preview that ITEM finalizes."
     (not omnigent-conversation--loading)
     (or omnigent-conversation--invalid
         omnigent-conversation--permission-read-only)
-    omnigent-conversation--sandbox-status)))
+    (member
+     (alist-get 'stage omnigent-conversation--sandbox-status)
+     '("failed" "action_required")))))
 
 (defun omnigent-conversation-ready-p ()
   "Return non-nil when the current conversation can submit composer text."

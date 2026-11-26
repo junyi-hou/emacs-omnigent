@@ -504,12 +504,16 @@
       (insert "draft")
       (omnigent-conversation--snapshot
        200 (cons '(sandbox_status (stage . "cloning")) snapshot))
-      (should buffer-read-only)
+      (should-not buffer-read-only)
       (should (timerp omnigent-ui--busy-timer))
       (should
        (string-match-p
         "Cloning repositories"
         (overlay-get omnigent-ui--sandbox-overlay 'before-string)))
+      (omnigent-conversation--event
+       "session.sandbox_status" '((stage . "action_required")))
+      (should buffer-read-only)
+      (should-not omnigent-ui--busy-timer)
       (omnigent-conversation--event
        "session.sandbox_status"
        '((stage . "failed") (error . "Provider unavailable")))

@@ -124,7 +124,10 @@ request behavior.
 Open a managed session or fork when the server returns its ID. Show an
 animated status block before the composer while the agent starts. Keep
 the status outside the saved transcript and preserve any composer text.
-The composer is read-only while provisioning.
+Once the conversation loads, users can edit the composer and send a message
+while provisioning continues. The server queues the message until the agent
+can receive it. Keep the composer read-only if provisioning fails or requires
+user action.
 
 Use the snapshot's `sandbox_status` on open and after reconnect. Update
 the block from `session.sandbox_status` events. On `ready`, remove the

@@ -30,7 +30,7 @@
     (overlay-get omnigent-ui--sandbox-overlay 'before-string)))
 
 (ert-deftest omnigent-integration-managed-provisioning ()
-  "Watch a managed session start and become editable with a local launcher."
+  "Queue a message in a managed session before the local launcher is ready."
   (let ((omnigent-integration--server-command
          #'omnigent-integration--managed-server-command)
         (omnigent-integration--server-environment
@@ -47,6 +47,8 @@
            (omnigent-session-default-sandbox-provider "modal")
            (omnigent-session-default-agent "codex-native-ui")
            (omnigent--create-draft nil)
+           (prompt "Managed session queued prompt")
+           (draft "Managed session draft")
            id
            buffer)
        (save-window-excursion
@@ -78,7 +80,6 @@
                                  (string-match-p
                                   "Provisioning sandbox" display)
                                  display))))))
-                   (should buffer-read-only)
                    (omnigent-integration--wait
                     (lambda ()
                       (let ((display
@@ -90,11 +91,37 @@
                (with-current-buffer buffer
                  (omnigent-integration--wait
                   (lambda ()
-                    (and buffer-read-only
+                    (and (omnigent-conversation-ready-p)
                          (string-match-p
                           "Provisioning sandbox"
                           (or (omnigent-integration--sandbox-display)
                               "")))))
+                 (goto-char (point-max))
+                 (insert prompt)
+                 (call-interactively (key-binding (kbd "C-c C-c")))
+                 (omnigent-integration--wait
+                  (lambda ()
+                    (and (omnigent-conversation-ready-p)
+                         (omnigent-integration--message-position
+                          (concat "[queued] > " prompt)))))
+                 (let ((session
+                        (omnigent-integration--get-json
+                         (omnigent-transport--session-path id))))
+                   (should
+                    (equal
+                     (alist-get
+                      'stage (alist-get 'sandbox_status session))
+                     "provisioning"))
+                   (should
+                    (equal
+                     (mapcar
+                      (lambda (item)
+                        (alist-get
+                         'text (car (alist-get 'content item))))
+                      (alist-get 'pending_inputs session))
+                     (list prompt))))
+                 (goto-char (point-max))
+                 (insert draft)
                  (omnigent-integration--post-json
                   (concat
                    omnigent-server-url "/__test/provision/release")
@@ -105,11 +132,9 @@
                      (not buffer-read-only)
                      (not (omnigent-integration--sandbox-display))))
                   30)
-                 (goto-char (point-max))
-                 (insert "Managed session draft")
                  (should
                   (string-suffix-p
-                   "> Managed session draft" (buffer-string)))))
+                   (concat "> " draft) (buffer-string)))))
            (when (buffer-live-p buffer)
              (kill-buffer buffer))
            (ignore-errors
