@@ -198,9 +198,12 @@ headings and interrupt markers. Apply Markdown to ready messages and highlight
 composer text according to [markdown-rendering.md](markdown-rendering.md).  Do
 not add a plan panel in v1.
 
-Show the workspace folder name, role, model, reasoning effort, access mode, and context
-window usage in the conversation header. Do not show the harness or session name in the
-header. The buffer name shows the session name. Show unknown values when the server does
+Show the model, reasoning effort, permission mode, and context usage on the
+first row of the conversation header. Show the session role, host address, and
+full workspace path on the second row. Resolve the host address with
+`omnigent-host-address-function` and the session's host ID. Use one text row
+when Emacs cannot display SVG images. Show the session name in the buffer name
+and omit the harness from the header. Show unknown values when the server does
 not report them. Update the header from session snapshots and stream events.
 
 ## Elicitations

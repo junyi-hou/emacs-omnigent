@@ -284,36 +284,42 @@
        #'omnigent-ui--token-count
        '(10 1000 1001 1200 1000000 1050001))
       '("10" "1k" "1.1k" "1.2k" "1m" "1.1m")))
-    (omnigent-conversation--snapshot
-     200
-     '((title . "Test session")
-       (workspace . "/srv/project/")
-       (harness . "codex-native")
-       (llm_model . "model-a")
-       (reasoning_effort . "high")
-       (labels
-        . ((omnigent.codex_native.approval_mode . "read-only")))
-       (last_total_tokens . 100)
-       (context_window . 1000)
-       (items . [])
-       (pending_inputs . [])
-       (pending_elicitations . [])))
-    (should
-     (equal
-      header-line-format
-      " project | model-a | high | read-only | 100 / 1k (10%%)"))
-    (omnigent-conversation--event
-     "session.model" '((model . "model-b")))
-    (omnigent-conversation--event
-     "session.reasoning_effort" '((reasoning_effort . "low")))
-    (omnigent-conversation--event
-     "session.codex_approval_mode" '((approval_mode . "full-access")))
-    (omnigent-conversation--event
-     "session.usage" '((context_tokens . 250)))
-    (should
-     (equal
-      header-line-format
-      " project | model-b | low | full-access | 250 / 1k (25%%)"))
+    (let ((omnigent-host-address-function
+           (lambda (id)
+             (should (equal id "runner-id"))
+             "runner.example")))
+      (omnigent-conversation--snapshot
+       200
+       '((title . "Test session")
+         (workspace . "/srv/project/")
+         (host_id . "runner-id")
+         (harness . "codex-native")
+         (llm_model . "model-a")
+         (reasoning_effort . "high")
+         (labels
+          . ((omnigent.codex_native.approval_mode . "read-only")))
+         (last_total_tokens . 100)
+         (context_window . 1000)
+         (items . [])
+         (pending_inputs . [])
+         (pending_elicitations . [])))
+      (should
+       (equal
+        header-line-format
+        " model-a | high | read-only | 100 / 1k (10%%) | runner.example | /srv/project/"))
+      (omnigent-conversation--event
+       "session.model" '((model . "model-b")))
+      (omnigent-conversation--event
+       "session.reasoning_effort" '((reasoning_effort . "low")))
+      (omnigent-conversation--event
+       "session.codex_approval_mode"
+       '((approval_mode . "full-access")))
+      (omnigent-conversation--event
+       "session.usage" '((context_tokens . 250)))
+      (should
+       (equal
+        header-line-format
+        " model-b | low | full-access | 250 / 1k (25%%) | runner.example | /srv/project/")))
     (omnigent-conversation--event
      "response.completed"
      '((response
@@ -344,6 +350,45 @@
      "response.completed"
      '((response . ((usage . ((total_tokens . 512)))))))
     (should (string-match-p "512 / 4.1k (12%%)" header-line-format))))
+
+(ert-deftest omnigent-ui-conversation-header-draws-two-svg-rows ()
+  "Draw settings and location on separate rows with literal header text."
+  (omnigent-ui-test--conversation
+    (let ((omnigent-conversation-header-data
+           '((llm_model . "model")
+             (reasoning_effort . "high")
+             (access_mode . "read-only")
+             (last_total_tokens . 10)
+             (context_window . 100)
+             (permission_level . 3)
+             (workspace . "/srv/R&D/100%")))
+          (omnigent-conversation-host-id "runner-id")
+          (omnigent-host-address-function
+           (lambda (_id) "runner.example")))
+      (cl-letf (((symbol-function 'display-graphic-p)
+                 (lambda (&rest _) t))
+                ((symbol-function 'image-type-available-p)
+                 (lambda (_) t))
+                ((symbol-function 'color-name-to-rgb)
+                 (lambda (_) '(0 0 0))))
+        (omnigent-ui--conversation-header))
+      (let* ((image (get-text-property 0 'display header-line-format))
+             (svg (plist-get (cdr image) :data)))
+        (should (eq (plist-get (cdr image) :type) 'svg))
+        (should
+         (string-match-p
+          (regexp-quote
+           "model | high | read-only | 10 / 100 (10%)</text>")
+          svg))
+        (should
+         (string-match-p
+          (regexp-quote
+           "[M] runner.example | /srv/R&amp;D/100%</text>")
+          svg))
+        (should
+         (equal
+          (get-text-property 0 'help-echo header-line-format)
+          "model | high | read-only | 10 / 100 (10%)\n[M] runner.example | /srv/R&D/100%"))))))
 
 (ert-deftest omnigent-ui-message-label-faces ()
   "Use the prompt face for user and agent labels."
@@ -700,7 +745,8 @@
        (pending_inputs . [])
        (pending_elicitations . [])))
     (should buffer-read-only)
-    (should (string-prefix-p " unknown [R] |" header-line-format))
+    (should
+     (string-suffix-p " | [R] unknown | unknown" header-line-format))
     (should-error (insert "more") :type 'buffer-read-only)
     (should-error (omnigent-conversation-send) :type 'user-error)
     (should-error (omnigent-conversation-interrupt) :type 'user-error)
@@ -713,7 +759,8 @@
        (pending_inputs . [])
        (pending_elicitations . [])))
     (should-not buffer-read-only)
-    (should (string-prefix-p " unknown [E] |" header-line-format))
+    (should
+     (string-suffix-p " | [E] unknown | unknown" header-line-format))
     (should
      (equal
       (buffer-substring-no-properties
@@ -725,7 +772,9 @@
        (items . [])
        (pending_inputs . [])
        (pending_elicitations . [])))
-    (should (string-prefix-p " unknown [M] |" header-line-format))))
+    (should
+     (string-suffix-p
+      " | [M] unknown | unknown" header-line-format))))
 
 (ert-deftest omnigent-ui-transcript-stream-preserves-composer-and-fold
     ()
