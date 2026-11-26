@@ -515,8 +515,24 @@ an `unwind-protect' cleanup clause."
                     (and state (not (equal state "Z")))))
                 descendants))
          (null descendants))))
-    (when (file-directory-p (omnigent-integration-run-root run))
-      (delete-directory (omnigent-integration-run-root run) t))))
+    (let ((root (omnigent-integration-run-root run))
+          (deadline (+ (float-time) 2)))
+      (while (and root (file-directory-p root))
+        (condition-case error-data
+            (progn
+              (delete-directory root t)
+              (setq root nil))
+          (file-error
+           ;; A detached process can create an entry after Emacs lists
+           ;; a directory and before it removes that directory.
+           (unless (and (equal
+                         (nth 1 error-data) "Removing directory")
+                        (string-equal-ignore-case
+                         (or (nth 2 error-data) "")
+                         "Directory not empty")
+                        (< (float-time) deadline))
+             (signal (car error-data) (cdr error-data)))
+           (sleep-for 0.05)))))))
 
 (defun omnigent-integration--session-row (id)
   "Return the position of the session list row for ID."

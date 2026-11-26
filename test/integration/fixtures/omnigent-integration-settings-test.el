@@ -11,7 +11,7 @@
   (let ((path (omnigent-transport--session-path id)))
     (omnigent-integration--wait
      (lambda ()
-       (and (string-search header header-line-format)
+       (and (string-prefix-p header header-line-format)
             (equal
              (alist-get field (omnigent-integration--get-json path))
              value))))))
@@ -136,20 +136,20 @@
                     id
                     'model_override
                     (omnigent-integration--wait (lambda () model))
-                    (format " | %s | " model))
+                    (format " %s | " model))
                    (call-interactively
                     #'omnigent-conversation-set-effort)
                    (omnigent-integration--wait-for-setting
                     id
                     'reasoning_effort
                     "high"
-                    (format " | %s | high | " model)))
+                    (format " %s | high | " model)))
                  (omnigent-integration--send-slash "/effort low")
                  (omnigent-integration--wait-for-setting
                   id
                   'reasoning_effort
                   "low"
-                  (format " | %s | low | " model))
+                  (format " %s | low | " model))
                  (should alternate-model)
                  (omnigent-integration--send-slash
                   (concat "/model " alternate-model))
@@ -157,7 +157,7 @@
                   id
                   'model_override
                   alternate-model
-                  (format " | %s | " alternate-model))
+                  (format " %s | " alternate-model))
                  (should (string-suffix-p "> " (buffer-string)))
                  (omnigent-integration--check-other-slash-commands
                   id))))
