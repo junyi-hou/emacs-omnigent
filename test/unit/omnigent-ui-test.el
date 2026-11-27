@@ -504,12 +504,16 @@
       (insert "draft")
       (omnigent-conversation--snapshot
        200 (cons '(sandbox_status (stage . "cloning")) snapshot))
-      (should buffer-read-only)
+      (should-not buffer-read-only)
       (should (timerp omnigent-ui--busy-timer))
       (should
        (string-match-p
         "Cloning repositories"
         (overlay-get omnigent-ui--sandbox-overlay 'before-string)))
+      (omnigent-conversation--event
+       "session.sandbox_status" '((stage . "action_required")))
+      (should buffer-read-only)
+      (should-not omnigent-ui--busy-timer)
       (omnigent-conversation--event
        "session.sandbox_status"
        '((stage . "failed") (error . "Provider unavailable")))
@@ -1746,6 +1750,26 @@
       (buffer-substring-no-properties
        (point-min) omnigent-ui--request-start)
       "You:\nHello\n\n"))))
+
+(ert-deftest omnigent-ui-transcript-renders-error-messages ()
+  "Show committed diagnostic messages and live error text in the transcript."
+  (omnigent-ui-test--conversation
+    (omnigent-conversation--snapshot
+     200
+     '((items
+        .
+        [((id . "diagnostic")
+          (type . "error")
+          (message . "Model unavailable."))])
+       (pending_inputs . []) (pending_elicitations . [])))
+    (omnigent-conversation--event
+     "response.error" '((error . "Live stream error.")))
+    (omnigent-ui--transcript-render)
+    (should
+     (equal
+      (buffer-substring-no-properties
+       (point-min) omnigent-ui--request-start)
+      "Error:\nModel unavailable.\n\nError:\nLive stream error.\n\n"))))
 
 (ert-deftest omnigent-ui-scrolled-transcript-keeps-reading-position ()
   "Preserve point by item ID when transcript output is refreshed above the composer."

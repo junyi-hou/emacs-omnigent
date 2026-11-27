@@ -1525,11 +1525,12 @@ AFTER is the cursor used for the current page."
 (defvar omnigent--conversation-submitted-draft nil)
 
 (defvar-local omnigent--conversation-command-catalog-requested nil)
-(defvar-local omnigent--conversation-command-skills nil)
+(defvar-local omnigent--conversation-command-skills nil
+  "Alist of cached skill commands and their descriptions.")
 
 (defun omnigent--conversation-command-catalog-result
     (buffer status body)
-  "Cache skill names from STATUS and BODY in BUFFER."
+  "Cache skill commands and descriptions from STATUS and BODY in BUFFER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (if (and (omnigent-transport-success-p status)
@@ -1542,7 +1543,10 @@ AFTER is the cursor used for the current page."
           (progn
             (setq omnigent--conversation-command-skills
                   (mapcar
-                   (lambda (skill) (alist-get 'name skill))
+                   (lambda (skill)
+                     (cons
+                      (concat "/" (alist-get 'name skill))
+                      (alist-get 'description skill)))
                    (append (alist-get 'skills body) nil)))
             (when (> (length (alist-get 'warnings body)) 0)
               (message "Skill discovery incomplete: %s"
@@ -1560,20 +1564,30 @@ AFTER is the cursor used for the current page."
                (string-match-p
                 "\\`/[^[:space:]/]*\\'"
                 (buffer-substring-no-properties start (point))))
-      (list
-       start (point)
-       (mapcar
-        (lambda (name) (concat "/" name))
-        (append
-         '("model"
-           "effort"
-           "new"
-           "clear"
-           "compact"
-           "btw"
-           "side")
-         omnigent--conversation-command-skills))
-       :exclusive 'no))))
+      (let ((commands
+             (append
+              '(("/model" . "[name] Select or set the session model.")
+                ("/effort"
+                 .
+                 "[level] Select or set the reasoning effort.")
+                ("/new" . "Create a session.")
+                ("/clear"
+                 .
+                 "Start a fresh session in the same workspace.")
+                ("/compact" . "Compact the session context.")
+                ("/btw" . "[question] Open a private side chat.")
+                ("/side" . "[question] Open a private side chat."))
+              omnigent--conversation-command-skills)))
+        (list
+         start (point) (delete-dups (mapcar #'car commands))
+         :annotation-function
+         (lambda (candidate)
+           (let ((description (cdr (assoc candidate commands))))
+             (when (stringp description)
+               (let ((words (split-string description)))
+                 (when words
+                   (concat "  " (string-join words " ")))))))
+         :exclusive 'no)))))
 
 (define-key
  omnigent-conversation-mode-map

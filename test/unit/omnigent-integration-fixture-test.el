@@ -56,6 +56,28 @@
     (should-not (file-exists-p root))
     (should-not (buffer-live-p log))))
 
+(ert-deftest omnigent-integration-stop-retries-nonempty-directory ()
+  "Retry cleanup when a late write makes the fixture directory nonempty."
+  (let* ((root (make-temp-file "omnigent-integration-stop-test-" t))
+         (run (omnigent-integration--make-run :root root))
+         (delete (symbol-function 'delete-directory))
+         attempted)
+    (unwind-protect
+        (cl-letf (((symbol-function 'delete-directory)
+                   (lambda (directory &optional recursive trash)
+                     (when (and (equal directory root)
+                                (not attempted))
+                       (setq attempted t)
+                       (make-directory
+                        (expand-file-name "late-write" root))
+                       (funcall delete directory))
+                     (funcall delete directory recursive trash))))
+          (omnigent-integration-stop run)
+          (should attempted)
+          (should-not (file-exists-p root)))
+      (when (file-directory-p root)
+        (delete-directory root t)))))
+
 (ert-deftest omnigent-integration-harness-uses-agent-and-owned-process
     ()
   "Pass the agent path to the CLI and retain the harness output for teardown."
