@@ -1,9 +1,8 @@
 # Workspace Changes Data Design
 
 **Status:** Diff and listing operations are implemented in
-[omnigent-workspace.el](../omnigent-workspace.el). Change-list caching and refresh
-coordination remain proposed. This document describes workspace data processing,
-not presentation or transport.
+[omnigent-workspace.el](../omnigent-workspace.el). The frontend caches change
+lists per session. This document describes workspace data processing.
 Use the APIs in [transport.md](transport.md) for server requests and responses.
 
 ## Decision
@@ -90,18 +89,18 @@ payloads are specified above. Diff generation requires the `diff` executable.
 
 ## Change-list cache and refresh
 
-Keep a separate change-list cache for each session. Fetch the selected session's list on
-selection and on `session.changed_files.invalidated` events. The frontend can also
-request a manual refresh. Coalesce overlapping refreshes for the same session: allow at
+Keep a separate change-list cache for each session. Refresh lists for known
+sessions in the sidebar and when a conversation is selected. See
+[frontend.md](frontend.md) for refresh triggers. Coalesce overlapping refreshes for the same session: allow at
 most one fetch at a time, and schedule one follow-up fetch if an invalidation or manual
 refresh arrives while it runs. A failed fetch leaves the cached list unchanged. Results
 for one session must not overwrite another session's cache. Clear cached state on server
-disconnect. This coordination is proposed, not yet implemented.
+disconnect.
 
 ## Scope
 
 Rendering, buffer selection, and file-opening commands belong in
-[frontend.md](frontend.md); the workspace UI remains open for discussion. Git staging,
+[frontend.md](frontend.md). Git staging,
 commits, persistent snapshots, and session-exclusive change attribution are out of
 scope.
 

@@ -141,6 +141,7 @@ Nil leaves the conversation buffer undisplayed."
     (require 'text-mode)
     (set-keymap-parent map text-mode-map)
     (define-key map (kbd "C-c C-c") #'omnigent-conversation-send)
+    (define-key map (kbd "M-RET") #'omnigent-ui-workspace)
     (define-key map (kbd "C-c C-k") #'omnigent-conversation-interrupt)
     (define-key map (kbd "C-c C-r") #'omnigent-conversation-reconnect)
     (define-key map (kbd "C-c C-f") #'omnigent-conversation-fork)
@@ -162,6 +163,7 @@ Nil leaves the conversation buffer undisplayed."
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map special-mode-map)
     (define-key map (kbd "RET") #'omnigent-ui-sessions-open)
+    (define-key map (kbd "M-RET") #'omnigent-ui-workspace)
     (define-key map (kbd "TAB") #'omnigent-ui-toggle-tree)
     (define-key map (kbd "<tab>") #'omnigent-ui-toggle-tree)
     (define-key map (kbd "m") #'omnigent-ui-move-session)
@@ -179,19 +181,6 @@ Nil leaves the conversation buffer undisplayed."
     (define-key map (kbd "C-c C-n") #'omnigent-sessions-create)
     map)
   "Keymap for `omnigent-ui-sessions-mode'."
-  :type 'keymap
-  :group 'omnigent)
-
-(defcustom omnigent-ui-workspace-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map special-mode-map)
-    (define-key map (kbd "RET") #'omnigent-ui-workspace-diff)
-    (define-key map (kbd "f") #'omnigent-ui-workspace-visit-file)
-    (define-key map (kbd "g") #'omnigent-ui-workspace-refresh)
-    (define-key
-     map (kbd "C-c C-g") #'omnigent-ui-workspace-magit-status)
-    map)
-  "Keymap for the workspace side view."
   :type 'keymap
   :group 'omnigent)
 
@@ -222,17 +211,21 @@ Configure this function when a runner is on a different host."
   :group 'omnigent)
 
 (defcustom omnigent-side-window-width 0.25
-  "Initial width of the session and workspace side windows.
+  "Initial width of the session side window.
 An integer specifies columns; a float specifies a fraction of frame width.
 When nil, let Emacs choose the width."
   :type '(choice (const :tag "Emacs default" nil) integer float)
   :group 'omnigent)
 
-(defcustom omnigent-workspace-window-height 15
-  "Initial height of the workspace side window.
-An integer specifies lines; a float specifies a fraction of frame height.
-When nil, let Emacs choose the height."
-  :type '(choice (const :tag "Emacs default" nil) integer float)
+(defcustom omnigent-ui-workspace-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map special-mode-map)
+    (define-key map (kbd "RET") #'omnigent-ui-workspace-visit)
+    (define-key map (kbd "d") #'omnigent-ui-workspace-diff)
+    (define-key map (kbd "g") #'omnigent-ui-workspace-reload)
+    map)
+  "Keymap for the Omnigent workspace buffer."
+  :type 'keymap
   :group 'omnigent)
 
 (defcustom omnigent-workspace-diff-mode #'diff-mode
