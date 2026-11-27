@@ -153,9 +153,7 @@ Unsent drafts are lost, but agents continue to run on their execution hosts."
       (dolist (window (window-list frame))
         (when (and (window-parameter window 'window-side)
                    (with-current-buffer (window-buffer window)
-                     (derived-mode-p
-                      'omnigent-ui-sessions-mode
-                      'omnigent-ui-workspace-mode)))
+                     (derived-mode-p 'omnigent-ui-sessions-mode)))
           (delete-window window)))))
   (omnigent-ui-reset)
   (message "Disconnected from Omnigent"))
@@ -2407,13 +2405,17 @@ When EFFORT is nil, prompt with the current model's supported levels."
    #'omnigent-conversation--interrupted))
 
 (defun omnigent-ui-sessions-open ()
-  "Open the session at point."
+  "Open the session or its workspace at point."
   (interactive)
-  (let* ((id (omnigent-ui--session-id-at-point))
-         (session (and id (omnigent-sessions-row id))))
-    (unless session
-      (user-error "No session at point"))
-    (omnigent-ui-open id (alist-get 'title session))))
+  (if-let* ((resource
+             (get-text-property
+              (line-beginning-position) 'omnigent-ui-resource)))
+    (omnigent-ui-workspace (car resource))
+    (let* ((id (omnigent-ui--session-id-at-point))
+           (session (and id (omnigent-sessions-row id))))
+      (unless session
+        (user-error "No session at point"))
+      (omnigent-ui-open id (alist-get 'title session)))))
 
 (defun omnigent-ui--project-heading ()
   "Return the position of the project heading for the current line."
@@ -2437,7 +2439,7 @@ When EFFORT is nil, prompt with the current model's supported levels."
                 (delete project omnigent-ui--folded-projects)
               (cons project omnigent-ui--folded-projects)))
       (omnigent-ui-sessions-render))
-     ((and id (omnigent-sessions-children id))
+     ((and id (omnigent-ui--session-branch-p id))
       (setq omnigent-ui--folded-sessions
             (if (member id omnigent-ui--folded-sessions)
                 (delete id omnigent-ui--folded-sessions)
@@ -2669,12 +2671,14 @@ When DIRECTION is undo or redo, move the entry between history lists."
        (append
         '((side . left) (slot . -1))
         (when omnigent-side-window-width
-          `((window-width . ,omnigent-side-window-width))))))))
+          `((window-width . ,omnigent-side-window-width)))))
+      (omnigent-ui--refresh-resources))))
 
 (defun omnigent-ui-refresh ()
-  "Refresh the root list and the child lists of open conversations."
+  "Refresh the session tree and its PR and workspace rows."
   (interactive)
   (omnigent-sessions-refresh)
+  (omnigent-ui--refresh-resources t)
   (dolist (entry omnigent-sessions--buffers)
     (omnigent-sessions-refresh-children (car entry))))
 
@@ -3110,31 +3114,58 @@ Call ON-SEND, if non-nil, when the fork is ready to submit the question."
  omnigent-ui-workspace-mode
  special-mode
  "Omnigent Workspace"
- "Show changed workspace-relative paths for one session."
+ "Visit pull requests and changed files for a session."
  (setq-local truncate-lines t))
 
-(defun omnigent-ui-workspace ()
-  "Show or hide the selected session's workspace panel."
+(defun omnigent-ui-workspace (&optional id)
+  "Open the workspace buffer for ID or the session at point."
   (interactive)
-  (unless omnigent-ui--selected-session
-    (user-error "Select a session first"))
-  (if omnigent-ui--workspace-visible
-      (progn
-        (omnigent-ui--workspace-hide)
-        (setq omnigent-ui--workspace-closed t))
-    (setq
-     omnigent-ui--workspace-closed nil
-     omnigent-ui--workspace-visible t)
-    (omnigent-ui--workspace-display)
-    (omnigent-ui-workspace-refresh)))
+  (let ((id
+         (or id
+             (omnigent-ui--session-id-at-point)
+             (car
+              (get-text-property
+               (line-beginning-position) 'omnigent-ui-resource))
+             (and (derived-mode-p 'omnigent-conversation-mode)
+                  omnigent-conversation-session-id))))
+    (unless id
+      (user-error "No session at point"))
+    (let ((buffer
+           (get-buffer-create
+            (format "*omnigent-workspace: %s*" id))))
+      (with-current-buffer buffer
+        (unless (derived-mode-p 'omnigent-ui-workspace-mode)
+          (omnigent-ui-workspace-mode)
+          (setq omnigent-ui--workspace-id id)
+          (omnigent-ui--workspace-render id)))
+      (pop-to-buffer buffer)
+      (omnigent-ui-workspace-reload))))
+
+(defun omnigent-ui-workspace-reload ()
+  "Refresh pull requests and changed files for this workspace."
+  (interactive)
+  (omnigent-ui--refresh-pull-requests omnigent-ui--workspace-id)
+  (omnigent-ui-workspace-refresh omnigent-ui--workspace-id))
+
+(defun omnigent-ui-workspace-visit ()
+  "Visit the pull request or changed file at point."
+  (interactive)
+  (pcase (get-text-property
+          (line-beginning-position) 'omnigent-ui-workspace-item)
+    (`(pr . ,url) (browse-url url))
+    (`(file . ,path)
+     (let ((file
+            (omnigent-ui--workspace-filename
+             omnigent-ui--workspace-id path)))
+       (unless (file-exists-p file)
+         (user-error "File unavailable. Press d to view its diff"))
+       (find-file file)))
+    ('(diff) (omnigent-ui-workspace-diff))
+    (_ (user-error "No workspace item at point"))))
 
 (defun omnigent-ui-workspace-refresh (&optional id)
-  "Refresh workspace ID, or the current panel, coalescing concurrent requests."
-  (interactive)
-  (setq id
-        (or id
-            omnigent-ui--workspace-id
-            omnigent-ui--selected-session))
+  "Refresh workspace ID or the selected session, coalescing concurrent requests."
+  (setq id (or id omnigent-ui--selected-session))
   (when id
     (if (gethash id omnigent-ui--workspace-pending)
         (puthash id t omnigent-ui--workspace-again)
@@ -3150,33 +3181,42 @@ Call ON-SEND, if non-nil, when the fork is ready to submit the question."
            (remhash id omnigent-ui--workspace-pending)))))))
 
 (defun omnigent-ui-workspace-diff ()
-  "Fetch a fresh file or combined diff for the selected workspace row."
+  "Fetch a fresh diff for the workspace item at point."
   (interactive)
-  (let ((id omnigent-ui--workspace-id)
-        (path
-         (get-text-property
-          (line-beginning-position) 'omnigent-ui-path)))
-    (unless (and id path)
-      (user-error "No changed file at point"))
-    (let ((callback
-           (apply-partially #'omnigent-ui--diff-result id path)))
-      (condition-case nil
-          (if (eq path :all)
-              (omnigent-workspace-diff id callback)
-            (omnigent-workspace-file-diff id path callback))
-        (error
-         nil)))))
-
-(defun omnigent-ui-workspace-visit-file ()
-  "Visit the changed file at point in its workspace."
-  (interactive)
-  (let ((id omnigent-ui--workspace-id)
-        (path
-         (get-text-property
-          (line-beginning-position) 'omnigent-ui-path)))
-    (unless (and id (stringp path))
-      (user-error "No changed file at point"))
-    (find-file (omnigent-ui--workspace-filename id path))))
+  (let* ((item
+          (get-text-property
+           (line-beginning-position) 'omnigent-ui-workspace-item))
+         (id omnigent-ui--workspace-id)
+         (buffer (current-buffer))
+         (generation omnigent-transport--generation)
+         (target (or (cdr item) :all))
+         (callback
+          (lambda (status diff)
+            (when (and (= generation omnigent-transport--generation)
+                       (buffer-live-p buffer))
+              (omnigent-ui--diff-result id target status diff)))))
+    (pcase item
+      (`(pr . ,url)
+       (omnigent-transport--request
+        id "GET"
+        (omnigent-transport--session-path
+         id
+         (concat
+          "/resources/github/diff?pr_url=" (url-hexify-string url)))
+        (lambda (status body)
+          (if (and (omnigent-transport-success-p status)
+                   (listp body)
+                   (stringp (alist-get 'patch body)))
+              (funcall callback status (alist-get 'patch body))
+            (when (and (= generation omnigent-transport--generation)
+                       (buffer-live-p buffer))
+              (message "%s"
+                       (omnigent-transport-error-message
+                        "Fetch PR diff" status body)))))))
+      (`(file . ,path)
+       (omnigent-workspace-file-diff id path callback))
+      ('(diff) (omnigent-workspace-diff id callback))
+      (_ (user-error "No workspace item at point")))))
 
 (defun omnigent-ui-workspace-magit-status ()
   "Open Magit status for the workspace of the current diff buffer."

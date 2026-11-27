@@ -152,8 +152,8 @@ checks do not remove the subscription gap described above.
   ordinary network outages or bypass authentication. Authentication recovery needs
   the separate authentication design.
 - An unavailable session follows the session-management removal policy: stop its stream
-  retries, freeze its conversation and drafts as read-only, and close its workspace
-  panel. Do not report deletion or infer it from list omission or a REST 404, which can
+  retries, freeze its conversation and drafts as read-only, and clear its cached
+  PRs and workspace changes. Do not report deletion or infer it from list omission or a REST 404, which can
   also represent lost access.
 - Closing a conversation or selecting another server cancels its recovery work.
   Late callbacks must not revive a stopped stream or update another server's state.

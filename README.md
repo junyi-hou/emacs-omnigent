@@ -30,7 +30,7 @@ What works:
 - Conversation state, snapshot parsing, and message and interrupt requests
   (`omnigent-conversation.el`).
 
-- Optional session and workspace side windows, streamed plain-text transcripts,
+- An optional session sidebar, streamed plain-text transcripts,
   collapsed tool and reasoning blocks, and inline elicitation forms (`omnigent-ui.el`).
 
 ## Installation
@@ -72,9 +72,11 @@ Install `curl` for session streams and `diff` for workspace patches.
    expand or collapse their bodies.
 4. Use `TAB` and `S-TAB` to navigate elicitation fields and actions. Secret fields use a
    masked minibuffer prompt, not clear text in the transcript.
-5. Run `M-x omnigent-ui-workspace` to show or hide workspace changes. Use `RET` for a
-   fresh file or combined diff, or `g` to refresh the file list. The panel opens
-   automatically for changed files until you close it yourself.
+5. Press `M-RET` on a session or in its conversation to open its workspace.
+   You can also click or press `RET` on its `[workspace]` sidebar row.
+   In the workspace, press `RET` to visit a linked PR or changed file, `d` to
+   view its diff, or `g` to refresh. The `[workspace diff]` row opens the
+   combined diff.
 6. Run `M-x omnigent-disconnect` to stop client connections and close conversation and
    workspace buffers. This discards unsent drafts but does not stop agents.
 
