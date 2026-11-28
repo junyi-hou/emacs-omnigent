@@ -23,6 +23,8 @@
 
 ## Coding workflow
 
+Follow this workflow through merge and branch cleanup.
+
 1. Add or update unit tests to specify the expected behavior.
 2. Implement the feature or fix.
 3. Run `make unit-test` locally. Fix failures and rerun it until all unit tests
@@ -43,13 +45,14 @@
 
 ## External actions
 
-The coding workflow gives the agent permission to commit changes for the task,
-push its branch, and open and merge its pull request. It also gives permission
-to delete the local and remote task branches after the pull request merges.
-These actions need no separate confirmation when the agent follows the workflow
-and commit message format above. This permission takes precedence over general
-restrictions on these actions for this repository. Follow the existing rules for
-other external actions.
+For coding tasks in this repository, the workflow authorizes the Git and GitHub
+actions it lists. This authorization takes precedence over general restrictions
+on those actions. Ask before taking any other external action.
+
+If the sandbox blocks an authorized step, request sandbox approval for that step.
+This includes write access to Git metadata and network access to GitHub. If
+approval is denied or unavailable, complete the steps that can still run and
+report the exact step that remains blocked.
 
 ## Tests
 
