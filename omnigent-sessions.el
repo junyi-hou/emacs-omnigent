@@ -1191,6 +1191,7 @@ When RETURN-ROW is non-nil, pass the selected agent row for a choice."
         payload)
     (dolist (field fields)
       (when (and (cdr field)
+                 (not (eq (car field) 'excluded_pull_requests))
                  (not
                   (memq
                    (car field)
@@ -1205,6 +1206,20 @@ When RETURN-ROW is non-nil, pass the selected agent row for a choice."
     (omnigent-transport-request
      "POST" "/v1/sessions"
      (lambda (status body)
+       (when-let* ((success (omnigent-transport-success-p status))
+                   (id (and (listp body) (alist-get 'id body)))
+                   ((stringp id)))
+         (dolist (url (alist-get 'excluded_pull_requests fields))
+           (omnigent-transport--request
+            id "DELETE"
+            (omnigent-transport--session-path
+             id
+             (concat "/pull-requests?url=" (url-hexify-string url)))
+            (lambda (unlink-status unlink-body)
+              (unless (omnigent-transport-success-p unlink-status)
+                (omnigent-sessions--error
+                 "Exclude source pull request" unlink-status
+                 unlink-body))))))
        (funcall (or callback #'omnigent-sessions--created)
                 status
                 (if (and managed

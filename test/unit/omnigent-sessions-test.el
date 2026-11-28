@@ -431,6 +431,62 @@
         (omnigent-sessions-create)
         (should-not (assoc "project_id" payload))))))
 
+(ert-deftest omnigent-sessions-create-from-linked-pr-workspace ()
+  "Reuse the workspace and exclude source PRs on the new session."
+  (let ((omnigent-session-default-host-type "external")
+        (omnigent-session-default-host nil)
+        (omnigent-session-default-workspace nil)
+        (omnigent-session--pull-requests
+         (make-hash-table :test 'equal))
+        (omnigent-sessions
+         '(((id . "source")
+            (host_id . "host")
+            (workspace . "/pr-checkout")
+            (project_id . "project")
+            (pull_request (url . "https://example.com/pr/42")))))
+        (status 201)
+        payload
+        unlinks)
+    (puthash
+     "source"
+     '(((url . "https://example.com/pr/42"))
+       ((url . "https://example.com/pr/43")))
+     omnigent-session--pull-requests)
+    (cl-letf (((symbol-function 'omnigent-sessions--read-agent)
+               (lambda (_generation callback &rest _)
+                 (funcall callback "agent")))
+              ((symbol-function 'omnigent-sessions--created) #'ignore)
+              ((symbol-function 'omnigent-transport--request)
+               (lambda (id method path callback &optional data)
+                 (if (equal method "POST")
+                     (progn
+                       (should (equal path "/v1/sessions"))
+                       (setq payload data)
+                       (funcall callback status '((id . "new"))))
+                   (should (equal method "DELETE"))
+                   (should (equal id "new"))
+                   (push path unlinks)
+                   (funcall callback 200 nil)))))
+      (with-temp-buffer
+        (setq major-mode 'omnigent-session-mode)
+        (insert (propertize "Source" 'omnigent-session-id "source"))
+        (goto-char (point-min))
+        (omnigent-sessions-create)
+        (should
+         (equal (cdr (assoc "workspace" payload)) "/pr-checkout"))
+        (should (equal (cdr (assoc "project_id" payload)) "project"))
+        (should-not (assoc "excluded_pull_requests" payload))
+        (should
+         (equal
+          unlinks
+          '("/v1/sessions/new/pull-requests?url=https%3A%2F%2Fexample.com%2Fpr%2F43"
+            "/v1/sessions/new/pull-requests?url=https%3A%2F%2Fexample.com%2Fpr%2F42")))
+        (setq
+         unlinks nil
+         status 500)
+        (omnigent-sessions-create)
+        (should-not unlinks)))))
+
 (ert-deftest omnigent-sessions-create-from-file-uses-buffer-workspace
     ()
   "Send the project root or buffer directory without a server project."
