@@ -136,20 +136,59 @@
                         ("codex-native-ui" . ,second-reply)))))
                    (ert-info
                     ("Compare the entire recovered transcript with the server")
-                    (omnigent-integration--wait
-                     (lambda ()
-                       (and
-                        (> (omnigent-stream-attempt stream) attempt)
-                        (process-live-p
-                         (omnigent-stream-process stream))
-                        (not buffer-read-only)
-                        (omnigent-integration--message-position
-                         "section24")
-                        (eq
-                         (omnigent-integration--session-row-face id)
-                         'omnigent-session-idle)))
-                     (+ omnigent-transport--reconnect-min-delay
-                        omnigent-transport-connect-timeout))
+                    (condition-case nil
+                        (omnigent-integration--wait
+                         (lambda ()
+                           ;; Snapshot recovery can replace the stream.
+                           (let ((current-stream
+                                  omnigent-conversation--stream))
+                             (and
+                              current-stream
+                              (or (not (eq current-stream stream))
+                                  (> (omnigent-stream-attempt
+                                      current-stream)
+                                     attempt))
+                              (process-live-p
+                               (omnigent-stream-process
+                                current-stream))
+                              (not buffer-read-only)
+                              (omnigent-integration--message-position
+                               "section24")
+                              (eq
+                               (omnigent-integration--session-row-face
+                                id)
+                               'omnigent-session-idle))))
+                         (+ omnigent-transport--reconnect-min-delay
+                            omnigent-transport-connect-timeout))
+                      (ert-test-failed
+                       (let* ((current-stream
+                               omnigent-conversation--stream)
+                              (current-process
+                               (and current-stream
+                                    (omnigent-stream-process
+                                     current-stream))))
+                         (ert-fail
+                          (list
+                           "Timed out waiting for stream recovery"
+                           :original-attempt attempt
+                           :stream-replaced
+                           (not (eq current-stream stream))
+                           :current-attempt
+                           (and current-stream
+                                (omnigent-stream-attempt
+                                 current-stream))
+                           :process-status
+                           (and current-process
+                                (process-status current-process))
+                           :read-only buffer-read-only
+                           :reply-recovered
+                           (and
+                            (omnigent-integration--message-position
+                             "section24")
+                            t)
+                           :session-face
+                           (omnigent-integration--session-row-face
+                            id))))))
                     (should
                      (equal
                       (buffer-substring-no-properties
