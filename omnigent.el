@@ -453,13 +453,7 @@ Run `omnigent-sessions-change-hook' on success, or the error hook on failure."
 With a prefix argument EDIT, open the session creation menu."
   (interactive "P")
   (let* ((id (omnigent-session--session-id-at-point))
-         (session
-          (and id
-               (cl-find
-                id
-                (omnigent-sessions-visible)
-                :key (lambda (row) (alist-get 'id row))
-                :test #'equal)))
+         (session (and id (omnigent-sessions-row id)))
          (host
           (or (alist-get 'host_id session)
               (and (derived-mode-p 'omnigent-conversation-mode)
@@ -481,6 +475,16 @@ With a prefix argument EDIT, open the session creation menu."
          (configured-host (alist-get 'host_id fields)))
     (when (stringp project)
       (setf (alist-get 'project_id fields) project))
+    (when (and id (derived-mode-p 'omnigent-session-mode))
+      (setf (alist-get 'excluded_pull_requests fields)
+            (delete-dups
+             (delq
+              nil
+              (cons
+               (alist-get 'url (alist-get 'pull_request session))
+               (mapcar
+                (lambda (pr) (alist-get 'url pr))
+                (gethash id omnigent-session--pull-requests)))))))
     (unless (equal (alist-get 'host_type fields) "managed")
       (unless configured-host
         (setf (alist-get 'host_id fields) host))
