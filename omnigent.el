@@ -48,6 +48,7 @@
   (setq
    omnigent--idle-timer nil
    omnigent-session--selected-session nil)
+  (omnigent-session--stop-resource-timer)
   (clrhash omnigent-session--pull-requests)
   (clrhash omnigent-session--pull-requests-pending)
   (clrhash omnigent-session--resource-checked)

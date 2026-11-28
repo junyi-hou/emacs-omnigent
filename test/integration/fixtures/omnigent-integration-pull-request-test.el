@@ -113,12 +113,12 @@
                  (omnigent-integration--pull-request-numbers source)
                  '(42)))
                (with-current-buffer "*omnigent-sessions*"
-                 (omnigent-session--refresh-resources t)
                  (goto-char
                   (omnigent-integration--wait
                    (lambda ()
                      (omnigent-integration--pull-request-row
-                      source 42))))
+                      source 42))
+                   65))
                  (let (opened-url)
                    (cl-letf (((symbol-function 'browse-url)
                               (lambda (url &rest _)

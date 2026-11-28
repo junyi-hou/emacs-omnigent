@@ -278,10 +278,11 @@ Read linked PRs from `GET /v1/sessions/{id}/pull-requests`. This endpoint
 returns the status last fetched by the server's runner or host. Read the PR
 patch from `GET /v1/sessions/{id}/resources/github/diff?pr_url=...`.
 When the sidebar opens or the session list updates, check the known sessions
-and their known descendants. Limit automatic sidebar checks to one per
-session every 30 seconds. Use `g` in the sidebar to refresh on demand.
-Refresh PRs when the session stream reports terminal status. Keep cached rows
-on request failure.
+and their known descendants. Repeat the check every 30 seconds while the
+sidebar is visible. Limit automatic sidebar checks to one per session
+every 30 seconds. Use `g` in the sidebar to refresh on demand. Refresh PRs
+when the session stream reports terminal status. Keep cached rows on request
+failure.
 
 Display PR diffs through Emacs window selection rules. Reuse one diff buffer
 per session and PR. Use `omnigent-workspace-diff-mode` to set its mode. Use
