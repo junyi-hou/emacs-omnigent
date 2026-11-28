@@ -293,8 +293,9 @@ message if the fetch succeeds with an empty patch.
 Bind `C-c C-g` in the conversation and session list to show changes for the
 session. The default command fetches the workspace patch on demand. Use
 `omnigent-workspace-diff-mode` to display the patch in a diff buffer. A custom
-`omnigent-workspace-diff-function` receives the session ID and runs with the
-mapped workspace as its default directory.
+`omnigent-workspace-diff-function` receives the unified diff string after a
+successful fetch. It runs with the mapped workspace as its default directory
+when available.
 
 ## Nongoals
 

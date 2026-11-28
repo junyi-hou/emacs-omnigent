@@ -3157,20 +3157,17 @@ Call ON-SEND, if non-nil, when the fork is ready to submit the question."
 (defun omnigent-workspace-diff ()
   "Show changes for the current session using the configured function."
   (interactive)
-  (let ((id (omnigent-workspace--session-at-point)))
-    (if (eq
-         omnigent-workspace-diff-function
-         #'omnigent-workspace-show-diff)
-        (omnigent-workspace-show-diff id)
-      (let ((default-directory
-             (or (omnigent-conversation--default-directory id t)
-                 (user-error
-                  "Session workspace directory is unavailable"))))
-        (funcall omnigent-workspace-diff-function id)))))
+  (omnigent-workspace--display-diff
+   (omnigent-workspace--session-at-point)
+   omnigent-workspace-diff-function))
 
 (defun omnigent-workspace-show-diff (id)
-  "Fetch and display the server's workspace diff for session ID."
+  "Fetch the workspace diff for session ID and display it in a buffer."
   (interactive (list (omnigent-workspace--session-at-point)))
+  (omnigent-workspace--display-diff id nil))
+
+(defun omnigent-workspace--display-diff (id display)
+  "Fetch the workspace diff for ID and pass the patch to DISPLAY."
   (let ((generation omnigent-transport--generation)
         (buffer (current-buffer)))
     (omnigent-workspace--fetch-diff
@@ -3178,25 +3175,36 @@ Call ON-SEND, if non-nil, when the fork is ready to submit the question."
      (lambda (status result)
        (when (and (= generation omnigent-transport--generation)
                   (buffer-live-p buffer))
-         (if (omnigent-transport-success-p status)
-             (omnigent-ui--diff-result id :workspace status result)
+         (cond
+          ((not (omnigent-transport-success-p status))
            (message "%s"
                     (omnigent-transport-error-message
-                     "Fetch workspace diff" status result))))))))
-
-(defun omnigent-ui-workspace-magit-status ()
-  "Open Magit status for the workspace of the current diff buffer."
-  (interactive)
-  (let ((directory
-         (and omnigent-ui--workspace-id
-              (omnigent-conversation--default-directory
-               omnigent-ui--workspace-id
-               t))))
-    (unless directory
-      (user-error "No workspace for this buffer"))
-    (unless (require 'magit nil t)
-      (user-error "Magit is not installed"))
-    (magit-status directory)))
+                     "Fetch workspace diff" status result)))
+          ((string-empty-p result)
+           (message "No diff available for this workspace"))
+          (t
+           (let ((directory
+                  (or (ignore-errors
+                        (omnigent-conversation--default-directory id
+                                                                  t))
+                      (buffer-local-value 'default-directory buffer)))
+                 (diff-buffer
+                  (get-buffer-create
+                   (format "*omnigent-diff: %s:workspace*" id))))
+             (with-current-buffer diff-buffer
+               (setq default-directory directory)
+               (unwind-protect
+                   (funcall (or display
+                                (eval
+                                 (car
+                                  (get
+                                   'omnigent-workspace-diff-function
+                                   'standard-value))
+                                 t))
+                            result)
+                 (when (buffer-live-p diff-buffer)
+                   (with-current-buffer diff-buffer
+                     (setq omnigent-ui--workspace-id id)))))))))))))
 
 (provide 'omnigent)
 ;;; omnigent.el ends here

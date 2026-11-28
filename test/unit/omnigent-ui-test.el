@@ -1254,7 +1254,7 @@
           (kill-buffer buffer))))))
 
 (ert-deftest omnigent-ui-workspace-diff-keymaps ()
-  "Use the session workspace for a custom diff command in both buffers."
+  "Run the patch handler in the session diff buffer from both keymaps."
   (let ((omnigent-sessions
          '(((id . "diff-test")
             (title . "Diff test")
@@ -1263,23 +1263,39 @@
         (omnigent-host-address-function (lambda (_) "127.0.0.1"))
         calls)
     (let ((omnigent-workspace-diff-function
-           (lambda (id) (push (list id default-directory) calls))))
-      (omnigent-ui-test--conversation
-        (setq omnigent-conversation-session-id "diff-test")
-        (call-interactively (key-binding (kbd "C-c C-g"))))
-      (unwind-protect
-          (with-current-buffer (get-buffer-create
-                                "*omnigent-sessions*")
-            (omnigent-ui-sessions-mode)
-            (omnigent-ui-sessions-render)
-            (goto-char (point-min))
-            (should (search-forward "Diff test" nil t))
-            (call-interactively (key-binding (kbd "C-c C-g"))))
-        (kill-buffer "*omnigent-sessions*")))
+           (lambda (patch)
+             (push (list
+                    patch default-directory (buffer-name))
+                   calls))))
+      (cl-letf (((symbol-function 'omnigent-workspace--fetch-diff)
+                 (lambda (id callback)
+                   (should (equal id "diff-test"))
+                   (funcall callback 200 "workspace patch"))))
+        (omnigent-ui-test--conversation
+          (setq omnigent-conversation-session-id "diff-test")
+          (call-interactively (key-binding (kbd "C-c C-g"))))
+        (unwind-protect
+            (with-current-buffer (get-buffer-create
+                                  "*omnigent-sessions*")
+              (omnigent-ui-sessions-mode)
+              (omnigent-ui-sessions-render)
+              (goto-char (point-min))
+              (should (search-forward "Diff test" nil t))
+              (call-interactively (key-binding (kbd "C-c C-g"))))
+          (kill-buffer "*omnigent-sessions*")
+          (when-let* ((buffer
+                       (get-buffer
+                        "*omnigent-diff: diff-test:workspace*")))
+            (kill-buffer buffer)))))
     (should
      (equal
       calls
-      '(("diff-test" "/workspace/") ("diff-test" "/workspace/"))))))
+      '(("workspace patch"
+         "/workspace/"
+         "*omnigent-diff: diff-test:workspace*")
+        ("workspace patch"
+         "/workspace/"
+         "*omnigent-diff: diff-test:workspace*"))))))
 
 (ert-deftest
     omnigent-ui-workspace-diff-fetches-and-displays-server-patch
@@ -1301,21 +1317,23 @@
                               200
                               '((before . "old\n")
                                 (after . "new\n"))))))
-                ((symbol-function 'omnigent-ui--diff-result)
-                 (lambda (id target status patch)
-                   (setq displayed (list id target status patch)))))
+                ((symbol-function 'pop-to-buffer)
+                 (lambda (buffer &rest _) (setq displayed buffer))))
         (call-interactively (key-binding (kbd "C-c C-g")))
         (should
          (equal
           (nreverse paths)
           '("/v1/sessions/conv_test/resources/environments/default/changes"
             "/v1/sessions/conv_test/resources/environments/default/diff/src/some%20file")))
-        (should
-         (equal (seq-take displayed 3) '("conv_test" :workspace 200)))
-        (should (string-search "-old\n+new\n" (nth 3 displayed)))))))
+        (should (buffer-live-p displayed))
+        (unwind-protect
+            (with-current-buffer displayed
+              (should (equal omnigent-ui--workspace-id "conv_test"))
+              (should (string-search "-old\n+new\n" (buffer-string))))
+          (kill-buffer displayed))))))
 
 (ert-deftest omnigent-ui-workspace-diff-directory ()
-  "Use the mapped workspace root for the diff buffer and Magit."
+  "Use the mapped workspace root for the diff buffer."
   (save-window-excursion
     (let ((omnigent-sessions
            '(((id . "mapping")
@@ -1331,22 +1349,7 @@
             (setq buffer (current-buffer))
             (should
              (equal
-              default-directory "/ssh:runner.example:/workspace/"))
-            (should
-             (eq
-              (key-binding (kbd "C-c C-g"))
-              #'omnigent-ui-workspace-magit-status))
-            (let (status-directory)
-              (cl-letf (((symbol-function 'require)
-                         (lambda (&rest _) t))
-                        ((symbol-function 'magit-status)
-                         (lambda (directory &rest _)
-                           (setq status-directory directory))))
-                (call-interactively
-                 #'omnigent-ui-workspace-magit-status))
-              (should
-               (equal
-                status-directory "/ssh:runner.example:/workspace/"))))
+              default-directory "/ssh:runner.example:/workspace/")))
         (when (buffer-live-p buffer)
           (kill-buffer buffer))))))
 

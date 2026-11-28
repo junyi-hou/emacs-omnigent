@@ -89,12 +89,8 @@ Press `C-c C-g` in a conversation or on its session row to fetch and display
 the workspace patch. Use `M-x omnigent-workspace-show-diff` to call the
 server-backed command directly. The patch uses `diff-mode` by default.
 
-To open Magit with the same key, set:
-
-```elisp
-(setq omnigent-workspace-diff-function
-      (lambda (&rest _) (call-interactively #'magit-status)))
-```
+Set `omnigent-workspace-diff-function` to a function that takes one unified
+diff string to customize how the command displays the patch.
 
 ### Side chat
 

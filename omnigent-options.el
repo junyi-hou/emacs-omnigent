@@ -219,10 +219,29 @@ When nil, let Emacs choose the width."
   :group 'omnigent)
 
 (defcustom omnigent-workspace-diff-function
-  #'omnigent-workspace-show-diff
-  "Function called with the session ID to display workspace changes.
-For a custom function, the command binds `default-directory' to the workspace.
-For Magit, use (lambda (&rest _) (call-interactively #'magit-status))."
+  (lambda (patch)
+    "Insert PATCH into the current diff buffer and display it."
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (insert patch)
+      (funcall omnigent-workspace-diff-mode)
+      (setq buffer-read-only t)
+      (goto-char (point-min)))
+    (pop-to-buffer (current-buffer)))
+  "Function called with one nonempty unified workspace patch string.
+The current buffer is the session's diff buffer.  Its `default-directory'
+is the mapped workspace when available.
+The default function inserts the patch and displays the buffer.
+
+To open Magit status instead when the workspace is a Git repository:
+
+  (setq omnigent-workspace-diff-function
+        (lambda (_patch)
+          (require 'magit)
+          (magit-status default-directory)))
+
+Omnigent still fetches the patch first and calls the function only when
+the patch is nonempty.  Magit shows changes from the workspace repository."
   :type 'function
   :group 'omnigent)
 

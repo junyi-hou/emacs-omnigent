@@ -598,13 +598,6 @@
             (erase-buffer)
             (insert diff)
             (funcall omnigent-workspace-diff-mode)
-            (let ((map (make-sparse-keymap)))
-              (set-keymap-parent map (current-local-map))
-              (define-key
-               map
-               (kbd "C-c C-g")
-               #'omnigent-ui-workspace-magit-status)
-              (use-local-map map))
             (when-let* ((root
                          (ignore-errors
                            (omnigent-conversation--default-directory
