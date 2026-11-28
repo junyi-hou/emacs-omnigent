@@ -1662,7 +1662,7 @@
         (kill-buffer buffer)))))
 
 (ert-deftest omnigent-session-pr-status-faces ()
-  "Keep the PR number linked and underline each status in its own face."
+  "Apply the status face to the full clickable PR label."
   (let ((omnigent-session--pull-requests
          (make-hash-table :test 'equal))
         (url "https://github.com/example/project/pull/42"))
@@ -1678,13 +1678,19 @@
         (omnigent-session--insert-session-row
          '((id . "items") (title . "Fix parser")) 80 0 nil)
         (goto-char (point-min))
-        (search-forward "PR #42 ")
-        (should (eq (get-text-property (- (point) 2) 'face) 'link))
-        (should
-         (equal
-          (get-text-property (point) 'face)
-          `(:inherit ,(cdr entry) :underline t)))
-        (should (button-at (point)))))))
+        (search-forward (format "PR #42 [%s]" (downcase (car entry))))
+        (let ((button (button-at (1- (point)))))
+          (should button)
+          (should
+           (equal
+            (button-label button)
+            (format "PR #42 [%s]" (downcase (car entry)))))
+          (should-not
+           (text-property-not-all
+            (button-start button)
+            (button-end button)
+            'face
+            (cdr entry))))))))
 
 (ert-deftest omnigent-session-pr-diff ()
   "Use the owning session on a PR row and fetch the PR patch with d."
