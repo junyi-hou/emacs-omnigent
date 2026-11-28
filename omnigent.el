@@ -2834,11 +2834,17 @@ When DIRECTION is undo or redo, move the entry between history lists."
                 (when (and (derived-mode-p 'omnigent-ui-sessions-mode)
                            (not (eq (alist-get 'archived session) t)))
                   (save-excursion
+                    (while (get-text-property
+                            (line-beginning-position)
+                            'omnigent-ui-resource)
+                      (forward-line -1))
                     (forward-line 1)
-                    (or (omnigent-ui--session-id-at-point)
+                    (or (get-text-property
+                         (point) 'omnigent-ui-session-id)
                         (progn
                           (forward-line -2)
-                          (omnigent-ui--session-id-at-point)))))))
+                          (get-text-property
+                           (point) 'omnigent-ui-session-id)))))))
     (if (derived-mode-p 'omnigent-ui-sessions-mode)
         (omnigent-ui--run-session-action
          "Toggle archive"

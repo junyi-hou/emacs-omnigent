@@ -64,9 +64,10 @@
     'omnigent-ui-session-idle)))
 
 (defun omnigent-ui--session-id-at-point ()
-  "Return the session ID at point."
-  (get-text-property
-   (line-beginning-position) 'omnigent-ui-session-id))
+  "Return the session ID for the session or linked PR at point."
+  (let ((start (line-beginning-position)))
+    (or (get-text-property start 'omnigent-ui-session-id)
+        (car (get-text-property start 'omnigent-ui-resource)))))
 
 (defun omnigent-ui--session-age (updated-at)
   "Return a short age label for UPDATED-AT."
@@ -131,8 +132,7 @@
       (let* ((resource
               (get-text-property
                (line-beginning-position) 'omnigent-ui-resource))
-             (id
-              (or (omnigent-ui--session-id-at-point) (car resource)))
+             (id (omnigent-ui--session-id-at-point))
              (project
               (or (omnigent-ui--project-at-point)
                   (get-text-property

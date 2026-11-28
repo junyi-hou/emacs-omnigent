@@ -1634,7 +1634,7 @@
         (kill-buffer buffer)))))
 
 (ert-deftest omnigent-ui-session-pr-diff ()
-  "Fetch the patch for the PR at point when the user presses d."
+  "Use the owning session on a PR row and fetch the PR patch with d."
   (let ((omnigent-ui--pull-requests (make-hash-table :test 'equal))
         (omnigent-sessions '(((id . "items") (title . "Fix parser"))))
         (url "https://github.com/example/project/pull/42")
@@ -1648,6 +1648,11 @@
           (omnigent-ui-sessions-mode)
           (omnigent-ui-sessions-render)
           (should (search-forward "#42" nil t))
+          (should
+           (equal (omnigent-workspace--session-at-point) "items"))
+          (should
+           (equal
+            (omnigent-ui--action-target) '("items" . "Fix parser")))
           (cl-letf
               (((symbol-function 'omnigent-transport--request)
                 (lambda (id method path callback &optional _)
