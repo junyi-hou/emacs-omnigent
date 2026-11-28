@@ -1659,9 +1659,11 @@ AFTER is the cursor used for the current page."
       (omnigent-transport-stop-session-stream
        omnigent-conversation--stream))))
 
-(defun omnigent-conversation--default-directory (id)
-  "Return the local workspace directory for session ID.
-Use the current project root when the session workspace is unavailable."
+(defun omnigent-conversation--default-directory
+    (id &optional workspace-only)
+  "Return the mapped workspace directory for session ID.
+If WORKSPACE-ONLY is non-nil, return nil when workspace details are missing.
+Otherwise, fall back to the current project root or directory."
   (let* ((session (omnigent-sessions-row id))
          (workspace (alist-get 'workspace session))
          (host-id (alist-get 'host_id session)))
@@ -1672,10 +1674,11 @@ Use the current project root when the session workspace is unavailable."
         (file-name-as-directory
          (omnigent-workspace-local-filename
           workspace "" (omnigent-workspace-host-mapping host-id)))
-      (let ((project (project-current nil)))
-        (if project
-            (project-root project)
-          default-directory)))))
+      (unless workspace-only
+        (let ((project (project-current nil)))
+          (if project
+              (project-root project)
+            default-directory))))))
 
 (defvar-local omnigent-conversation--directory-pending nil
   "Non-nil when the session workspace is not yet available.")
@@ -1773,11 +1776,7 @@ When SIDE-CHAT is non-nil, skip skill completion discovery."
          matches)
     (dolist (session (omnigent-sessions-visible))
       (let* ((id (alist-get 'id session))
-             (root
-              (or (alist-get
-                   'root
-                   (gethash id omnigent-ui--workspace-cache))
-                  (alist-get 'workspace session)))
+             (root (alist-get 'workspace session))
              (host (alist-get 'host_id session)))
         (when (and (stringp root) (stringp host) (stringp id))
           (let ((mapped
@@ -2405,12 +2404,12 @@ When EFFORT is nil, prompt with the current model's supported levels."
    #'omnigent-conversation--interrupted))
 
 (defun omnigent-ui-sessions-open ()
-  "Open the session or its workspace at point."
+  "Open the session or linked PR at point."
   (interactive)
   (if-let* ((resource
              (get-text-property
               (line-beginning-position) 'omnigent-ui-resource)))
-    (omnigent-ui-workspace (car resource))
+    (browse-url (cdr resource))
     (let* ((id (omnigent-ui--session-id-at-point))
            (session (and id (omnigent-sessions-row id))))
       (unless session
@@ -2675,7 +2674,7 @@ When DIRECTION is undo or redo, move the entry between history lists."
       (omnigent-ui--refresh-resources))))
 
 (defun omnigent-ui-refresh ()
-  "Refresh the session tree and its PR and workspace rows."
+  "Refresh the session tree and its PR rows."
   (interactive)
   (omnigent-sessions-refresh)
   (omnigent-ui--refresh-resources t)
@@ -3110,124 +3109,88 @@ Call ON-SEND, if non-nil, when the fork is ready to submit the question."
        (apply-partially #'omnigent-ui--action-result
                         "Delete" title)))))
 
-(define-derived-mode
- omnigent-ui-workspace-mode
- special-mode
- "Omnigent Workspace"
- "Visit pull requests and changed files for a session."
- (setq-local truncate-lines t))
-
-(defun omnigent-ui-workspace (&optional id)
-  "Open the workspace buffer for ID or the session at point."
+(defun omnigent-ui-pull-request-diff ()
+  "Fetch and display the diff for the linked PR at point."
   (interactive)
-  (let ((id
-         (or id
-             (omnigent-ui--session-id-at-point)
-             (car
-              (get-text-property
-               (line-beginning-position) 'omnigent-ui-resource))
-             (and (derived-mode-p 'omnigent-conversation-mode)
-                  omnigent-conversation-session-id))))
-    (unless id
-      (user-error "No session at point"))
-    (let ((buffer
-           (get-buffer-create
-            (format "*omnigent-workspace: %s*" id))))
-      (with-current-buffer buffer
-        (unless (derived-mode-p 'omnigent-ui-workspace-mode)
-          (omnigent-ui-workspace-mode)
-          (setq omnigent-ui--workspace-id id)
-          (omnigent-ui--workspace-render id)))
-      (pop-to-buffer buffer)
-      (omnigent-ui-workspace-reload))))
+  (pcase-let ((`(,id . ,url)
+               (or (get-text-property
+                    (line-beginning-position) 'omnigent-ui-resource)
+                   (user-error "No pull request at point")))
+              (buffer (current-buffer))
+              (generation omnigent-transport--generation))
+    (omnigent-transport--request
+     id "GET"
+     (omnigent-transport--session-path
+      id
+      (concat
+       "/resources/github/diff?pr_url=" (url-hexify-string url)))
+     (lambda (status body)
+       (when (and (= generation omnigent-transport--generation)
+                  (buffer-live-p buffer)
+                  (cl-find
+                   url
+                   (gethash id omnigent-ui--pull-requests)
+                   :key (lambda (pr) (alist-get 'url pr))
+                   :test #'equal))
+         (if (and (omnigent-transport-success-p status)
+                  (listp body)
+                  (stringp (alist-get 'patch body)))
+             (omnigent-ui--diff-result
+              id url status (alist-get 'patch body))
+           (message "%s"
+                    (omnigent-transport-error-message
+                     "Fetch PR diff" status body))))))))
 
-(defun omnigent-ui-workspace-reload ()
-  "Refresh pull requests and changed files for this workspace."
+(defun omnigent-workspace--session-at-point ()
+  "Return the conversation's session ID or the session ID at point."
+  (or (if (derived-mode-p 'omnigent-conversation-mode)
+          omnigent-conversation-session-id
+        (omnigent-ui--session-id-at-point))
+      (user-error "No session at point")))
+
+(defun omnigent-workspace-diff ()
+  "Show changes for the current session using the configured function."
   (interactive)
-  (omnigent-ui--refresh-pull-requests omnigent-ui--workspace-id)
-  (omnigent-ui-workspace-refresh omnigent-ui--workspace-id))
+  (let ((id (omnigent-workspace--session-at-point)))
+    (if (eq
+         omnigent-workspace-diff-function
+         #'omnigent-workspace-show-diff)
+        (omnigent-workspace-show-diff id)
+      (let ((default-directory
+             (or (omnigent-conversation--default-directory id t)
+                 (user-error
+                  "Session workspace directory is unavailable"))))
+        (funcall omnigent-workspace-diff-function id)))))
 
-(defun omnigent-ui-workspace-visit ()
-  "Visit the pull request or changed file at point."
-  (interactive)
-  (pcase (get-text-property
-          (line-beginning-position) 'omnigent-ui-workspace-item)
-    (`(pr . ,url) (browse-url url))
-    (`(file . ,path)
-     (let ((file
-            (omnigent-ui--workspace-filename
-             omnigent-ui--workspace-id path)))
-       (unless (file-exists-p file)
-         (user-error "File unavailable. Press d to view its diff"))
-       (find-file file)))
-    ('(diff) (omnigent-ui-workspace-diff))
-    (_ (user-error "No workspace item at point"))))
-
-(defun omnigent-ui-workspace-refresh (&optional id)
-  "Refresh workspace ID or the selected session, coalescing concurrent requests."
-  (setq id (or id omnigent-ui--selected-session))
-  (when id
-    (if (gethash id omnigent-ui--workspace-pending)
-        (puthash id t omnigent-ui--workspace-again)
-      (let ((token (make-symbol "workspace-fetch")))
-        (puthash id token omnigent-ui--workspace-pending)
-        (condition-case nil
-            (omnigent-workspace-list
-             id
-             (apply-partially
-              #'omnigent-ui--workspace-result
-              id omnigent-transport--generation token))
-          (error
-           (remhash id omnigent-ui--workspace-pending)))))))
-
-(defun omnigent-ui-workspace-diff ()
-  "Fetch a fresh diff for the workspace item at point."
-  (interactive)
-  (let* ((item
-          (get-text-property
-           (line-beginning-position) 'omnigent-ui-workspace-item))
-         (id omnigent-ui--workspace-id)
-         (buffer (current-buffer))
-         (generation omnigent-transport--generation)
-         (target (or (cdr item) :all))
-         (callback
-          (lambda (status diff)
-            (when (and (= generation omnigent-transport--generation)
-                       (buffer-live-p buffer))
-              (omnigent-ui--diff-result id target status diff)))))
-    (pcase item
-      (`(pr . ,url)
-       (omnigent-transport--request
-        id "GET"
-        (omnigent-transport--session-path
-         id
-         (concat
-          "/resources/github/diff?pr_url=" (url-hexify-string url)))
-        (lambda (status body)
-          (if (and (omnigent-transport-success-p status)
-                   (listp body)
-                   (stringp (alist-get 'patch body)))
-              (funcall callback status (alist-get 'patch body))
-            (when (and (= generation omnigent-transport--generation)
-                       (buffer-live-p buffer))
-              (message "%s"
-                       (omnigent-transport-error-message
-                        "Fetch PR diff" status body)))))))
-      (`(file . ,path)
-       (omnigent-workspace-file-diff id path callback))
-      ('(diff) (omnigent-workspace-diff id callback))
-      (_ (user-error "No workspace item at point")))))
+(defun omnigent-workspace-show-diff (id)
+  "Fetch and display the server's workspace diff for session ID."
+  (interactive (list (omnigent-workspace--session-at-point)))
+  (let ((generation omnigent-transport--generation)
+        (buffer (current-buffer)))
+    (omnigent-workspace--fetch-diff
+     id
+     (lambda (status result)
+       (when (and (= generation omnigent-transport--generation)
+                  (buffer-live-p buffer))
+         (if (omnigent-transport-success-p status)
+             (omnigent-ui--diff-result id :workspace status result)
+           (message "%s"
+                    (omnigent-transport-error-message
+                     "Fetch workspace diff" status result))))))))
 
 (defun omnigent-ui-workspace-magit-status ()
   "Open Magit status for the workspace of the current diff buffer."
   (interactive)
-  (unless omnigent-ui--workspace-id
-    (user-error "No workspace for this buffer"))
-  (unless (require 'magit nil t)
-    (user-error "Magit is not installed"))
-  (magit-status
-   (file-name-as-directory
-    (omnigent-ui--workspace-filename omnigent-ui--workspace-id ""))))
+  (let ((directory
+         (and omnigent-ui--workspace-id
+              (omnigent-conversation--default-directory
+               omnigent-ui--workspace-id
+               t))))
+    (unless directory
+      (user-error "No workspace for this buffer"))
+    (unless (require 'magit nil t)
+      (user-error "Magit is not installed"))
+    (magit-status directory)))
 
 (provide 'omnigent)
 ;;; omnigent.el ends here

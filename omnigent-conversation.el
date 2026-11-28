@@ -7,6 +7,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr-x)
 (require 'omnigent-options)
 (require 'omnigent-sessions)
 

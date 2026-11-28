@@ -51,8 +51,7 @@ Raw requests return parsed JSON when possible, raw response text otherwise, and
 nil for an empty body. JSON objects become alists with symbol keys; arrays
 become vectors. JSON null becomes nil, and JSON false becomes `:json-false`.
 
-Each composite operation documents its derived success value. Workspace diff,
-for example, delivers a string instead of the underlying file-content responses.
+Each composite operation documents its derived success value.
 On an HTTP or transport failure, forward the original status and body unchanged.
 Do not invent an HTTP code for a local failure or turn a failed request into an
 empty success.
@@ -148,4 +147,4 @@ redefining this common contract:
 - [Session management](session-tree.md)
 - [Conversation buffers](conversation-buffer.md)
 - [Elicitations](elicitation.md)
-- [Workspace changes](workspace-changes.md)
+- [Workspace paths](workspace-changes.md)
