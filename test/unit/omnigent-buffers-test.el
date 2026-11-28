@@ -1661,6 +1661,31 @@
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 
+(ert-deftest omnigent-session-pr-status-faces ()
+  "Keep the PR number linked and underline each status in its own face."
+  (let ((omnigent-session--pull-requests
+         (make-hash-table :test 'equal))
+        (url "https://github.com/example/project/pull/42"))
+    (dolist (entry
+             '(("OPEN" . success)
+               ("MERGED" . omnigent-session-archived)
+               ("CLOSED" . error)))
+      (puthash
+       "items"
+       `(((url . ,url) (number . 42) (state . ,(car entry))))
+       omnigent-session--pull-requests)
+      (with-temp-buffer
+        (omnigent-session--insert-session-row
+         '((id . "items") (title . "Fix parser")) 80 0 nil)
+        (goto-char (point-min))
+        (search-forward "PR #42 ")
+        (should (eq (get-text-property (- (point) 2) 'face) 'link))
+        (should
+         (equal
+          (get-text-property (point) 'face)
+          `(:inherit ,(cdr entry) :underline t)))
+        (should (button-at (point)))))))
+
 (ert-deftest omnigent-session-pr-diff ()
   "Use the owning session on a PR row and fetch the PR patch with d."
   (let ((omnigent-session--pull-requests
