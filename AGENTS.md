@@ -35,8 +35,9 @@
    repository's Conventional Commits format, such as
    `fix(sessions): align session titles`. Then create the commit.
 6. Push the task branch and open a pull request. Monitor CI through completion.
-   Fix failures caused by the change and verify the new revision. Merge only
-   after all CI tests pass on the latest revision and all required checks pass.
+   Fix failures caused by the change and verify the new revision. Use
+   `gh pr merge --rebase` after all CI tests pass on the latest revision and all
+   required checks pass.
 7. Confirm that the pull request merged. Delete the local and remote task
    branches if they still exist. Preserve any uncommitted work.
 
