@@ -41,7 +41,7 @@
                            (cons second-prompt second-reply)))
                    (goto-char (point-max))
                    (insert (car turn))
-                   (call-interactively (key-binding (kbd "C-c C-c")))
+                   (funcall #'omnigent-conversation-send)
                    (omnigent-integration--wait
                     (lambda ()
                       (and (omnigent-integration--message-position
@@ -66,20 +66,21 @@
                                   first-reply (json-encode item))))
                           items))
                         (response-id
-                         (alist-get 'response_id first-answer))
-                        (current-prefix-arg '(4)))
+                         (alist-get 'response_id first-answer)))
                    (should (stringp response-id))
-                   (call-interactively (key-binding (kbd "C-c C-f")))
-                   ;; Supply the minibuffer choice in batch Emacs.
-                   (cl-letf (((symbol-function 'completing-read)
+                   ;; Call the fork commands without opening the menu in batch Emacs.
+                   (cl-letf (((symbol-function 'omnigent--fork-menu)
+                              #'ignore)
+                             ((symbol-function 'completing-read)
                               (lambda (prompt choices &rest _)
                                 (should
                                  (equal
                                   prompt "Fork through response: "))
                                 (should (member response-id choices))
                                 response-id)))
-                     (execute-kbd-macro (kbd "r")))
-                   (execute-kbd-macro (kbd "RET"))))
+                     (funcall #'omnigent-conversation-fork t)
+                     (funcall #'omnigent--fork-response)
+                     (funcall #'omnigent--fork-submit))))
                (let ((fork
                       (omnigent-integration--wait
                        (lambda ()

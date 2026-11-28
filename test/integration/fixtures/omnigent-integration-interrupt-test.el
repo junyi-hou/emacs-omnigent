@@ -47,7 +47,7 @@
                    (omnigent-integration--open-session-row id)
                  (goto-char (point-max))
                  (insert first-prompt)
-                 (call-interactively (key-binding (kbd "C-c C-c")))
+                 (funcall #'omnigent-conversation-send)
                  (omnigent-integration--wait
                   (lambda ()
                     (and (omnigent-integration--message-position
@@ -57,7 +57,7 @@
                           'omnigent-session-idle))))
                  (goto-char (point-max))
                  (insert long-prompt)
-                 (call-interactively (key-binding (kbd "C-c C-c")))
+                 (funcall #'omnigent-conversation-send)
                  (ert-info
                   ("Interrupt after Codex starts streaming")
                   (omnigent-integration--wait
@@ -75,7 +75,7 @@
                   (should-not
                    (omnigent-integration--message-position
                     end-marker))
-                  (call-interactively (key-binding (kbd "C-c C-k")))
+                  (funcall #'omnigent-conversation-interrupt)
                   (omnigent-integration--wait
                    (lambda ()
                      (and (not buffer-read-only)
@@ -89,7 +89,7 @@
                            " ")))))
                  (goto-char (point-max))
                  (insert follow-up)
-                 (call-interactively (key-binding (kbd "C-c C-c")))
+                 (funcall #'omnigent-conversation-send)
                  (let ((reply
                         (omnigent-integration--wait
                          (lambda ()

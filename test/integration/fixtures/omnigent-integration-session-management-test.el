@@ -36,12 +36,6 @@
              fields)
             session)))))
 
-(defun omnigent-integration--management-key (key)
-  "Invoke the command bound to KEY in the current buffer."
-  (let ((command (key-binding (kbd key))))
-    (should (and (commandp command) (not (eq command 'undefined))))
-    (call-interactively command)))
-
 (defun omnigent-integration--management-get-status (path)
   "Return the HTTP status for a GET of PATH."
   (let (result)
@@ -93,7 +87,7 @@
                                            "*omnigent-sessions*"))))
                (cl-letf (((symbol-function 'read-string)
                           (lambda (&rest _) project)))
-                 (omnigent-integration--management-key "C"))
+                 (funcall #'omnigent-session-create-project))
                (goto-char
                 (omnigent-integration--wait
                  (lambda ()
@@ -114,8 +108,7 @@
                   (omnigent-integration--project-heading project))
                  (cl-letf (((symbol-function 'read-string)
                             (lambda (&rest _) renamed-project)))
-                   (call-interactively
-                    #'omnigent-session-rename-at-point))
+                   (funcall #'omnigent-session-rename-at-point))
                  (omnigent-integration--wait
                   (lambda ()
                     (omnigent-integration--project-heading
@@ -126,7 +119,7 @@
                                 (should
                                  (assoc renamed-project choices))
                                 (setq selected renamed-project))))
-                     (omnigent-integration--management-key "/")
+                     (funcall #'omnigent-session-find-project)
                      (omnigent-integration--wait
                       (lambda ()
                         (and selected
@@ -134,16 +127,16 @@
                               (point)
                               (omnigent-integration--project-heading
                                renamed-project)))))))
-                 (omnigent-integration--management-key "TAB")
+                 (funcall #'omnigent-session-toggle-tree)
                  (should-not (omnigent-integration--session-row id))
-                 (omnigent-integration--management-key "TAB")
+                 (funcall #'omnigent-session-toggle-tree)
                  (should (omnigent-integration--session-row id))
-                 (let ((current-prefix-arg 1000))
-                   (omnigent-integration--management-key "-"))
+                 (funcall #'omnigent-session-decrease-session-limit
+                          1000)
                  (omnigent-integration--wait
                   (lambda ()
                     (not (omnigent-integration--session-row id))))
-                 (omnigent-integration--management-key "+")
+                 (funcall #'omnigent-session-increase-session-limit 1)
                  (ert-info
                   ((format "Selecting session %s in %s"
                            id
@@ -153,15 +146,14 @@
                     (lambda
                       ()
                       (omnigent-integration--session-row id)))))
-                 (let ((current-prefix-arg 20))
-                   (omnigent-integration--management-key "+"))
+                 (funcall #'omnigent-session-increase-session-limit
+                          20)
                  (cl-letf (((symbol-function 'read-string)
                             (lambda (&rest _) renamed-title)))
-                   (call-interactively
-                    #'omnigent-session-rename-at-point))
+                   (funcall #'omnigent-session-rename-at-point))
                  (omnigent-integration--session-fields
                   id `((title . ,renamed-title)))
-                 (omnigent-integration--management-key "g")
+                 (funcall #'omnigent-session-refresh)
                  (omnigent-integration--wait
                   (lambda ()
                     (and
@@ -173,14 +165,14 @@
                             (lambda (_ choices &rest _)
                               (should (assoc "[Unassigned]" choices))
                               "[Unassigned]")))
-                   (omnigent-integration--management-key "m")
+                   (funcall #'omnigent-session-move-session)
                    (omnigent-integration--session-fields
                     id
                     `((project_id . :null) (workspace . ,workspace))))
-                 (omnigent-integration--management-key "u")
+                 (funcall #'omnigent-session-undo-action)
                  (omnigent-integration--session-fields
                   id `((project_id . ,project-id)))
-                 (omnigent-integration--management-key "C-r")
+                 (funcall #'omnigent-session-redo-action)
                  (omnigent-integration--session-fields
                   id '((project_id . :null)))
                  (ert-info
@@ -196,7 +188,7 @@
                             (lambda (_ choices &rest _)
                               (should (assoc renamed-project choices))
                               renamed-project)))
-                   (omnigent-integration--management-key "m")
+                   (funcall #'omnigent-session-move-session)
                    (omnigent-integration--session-fields
                     id `((project_id . ,project-id))))
                  (ert-info
@@ -208,27 +200,27 @@
                     (lambda
                       ()
                       (omnigent-integration--session-row id)))))
-                 (omnigent-integration--management-key "a")
+                 (funcall #'omnigent-session-archive-at-point)
                  (omnigent-integration--session-fields
                   id '((archived . t)))
                  (omnigent-integration--wait
                   (lambda ()
                     (not (omnigent-integration--session-row id))))
-                 (omnigent-integration--management-key "A")
+                 (funcall #'omnigent-session-toggle-archived-sessions)
                  (omnigent-integration--wait
                   (lambda ()
                     (memq
                      'omnigent-session-archived
                      (ensure-list
                       (omnigent-integration--session-row-face id)))))
-                 (omnigent-integration--management-key "u")
+                 (funcall #'omnigent-session-undo-action)
                  (omnigent-integration--session-fields
                   id '((archived . :false)))
-                 (omnigent-integration--management-key "C-r")
+                 (funcall #'omnigent-session-redo-action)
                  (omnigent-integration--session-fields
                   id '((archived . t)))
                  (goto-char (omnigent-integration--session-row id))
-                 (omnigent-integration--management-key "a")
+                 (funcall #'omnigent-session-archive-at-point)
                  (omnigent-integration--session-fields
                   id '((archived . :false)))
                  (let ((conversation
@@ -236,23 +228,23 @@
                    (with-current-buffer conversation
                      (goto-char (point-max))
                      (insert prompt)
-                     (omnigent-integration--management-key "C-c C-c")
+                     (funcall #'omnigent-conversation-send)
                      (omnigent-integration--wait
                       (lambda ()
                         (omnigent-integration--message-position
                          reply)))
-                     (omnigent-integration--management-key "C-c C-t"))
+                     (funcall #'omnigent-generate-session-title))
                    (omnigent-integration--session-fields
                     id `((title . ,generated-title)))
                    (with-current-buffer conversation
-                     (omnigent-integration--management-key "C-c C-a"))
+                     (funcall #'omnigent-conversation-archive))
                    (omnigent-integration--session-fields
                     id '((archived . t)))
                    (omnigent-integration--wait
                     (lambda () (not (buffer-live-p conversation)))))
                  (select-window
                   (get-buffer-window "*omnigent-sessions*"))
-                 (omnigent-integration--management-key "g")
+                 (funcall #'omnigent-session-refresh)
                  (ert-info
                   ((format "Selecting session %s in %s"
                            id
@@ -262,7 +254,7 @@
                     (lambda
                       ()
                       (omnigent-integration--session-row id)))))
-                 (omnigent-integration--management-key "a")
+                 (funcall #'omnigent-session-archive-at-point)
                  (omnigent-integration--session-fields
                   id '((archived . :false)))
                  (goto-char
@@ -270,7 +262,7 @@
                    renamed-project))
                  (cl-letf (((symbol-function 'y-or-n-p)
                             (lambda (&rest _) t)))
-                   (omnigent-integration--management-key "d"))
+                   (funcall #'omnigent-session-delete-at-point))
                  (omnigent-integration--wait
                   (lambda ()
                     (not
@@ -289,7 +281,7 @@
                       (omnigent-integration--session-row id)))))
                  (cl-letf (((symbol-function 'y-or-n-p)
                             (lambda (&rest _) t)))
-                   (omnigent-integration--management-key "d"))
+                   (funcall #'omnigent-session-delete-at-point))
                  (omnigent-integration--wait
                   (lambda ()
                     (not (omnigent-integration--session-row id))))
@@ -324,8 +316,7 @@
                              (lambda
                                (row)
                                (setq created (alist-get 'id row))))))
-                       (call-interactively
-                        #'omnigent-sessions-create-from-file)
+                       (funcall #'omnigent-sessions-create-from-file)
                        (omnigent-integration--wait
                         (lambda () created))))
                    (omnigent-integration--session-fields
@@ -336,8 +327,7 @@
                         created)
                      (cl-letf (((symbol-function 'y-or-n-p)
                                 (lambda (&rest _) t)))
-                       (omnigent-integration--management-key
-                        "C-c C-d")))
+                       (funcall #'omnigent-delete)))
                    (omnigent-integration--wait
                     (lambda ()
                       (not

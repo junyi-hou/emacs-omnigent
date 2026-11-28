@@ -31,7 +31,7 @@
                  (window-live-p
                   (get-buffer-window "*omnigent-sessions*")))
               (should-not (get-buffer-window "*omnigent-sessions*"))
-              (call-interactively #'omnigent-session-list)
+              (funcall #'omnigent-session-list)
               (should
                (window-live-p
                 (get-buffer-window "*omnigent-sessions*"))))

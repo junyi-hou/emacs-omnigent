@@ -148,8 +148,7 @@
                      (with-current-buffer parent-buffer
                        (goto-char (point-max))
                        (insert prompt)
-                       (call-interactively
-                        (key-binding (kbd "C-c C-c")))
+                       (funcall #'omnigent-conversation-send)
                        (ert-info
                         ("Polly shows a busy row and spinner")
                         (omnigent-integration--wait
@@ -199,14 +198,14 @@
                         (save-excursion
                           (forward-line 1)
                           (looking-at "    codex:fixt")))
-                       (call-interactively (key-binding (kbd "TAB")))
+                       (funcall #'omnigent-session-toggle-tree)
                        (should
                         (eq
                          (point)
                          (omnigent-integration--session-row parent)))
                        (should-not
                         (omnigent-integration--session-row child))
-                       (call-interactively (key-binding (kbd "TAB")))
+                       (funcall #'omnigent-session-toggle-tree)
                        (should
                         (eq
                          (point)

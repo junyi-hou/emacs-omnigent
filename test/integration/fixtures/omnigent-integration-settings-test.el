@@ -20,7 +20,7 @@
   "Submit slash COMMAND from the conversation composer."
   (goto-char (point-max))
   (insert command)
-  (call-interactively (key-binding (kbd "C-c C-c"))))
+  (funcall #'omnigent-conversation-send))
 
 (defun omnigent-integration--check-other-slash-commands (id)
   "Check the remaining built-in slash commands from session ID."
@@ -113,7 +113,7 @@
                  ;; Codex reports its model catalog after the runner starts.
                  (goto-char (point-max))
                  (insert "Load the model catalog")
-                 (call-interactively (key-binding (kbd "C-c C-c")))
+                 (funcall #'omnigent-conversation-send)
                  (omnigent-integration--wait
                   (lambda ()
                     (and (equal omnigent-conversation--status "idle")
@@ -130,15 +130,13 @@
                                        ("Effort: " "high"))))
                                 (should (member choice choices))
                                 choice))))
-                   (call-interactively
-                    #'omnigent-conversation-set-model)
+                   (funcall #'omnigent-conversation-set-model)
                    (omnigent-integration--wait-for-setting
                     id
                     'model_override
                     (omnigent-integration--wait (lambda () model))
                     (format " | %s | " model))
-                   (call-interactively
-                    #'omnigent-conversation-set-effort)
+                   (funcall #'omnigent-conversation-set-effort)
                    (omnigent-integration--wait-for-setting
                     id
                     'reasoning_effort

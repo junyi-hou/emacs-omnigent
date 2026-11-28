@@ -56,7 +56,7 @@
          (unwind-protect
              (progn
                (omnigent-connect omnigent-server-url)
-               (call-interactively #'omnigent-sessions-create)
+               (funcall #'omnigent-sessions-create)
                (setq buffer
                      (omnigent-integration--wait
                       (lambda ()
@@ -99,7 +99,7 @@
                               "")))))
                  (goto-char (point-max))
                  (insert prompt)
-                 (call-interactively (key-binding (kbd "C-c C-c")))
+                 (funcall #'omnigent-conversation-send)
                  (omnigent-integration--wait
                   (lambda ()
                     (and (omnigent-conversation-ready-p)

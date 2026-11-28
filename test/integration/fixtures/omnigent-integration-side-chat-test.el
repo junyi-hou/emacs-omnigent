@@ -49,14 +49,14 @@
                   #'omnigent-conversation-ready-p)
                  (goto-char (point-max))
                  (insert prompt)
-                 (call-interactively (key-binding (kbd "C-c C-c")))
+                 (funcall #'omnigent-conversation-send)
                  (omnigent-integration--wait
                   (lambda ()
                     (omnigent-integration--message-position
                      source-reply)))
                  (goto-char (point-max))
                  (insert "/btw " btw-question)
-                 (call-interactively (key-binding (kbd "C-c C-c"))))
+                 (funcall #'omnigent-conversation-send))
                (setq side
                      (omnigent-integration--wait
                       (lambda ()

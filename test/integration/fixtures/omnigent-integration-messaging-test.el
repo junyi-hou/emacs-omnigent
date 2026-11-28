@@ -29,9 +29,9 @@
      (delete-region (- (point) 2) (- (point) 1))
      :type 'text-read-only)
     (insert "Messaging fixture first prompt")
-    (call-interactively (key-binding (kbd "RET")))
+    (funcall #'newline nil 1)
     (insert "  Keep this indentation")
-    (call-interactively (key-binding (kbd "C-c C-c")))
+    (funcall #'omnigent-conversation-send)
     (ert-info
      ("Wait for the first partial reply")
      (omnigent-integration--wait
@@ -108,7 +108,7 @@
          (ensure-list
           (get-text-property bold-word 'font-lock-face))))))
     (goto-char (point-max))
-    (call-interactively (key-binding (kbd "C-c C-c")))
+    (funcall #'omnigent-conversation-send)
     (ert-info
      ("Wait for the follow-up to start streaming")
      (omnigent-integration--wait
@@ -117,7 +117,7 @@
          "Queue phase starts"))))
     (goto-char (point-max))
     (insert queued-prompt)
-    (call-interactively (key-binding (kbd "C-c C-c")))
+    (funcall #'omnigent-conversation-send)
     (ert-info
      ("Observe the message in the queue")
      (let ((queued
@@ -144,10 +144,10 @@
      (should-not (omnigent-integration--message-position final-reply))
      (goto-char (point-max))
      (insert "Unsent recovery draft")
-     (call-interactively (key-binding (kbd "C-c C-r")))
+     (funcall #'omnigent-conversation-reconnect)
      (should buffer-read-only)
      (should-error
-      (call-interactively (key-binding (kbd "C-c C-c")))
+      (funcall #'omnigent-conversation-send)
       :type 'user-error)
      (omnigent-integration--wait (lambda () (not buffer-read-only)))
      (should

@@ -546,13 +546,13 @@ an `unwind-protect' cleanup clause."
           (prop-match-beginning match))))))
 
 (defun omnigent-integration--open-session-row (id)
-  "Open session ID through the session list key binding."
+  "Open session ID through the session list command."
   (let ((position
          (omnigent-integration--wait
           (lambda () (omnigent-integration--session-row id)))))
     (select-window (get-buffer-window "*omnigent-sessions*"))
     (goto-char position)
-    (call-interactively (key-binding (kbd "RET"))))
+    (funcall #'omnigent-session-open-at-point))
   (let ((buffer (omnigent-sessions-buffer id)))
     (should (eq (window-buffer (selected-window)) buffer))
     (omnigent-integration--wait

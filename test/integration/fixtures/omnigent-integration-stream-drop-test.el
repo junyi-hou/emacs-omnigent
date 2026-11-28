@@ -78,7 +78,7 @@
                    (omnigent-integration--open-session-row id)
                  (goto-char (point-max))
                  (insert first-prompt)
-                 (call-interactively (key-binding (kbd "C-c C-c")))
+                 (funcall #'omnigent-conversation-send)
                  (omnigent-integration--wait
                   (lambda ()
                     (and (omnigent-integration--message-position
@@ -88,7 +88,7 @@
                           'omnigent-session-idle))))
                  (goto-char (point-max))
                  (insert second-prompt)
-                 (call-interactively (key-binding (kbd "C-c C-c")))
+                 (funcall #'omnigent-conversation-send)
                  (omnigent-integration--wait
                   (lambda ()
                     (omnigent-integration--message-position
