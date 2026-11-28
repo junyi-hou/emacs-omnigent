@@ -21,6 +21,35 @@
 - Add a docstring to every function, including private functions and test functions.
 - Add a docstring to every public variable.
 
+## Coding workflow
+
+1. Add or update unit tests to specify the expected behavior.
+2. Implement the feature or fix.
+3. Run `make unit-test` locally. Fix failures and rerun it until all unit tests
+   pass.
+4. Update integration tests when the change affects behavior they cover or
+   requires new integration coverage. Run the integration tests as described
+   below. If you change code or unit tests again, rerun `make unit-test`.
+5. Stage the changes for this task. Use the `commit-message` skill to draft the
+   commit message when the skill is available. Otherwise, follow this
+   repository's Conventional Commits format, such as
+   `fix(sessions): align session titles`. Then create the commit.
+6. Push the task branch and open a pull request. Monitor CI through completion.
+   Fix failures caused by the change and verify the new revision. Merge only
+   after all CI tests pass on the latest revision and all required checks pass.
+7. Confirm that the pull request merged. Delete the local and remote task
+   branches if they still exist. Preserve any uncommitted work.
+
+## External actions
+
+The coding workflow gives the agent permission to commit changes for the task,
+push its branch, and open and merge its pull request. It also gives permission
+to delete the local and remote task branches after the pull request merges.
+These actions need no separate confirmation when the agent follows the workflow
+and commit message format above. This permission takes precedence over general
+restrictions on these actions for this repository. Follow the existing rules for
+other external actions.
+
 ## Tests
 
 - Put unit tests in `test/unit/` in files named `*-test.el`. Use unit tests for
