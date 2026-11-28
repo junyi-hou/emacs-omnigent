@@ -1756,10 +1756,7 @@ The caller must obtain confirmation first."
               (and folded
                    (omnigent-session--descendant-pending-p session))))
          (prefix-width
-          (+ indent
-             (if branch
-                 2
-               0)
+          (+ indent 2
              (if pending
                  2
                0)))
@@ -1771,11 +1768,14 @@ The caller must obtain confirmation first."
               (replace-regexp-in-string "[\n\r]" " " title)
             "Untitled")))
     (insert (make-string indent ?\s))
-    (when branch
-      (insert
-       (if folded
-           "▸ "
-         "▾ ")))
+    (insert
+     (cond
+      ((not branch)
+       "  ")
+      (folded
+       "▸ ")
+      (t
+       "▾ ")))
     (when pending
       (insert "! "))
     (insert
@@ -1823,7 +1823,7 @@ The caller must obtain confirmation first."
             (format "PR #%s" (alist-get 'number pr))
             (when state
               (format " [%s]" (downcase state))))
-           (+ indent 2) line-width project)))
+           (+ indent 4) line-width project)))
       (dolist (child children)
         (omnigent-session--insert-session-row
          child line-width (1+ depth) project)))))

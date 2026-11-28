@@ -62,7 +62,7 @@
             (omnigent-session-render))
           (should
            (equal
-            (buffer-string) "▾ Unassigned\n  A very lon… 2d\n")))
+            (buffer-string) "▾ Unassigned\n    A very l… 2d\n")))
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 
@@ -152,14 +152,14 @@
           (goto-char (point-min))
           (search-forward "! First")
           (beginning-of-line)
-          (should (looking-at "  ! First"))
-          (should
-           (eq
-            (get-text-property (+ (point) 2) 'face)
-            'omnigent-session-attention))
+          (should (looking-at "    ! First"))
           (should
            (eq
             (get-text-property (+ (point) 4) 'face)
+            'omnigent-session-attention))
+          (should
+           (eq
+            (get-text-property (+ (point) 6) 'face)
             'omnigent-session-running))
           (omnigent-session-render)
           (should (equal (omnigent-session--session-id-at-point) "a"))
@@ -1592,7 +1592,7 @@
         (with-current-buffer (get-buffer-create "*omnigent-sessions*")
           (omnigent-session-mode)
           (omnigent-session-render)
-          (should (search-forward "Implement fix" nil t))
+          (should (re-search-forward "^      Implement fix" nil t))
           (should-not (omnigent-session--session-branch-p "child"))
           (cl-letf (((symbol-function 'omnigent-transport--request)
                      (lambda (id method path callback &optional _)
@@ -1616,10 +1616,10 @@
           (forward-line 1)
           (should
            (looking-at-p
-            (concat (regexp-quote "      PR #42 [open]") "$")))
+            (concat (regexp-quote "        PR #42 [open]") "$")))
           (cl-letf (((symbol-function 'browse-url)
                      (lambda (target &rest _) (setq opened target))))
-            (button-activate (button-at (+ (point) 6)))
+            (button-activate (button-at (+ (point) 8)))
             (should (equal opened url))
             (setq opened nil)
             (call-interactively (key-binding (kbd "RET")))
@@ -1645,12 +1645,12 @@
             (omnigent-session--refresh-pull-requests "child"))
           (should
            (looking-at-p
-            (concat (regexp-quote "      PR #42 [merged]") "$")))
+            (concat (regexp-quote "        PR #42 [merged]") "$")))
           (save-excursion
             (forward-line 1)
             (should
              (looking-at-p
-              (concat (regexp-quote "      PR #43 [open]") "$"))))
+              (concat (regexp-quote "        PR #43 [open]") "$"))))
           (forward-line -1)
           (omnigent-session-toggle-tree)
           (omnigent-session-render)
@@ -2717,7 +2717,7 @@
            omnigent-sessions--children)
           (omnigent-session-render)
           (should
-           (string-match-p "^      ! Grandchild" (buffer-string)))
+           (string-match-p "^        ! Grandchild" (buffer-string)))
           (omnigent-session-toggle-tree)
           (should
            (equal (omnigent-session--session-id-at-point) "parent"))
@@ -2728,5 +2728,5 @@
           (should (string-match-p "▸ Parent" (buffer-string)))
           (omnigent-session-toggle-tree)
           (should
-           (string-match-p "^      Grandchild" (buffer-string))))
+           (string-match-p "^        Grandchild" (buffer-string))))
       (kill-buffer buffer))))
