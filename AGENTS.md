@@ -2,9 +2,9 @@
 
 ## Design
 
-- Follow the applicable design decisions in `docs/` and `docs/adr/` when implementing
-- changes.  If a change conflicts with a design decision, ask before changing the
-- implementation or the decision.
+Follow the applicable design decisions in `docs/` and `docs/adr/` when implementing
+changes. If a change conflicts with a design decision, ask before changing the
+implementation or the decision.
 
 ## Style
 
