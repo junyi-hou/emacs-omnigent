@@ -197,7 +197,7 @@
                        (should
                         (save-excursion
                           (forward-line 1)
-                          (looking-at "    codex:fixt")))
+                          (looking-at "      codex:fixt")))
                        (funcall #'omnigent-session-toggle-tree)
                        (should
                         (eq
