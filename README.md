@@ -6,7 +6,7 @@ project brings Omnigent to Emacs as an interactive frontend.
 
 The goal of this project is to create a chat-centered omnignt interface in emacs:
 connect to an Omnigent server, pick a session, chat with the agent, and follow child
-sessions and workspace changes from inside Emacs. See
+sessions and linked pull requests from inside Emacs. See
 [docs/frontend.md](docs/frontend.md) for the UI plan and
 [docs/transport.md](docs/transport.md) for the transport layer.
 
@@ -58,7 +58,7 @@ With `use-package-vc` (Emacs 30 or later):
   :vc (:url "https://github.com/junyi-hou/omnigent-emacs"))
 ```
 
-Install `curl` for session streams and `diff` for workspace patches.
+Install `curl` for session streams and `diff` to display workspace patches.
 
 ## Using the frontend
 
@@ -72,17 +72,29 @@ Install `curl` for session streams and `diff` for workspace patches.
    expand or collapse their bodies.
 4. Use `TAB` and `S-TAB` to navigate elicitation fields and actions. Secret fields use a
    masked minibuffer prompt, not clear text in the transcript.
-5. Press `M-RET` on a session or in its conversation to open its workspace.
-   You can also click or press `RET` on its `[workspace]` sidebar row.
-   In the workspace, press `RET` to visit a linked PR or changed file, `d` to
-   view its diff, or `g` to refresh. The `[workspace diff]` row opens the
-   combined diff.
-6. Run `M-x omnigent-disconnect` to stop client connections and close conversation and
-   workspace buffers. This discards unsent drafts but does not stop agents.
+5. Linked PRs appear under their sessions. Press `RET` or click a PR to open
+   it in the browser. Press `d` on a PR to view its diff or `g` to refresh
+   the session list.
+6. Run `M-x omnigent-disconnect` to stop client connections and close
+   conversation and PR diff buffers. This discards unsent drafts but does
+   not stop agents.
 
-Session lists refresh after ten seconds of idle time, including when hidden.  Workspace
-refresh failures retain the previous view without a notification.  Transcript text uses
+Session lists refresh after ten seconds of idle time, including when hidden.
+PR refresh failures retain the previous rows. Transcript text uses
 plain text, not Markdown rendering.
+
+### Workspace changes
+
+Press `C-c C-g` in a conversation or on its session row to fetch and display
+the workspace patch. Use `M-x omnigent-workspace-show-diff` to call the
+server-backed command directly. The patch uses `diff-mode` by default.
+
+To open Magit with the same key, set:
+
+```elisp
+(setq omnigent-workspace-diff-function
+      (lambda (&rest _) (call-interactively #'magit-status)))
+```
 
 ### Side chat
 
@@ -152,15 +164,10 @@ See [AGENTS.md](AGENTS.md#tests) for test development instructions.
 The client can open at most 500 conversation buffers at once, because the server limits
 the WebSocket watch set to 500 sessions. This should be more than enough for normal use.
 
-The v1 workspace diff treats missing file contents as empty. If Omnigent fails to read a
-Git baseline, the diff can show existing lines as additions or omit a deleted
-file. Omnigent does not distinguish that failure from a new file.
-
 ## TODO
 
 - [ ] Design client-to-server retry for requests with no confirmed response, including
       messages and elicitation responses the server may already have accepted.
-- [ ] Support workspace diffs for non-Git workspaces.
 - [ ] Fetch older conversation items on demand.
 
 ## Sources

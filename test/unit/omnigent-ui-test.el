@@ -200,12 +200,7 @@
 (defmacro omnigent-ui-test--conversation (&rest body)
   "Run BODY in an isolated conversation with no network or process activity."
   (declare (indent 0) (debug t))
-  `(let ((omnigent-ui--selected-session nil)
-         (omnigent-ui--workspace-cache (make-hash-table :test 'equal))
-         (omnigent-ui--workspace-pending
-          (make-hash-table :test 'equal))
-         (omnigent-ui--workspace-again
-          (make-hash-table :test 'equal)))
+  `(let ((omnigent-ui--selected-session nil))
      (cl-letf (((symbol-function
                  'omnigent-transport-start-session-stream)
                 (lambda (&rest _) nil)))
@@ -1239,40 +1234,6 @@
        omnigent-conversation--prompt-start 'wrap-prefix)
       "   "))))
 
-(ert-deftest
-    omnigent-ui-workspace-refresh-coalesces-and-isolates-sessions
-    ()
-  "Coalesce overlapping refreshes and retain cached data after failure."
-  (let ((omnigent-ui--workspace-cache (make-hash-table :test 'equal))
-        (omnigent-ui--workspace-pending
-         (make-hash-table :test 'equal))
-        (omnigent-ui--workspace-again (make-hash-table :test 'equal))
-        calls
-        (renders 0))
-    (cl-letf (((symbol-function 'omnigent-workspace-list)
-               (lambda (id callback) (push (cons id callback) calls)))
-              ((symbol-function 'omnigent-ui-sessions-render)
-               (lambda () (cl-incf renders))))
-      (omnigent-ui-workspace-refresh "a")
-      (omnigent-ui-workspace-refresh "a")
-      (omnigent-ui-workspace-refresh "a")
-      (should (= (length calls) 1))
-      (omnigent-ui-workspace-refresh "b")
-      (funcall (cdr (assoc "a" calls))
-               200
-               '((changes . (((path . "a"))))))
-      (should (= (length calls) 3))
-      (funcall (cdar calls) 500 nil)
-      (funcall (cdr (assoc "b" calls)) 200 '((changes . nil)))
-      (should (= renders 1))
-      (should
-       (alist-get
-        'changes (gethash "a" omnigent-ui--workspace-cache)))
-      (should-not
-       (alist-get
-        'changes (gethash "b" omnigent-ui--workspace-cache)))
-      (should-not (gethash "a" omnigent-ui--workspace-pending)))))
-
 (ert-deftest omnigent-ui-diff-reuses-buffer-and-keeps-it-on-failure ()
   "Reuse successful diff buffers and leave existing contents on failed fetch."
   (save-window-excursion
@@ -1292,20 +1253,77 @@
         (when (buffer-live-p buffer)
           (kill-buffer buffer))))))
 
+(ert-deftest omnigent-ui-workspace-diff-keymaps ()
+  "Use the session workspace for a custom diff command in both buffers."
+  (let ((omnigent-sessions
+         '(((id . "diff-test")
+            (title . "Diff test")
+            (workspace . "/workspace")
+            (host_id . "runner"))))
+        (omnigent-host-address-function (lambda (_) "127.0.0.1"))
+        calls)
+    (let ((omnigent-workspace-diff-function
+           (lambda (id) (push (list id default-directory) calls))))
+      (omnigent-ui-test--conversation
+        (setq omnigent-conversation-session-id "diff-test")
+        (call-interactively (key-binding (kbd "C-c C-g"))))
+      (unwind-protect
+          (with-current-buffer (get-buffer-create
+                                "*omnigent-sessions*")
+            (omnigent-ui-sessions-mode)
+            (omnigent-ui-sessions-render)
+            (goto-char (point-min))
+            (should (search-forward "Diff test" nil t))
+            (call-interactively (key-binding (kbd "C-c C-g"))))
+        (kill-buffer "*omnigent-sessions*")))
+    (should
+     (equal
+      calls
+      '(("diff-test" "/workspace/") ("diff-test" "/workspace/"))))))
+
+(ert-deftest
+    omnigent-ui-workspace-diff-fetches-and-displays-server-patch
+    ()
+  "Display the patch from the changed path and file contents returned by the server."
+  (let (paths
+        displayed)
+    (omnigent-ui-test--conversation
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_id method path callback &optional _)
+                   (should (equal method "GET"))
+                   (push path paths)
+                   (if (string-suffix-p "/changes" path)
+                       (funcall callback
+                                200
+                                '((data
+                                   . [((path . "src/some file"))])))
+                     (funcall callback
+                              200
+                              '((before . "old\n")
+                                (after . "new\n"))))))
+                ((symbol-function 'omnigent-ui--diff-result)
+                 (lambda (id target status patch)
+                   (setq displayed (list id target status patch)))))
+        (call-interactively (key-binding (kbd "C-c C-g")))
+        (should
+         (equal
+          (nreverse paths)
+          '("/v1/sessions/conv_test/resources/environments/default/changes"
+            "/v1/sessions/conv_test/resources/environments/default/diff/src/some%20file")))
+        (should
+         (equal (seq-take displayed 3) '("conv_test" :workspace 200)))
+        (should (string-search "-old\n+new\n" (nth 3 displayed)))))))
+
 (ert-deftest omnigent-ui-workspace-diff-directory ()
   "Use the mapped workspace root for the diff buffer and Magit."
   (save-window-excursion
-    (let ((omnigent-ui--workspace-cache
-           (make-hash-table :test 'equal))
-          (omnigent-sessions
-           '(((id . "mapping") (host_id . "runner"))))
+    (let ((omnigent-sessions
+           '(((id . "mapping")
+              (host_id . "runner")
+              (workspace . "/workspace"))))
           (omnigent-host-address-function
            (lambda (_id) "runner.example"))
           buffer)
-      (puthash
-       "mapping"
-       '((root . "/workspace"))
-       omnigent-ui--workspace-cache)
       (unwind-protect
           (progn
             (omnigent-ui--diff-result
@@ -1387,10 +1405,6 @@
   "Start one ten-second idle timer even with hidden views and cancel on reset."
   (let ((omnigent-ui--idle-timer nil)
         (omnigent-sessions-updates 'updates)
-        (omnigent-ui--workspace-cache (make-hash-table :test 'equal))
-        (omnigent-ui--workspace-pending
-         (make-hash-table :test 'equal))
-        (omnigent-ui--workspace-again (make-hash-table :test 'equal))
         (calls 0)
         canceled)
     (cl-letf (((symbol-function 'run-with-idle-timer)
@@ -1454,9 +1468,7 @@
           buffer)
       (cl-letf (((symbol-function
                   'omnigent-transport-start-session-stream)
-                 (lambda (&rest _) nil))
-                ((symbol-function 'omnigent-ui-workspace-refresh)
-                 #'ignore))
+                 (lambda (&rest _) nil)))
         (unwind-protect
             (progn
               (omnigent-ui-sessions)
@@ -1538,7 +1550,6 @@
   "Add resources to the owning branch and preserve its fold through updates."
   (let ((omnigent-sessions '(((id . "parent") (title . "Polly"))))
         (omnigent-sessions--children (make-hash-table :test 'equal))
-        (omnigent-ui--workspace-cache (make-hash-table :test 'equal))
         (omnigent-ui--pull-requests (make-hash-table :test 'equal))
         (omnigent-ui--pull-requests-pending
          (make-hash-table :test 'equal))
@@ -1574,66 +1585,65 @@
                           (state . "OPEN")
                           (title . "Parser fix"))]))))
           (should (looking-at "    ▾ Implement fix"))
-          (should-not (get-buffer "*omnigent-workspace: child*"))
-          (should
-           (eq (key-binding (kbd "M-RET")) #'omnigent-ui-workspace))
           (forward-line 1)
-          (should (looking-at-p (regexp-quote "      [workspace]")))
-          (cl-letf (((symbol-function 'omnigent-ui-workspace)
-                     (lambda (id) (setq opened id))))
-            (button-activate (button-at (+ (point) 6))))
-          (should (equal opened "child"))
-          (omnigent-ui-sessions-render)
-          (should
-           (equal
-            (get-text-property
-             (point) 'omnigent-ui-resource)
-            '("child" . :workspace)))
+          (should (looking-at-p "      #42 (open) Parser fix"))
+          (cl-letf (((symbol-function 'browse-url)
+                     (lambda (target &rest _) (setq opened target))))
+            (button-activate (button-at (+ (point) 6)))
+            (should (equal opened url))
+            (setq opened nil)
+            (call-interactively (key-binding (kbd "RET")))
+            (should (equal opened url)))
+          (cl-letf
+              (((symbol-function 'omnigent-transport--request)
+                (lambda (_id _method _path callback &optional _)
+                  (funcall
+                   callback
+                   200
+                   `((data
+                      .
+                      [((url . ,url)
+                        (number . 42)
+                        (state . "MERGED")
+                        (title . "Parser fix"))
+                       ((url
+                         .
+                         "https://github.com/example/project/pull/43")
+                        (number . 43)
+                        (state . "OPEN")
+                        (title . "Second fix"))]))))))
+            (omnigent-ui--refresh-pull-requests "child"))
+          (should (looking-at-p "      #42 (merged) Parser fix"))
+          (save-excursion
+            (forward-line 1)
+            (should (looking-at-p "      #43 (open) Second fix")))
           (forward-line -1)
           (omnigent-ui-toggle-tree)
-          (puthash
-           "child"
-           '((changes . (((path . "one")) ((path . "two")))))
-           omnigent-ui--workspace-cache)
           (omnigent-ui-sessions-render)
           (should (looking-at "    ▸ Implement fix"))
-          (should-not (search-forward "[workspace]" nil t))
+          (should-not (search-forward "#42" nil t))
           (omnigent-ui-toggle-tree)
-          (should (search-forward "[workspace]" nil t))
-          (should-not (search-forward "[workspace]" nil t)))
+          (should (search-forward "#42 (merged)" nil t)))
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 
-(ert-deftest omnigent-ui-workspace-visits-and-diffs-both-item-types ()
-  "Open a workspace on demand and dispatch visit and diff by item type."
-  (save-window-excursion
-    (let ((omnigent-ui--workspace-cache
-           (make-hash-table :test 'equal))
-          (omnigent-ui--pull-requests (make-hash-table :test 'equal))
-          (omnigent-sessions '(((id . "items") (host_id . "runner"))))
-          (omnigent-host-address-function (lambda (_) "127.0.0.1"))
-          (url "https://github.com/example/project/pull/42")
-          visited
-          displayed)
-      (puthash
-       "items"
-       `(((url . ,url) (number . 42) (title . "Parser fix")))
-       omnigent-ui--pull-requests)
-      (puthash
-       "items"
-       '((root . "/workspace")
-         (changes . (((path . "parser.el") (status . "modified")))))
-       omnigent-ui--workspace-cache)
-      (unwind-protect
+(ert-deftest omnigent-ui-session-pr-diff ()
+  "Fetch the patch for the PR at point when the user presses d."
+  (let ((omnigent-ui--pull-requests (make-hash-table :test 'equal))
+        (omnigent-sessions '(((id . "items") (title . "Fix parser"))))
+        (url "https://github.com/example/project/pull/42")
+        displayed)
+    (puthash
+     "items"
+     `(((url . ,url) (number . 42)))
+     omnigent-ui--pull-requests)
+    (unwind-protect
+        (with-current-buffer (get-buffer-create "*omnigent-sessions*")
+          (omnigent-ui-sessions-mode)
+          (omnigent-ui-sessions-render)
+          (should (search-forward "#42" nil t))
           (cl-letf
-              (((symbol-function 'omnigent-ui-workspace-reload)
-                #'ignore)
-               ((symbol-function 'browse-url)
-                (lambda (target &rest _) (setq visited target)))
-               ((symbol-function 'file-exists-p) (lambda (_) t))
-               ((symbol-function 'find-file)
-                (lambda (path &rest _) (setq visited path)))
-               ((symbol-function 'omnigent-transport--request)
+              (((symbol-function 'omnigent-transport--request)
                 (lambda (id method path callback &optional _)
                   (should (equal (list id method) '("items" "GET")))
                   (should
@@ -1643,64 +1653,36 @@
                      "/v1/sessions/items/resources/github/diff?pr_url="
                      (url-hexify-string url))))
                   (funcall callback 200 '((patch . "PR patch")))))
-               ((symbol-function 'omnigent-workspace-file-diff)
-                (lambda (id path callback)
-                  (should
-                   (equal (list id path) '("items" "parser.el")))
-                  (funcall callback 200 "File patch")))
-               ((symbol-function 'omnigent-workspace-diff)
-                (lambda (id callback)
-                  (should (equal id "items"))
-                  (funcall callback 200 "Workspace patch")))
                ((symbol-function 'omnigent-ui--diff-result)
                 (lambda (id target status patch)
                   (setq displayed (list id target status patch)))))
-            (omnigent-ui-workspace "items")
-            (should (derived-mode-p 'omnigent-ui-workspace-mode))
-            (call-interactively (key-binding (kbd "RET")))
-            (should (equal visited url))
             (call-interactively (key-binding (kbd "d")))
             (should
-             (equal displayed (list "items" url 200 "PR patch")))
-            (should (search-forward "[workspace diff]" nil t))
-            (omnigent-ui-workspace-visit)
-            (should
-             (equal displayed '("items" :all 200 "Workspace patch")))
-            (should (search-forward "parser.el" nil t))
-            (omnigent-ui--workspace-render "items")
-            (should (looking-at "  M  parser.el"))
-            (omnigent-ui-workspace-visit)
-            (should (equal visited "/workspace/parser.el"))
-            (omnigent-ui-workspace-diff)
-            (should
-             (equal
-              displayed '("items" "parser.el" 200 "File patch"))))
-        (when-let* ((buffer
-                     (get-buffer "*omnigent-workspace: items*")))
-          (kill-buffer buffer))))))
+             (equal displayed (list "items" url 200 "PR patch")))))
+      (kill-buffer "*omnigent-sessions*"))))
 
-(ert-deftest
-    omnigent-ui-removal-freezes-draft-and-rejects-late-workspace
-    ()
-  "Freeze a removed session and discard a pending workspace result for it."
+(ert-deftest omnigent-ui-removal-freezes-draft-and-rejects-late-prs ()
+  "Freeze a removed session and discard its pending PR response."
   (omnigent-ui-test--conversation
     (insert "keep draft")
     (let ((omnigent-sessions--buffers
            (list (cons "conv_test" (current-buffer))))
+          (omnigent-ui--pull-requests (make-hash-table :test 'equal))
+          (omnigent-ui--pull-requests-pending
+           (make-hash-table :test 'equal))
           callback)
-      (cl-letf (((symbol-function 'omnigent-workspace-list)
-                 (lambda (_id cb) (setq callback cb))))
-        (omnigent-ui-workspace-refresh "conv_test"))
+      (cl-letf (((symbol-function 'omnigent-transport--request)
+                 (lambda (_id _method _path cb &optional _)
+                   (setq callback cb))))
+        (omnigent-ui--refresh-pull-requests "conv_test"))
       (omnigent-ui--frame '((type . "removed") (ids . ["conv_test"])))
       (should buffer-read-only)
       (should-error (omnigent-conversation-send) :type 'user-error)
       (should (string-suffix-p "keep draft" (buffer-string)))
       (funcall callback
                200
-               '((changes
-                  . (((path . "late") (status . "created"))))))
-      (should-not
-       (gethash "conv_test" omnigent-ui--workspace-cache)))))
+               '((data . [((url . "https://example.com/pr"))])))
+      (should-not (gethash "conv_test" omnigent-ui--pull-requests)))))
 
 (ert-deftest omnigent-ui-send-uses-server-state-not-session-status ()
   "Display queued input for every session status and commit it exactly once."

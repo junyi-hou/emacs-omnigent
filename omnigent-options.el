@@ -141,7 +141,7 @@ Nil leaves the conversation buffer undisplayed."
     (require 'text-mode)
     (set-keymap-parent map text-mode-map)
     (define-key map (kbd "C-c C-c") #'omnigent-conversation-send)
-    (define-key map (kbd "M-RET") #'omnigent-ui-workspace)
+    (define-key map (kbd "C-c C-g") #'omnigent-workspace-diff)
     (define-key map (kbd "C-c C-k") #'omnigent-conversation-interrupt)
     (define-key map (kbd "C-c C-r") #'omnigent-conversation-reconnect)
     (define-key map (kbd "C-c C-f") #'omnigent-conversation-fork)
@@ -162,8 +162,8 @@ Nil leaves the conversation buffer undisplayed."
 (defcustom omnigent-ui-sessions-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map special-mode-map)
+    (define-key map (kbd "C-c C-g") #'omnigent-workspace-diff)
     (define-key map (kbd "RET") #'omnigent-ui-sessions-open)
-    (define-key map (kbd "M-RET") #'omnigent-ui-workspace)
     (define-key map (kbd "TAB") #'omnigent-ui-toggle-tree)
     (define-key map (kbd "<tab>") #'omnigent-ui-toggle-tree)
     (define-key map (kbd "m") #'omnigent-ui-move-session)
@@ -177,7 +177,8 @@ Nil leaves the conversation buffer undisplayed."
     (define-key map (kbd "c") #'omnigent-sessions-create)
     (define-key map (kbd "C") #'omnigent-ui-create-project)
     (define-key map (kbd "a") #'omnigent-ui-archive-at-point)
-    (define-key map (kbd "d") #'omnigent-ui-delete-at-point)
+    (define-key map (kbd "d") #'omnigent-ui-pull-request-diff)
+    (define-key map (kbd "k") #'omnigent-ui-delete-at-point)
     (define-key map (kbd "C-c C-n") #'omnigent-sessions-create)
     map)
   "Keymap for `omnigent-ui-sessions-mode'."
@@ -217,19 +218,16 @@ When nil, let Emacs choose the width."
   :type '(choice (const :tag "Emacs default" nil) integer float)
   :group 'omnigent)
 
-(defcustom omnigent-ui-workspace-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map special-mode-map)
-    (define-key map (kbd "RET") #'omnigent-ui-workspace-visit)
-    (define-key map (kbd "d") #'omnigent-ui-workspace-diff)
-    (define-key map (kbd "g") #'omnigent-ui-workspace-reload)
-    map)
-  "Keymap for the Omnigent workspace buffer."
-  :type 'keymap
+(defcustom omnigent-workspace-diff-function
+  #'omnigent-workspace-show-diff
+  "Function called with the session ID to display workspace changes.
+For a custom function, the command binds `default-directory' to the workspace.
+For Magit, use (lambda (&rest _) (call-interactively #'magit-status))."
+  :type 'function
   :group 'omnigent)
 
 (defcustom omnigent-workspace-diff-mode #'diff-mode
-  "Function called in the workspace diff buffer after inserting the diff.
+  "Function called in a PR or workspace diff buffer after inserting the diff.
 The function takes no arguments."
   :type 'function
   :group 'omnigent)

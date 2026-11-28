@@ -18,7 +18,7 @@ UI. Those components process the data they receive.
 [session-tree.md](session-tree.md) owns session management and list state;
 [conversation-buffer.md](conversation-buffer.md) owns conversation state;
 [elicitation.md](elicitation.md) owns request state and response validation;
-[workspace-changes.md](workspace-changes.md) owns workspace data processing;
+[Workspace paths](workspace-changes.md) describes workspace path mapping;
 [frontend.md](frontend.md) owns presentation.
 
 ## Connection entry points

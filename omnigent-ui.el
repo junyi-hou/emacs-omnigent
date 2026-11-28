@@ -1,14 +1,13 @@
 ;;; omnigent-ui.el --- Omnigent frontend views -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; Session sidebar, workspace diffs, transcript folds, and inline forms.
+;; Session sidebar, diffs, transcript folds, and inline forms.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'comint)
 (require 'omnigent-conversation)
-(require 'omnigent-workspace)
 (require 'omnigent-options)
 (require 'wid-edit)
 (require 'diff-mode)
@@ -269,16 +268,13 @@
               (when (eobp)
                 (goto-char (point-min))))))))))
 
-(defvar omnigent-ui--workspace-cache (make-hash-table :test 'equal)
-  "Workspace listings by session ID.")
 (defvar omnigent-ui--pull-requests (make-hash-table :test 'equal)
   "Linked pull requests by session ID.")
 
 (defun omnigent-ui--session-branch-p (id)
-  "Return non-nil when ID has child sessions, PRs, or workspace changes."
+  "Return non-nil when ID has child sessions or linked PRs."
   (or (omnigent-sessions-children id)
-      (gethash id omnigent-ui--pull-requests)
-      (alist-get 'changes (gethash id omnigent-ui--workspace-cache))))
+      (gethash id omnigent-ui--pull-requests)))
 
 (defun omnigent-ui--open-resource-button (button)
   "Open the session resource represented by BUTTON."
@@ -382,12 +378,16 @@
        'face
        'omnigent-ui-session-attention))
     (unless folded
-      (when (or (gethash id omnigent-ui--pull-requests)
-                (alist-get
-                 'changes (gethash id omnigent-ui--workspace-cache)))
-        (omnigent-ui--insert-resource-row
-         id
-         :workspace "[workspace]" (+ indent 2) line-width project))
+      (dolist (pr (gethash id omnigent-ui--pull-requests))
+        (let ((state (alist-get 'state pr)))
+          (omnigent-ui--insert-resource-row
+           id (alist-get 'url pr)
+           (concat
+            (format "#%s" (alist-get 'number pr))
+            (when state
+              (format " (%s)" (downcase state)))
+            " " (alist-get 'title pr))
+           (+ indent 2) line-width project)))
       (dolist (child children)
         (omnigent-ui--insert-session-row
          child line-width (1+ depth) project)))))
@@ -396,13 +396,12 @@
 ;;; Connection and selection
 
 (defvar omnigent-ui--idle-timer nil)
-(defvar omnigent-ui--workspace-pending (make-hash-table :test 'equal))
-(defvar omnigent-ui--workspace-again (make-hash-table :test 'equal))
 (defvar omnigent-ui--pull-requests-pending
   (make-hash-table :test 'equal))
 (defvar omnigent-ui--resource-checked (make-hash-table :test 'equal))
 (defvar omnigent-ui--changing-windows nil)
-(defvar-local omnigent-ui--workspace-id nil)
+(defvar-local omnigent-ui--workspace-id nil
+  "Session ID for the current diff buffer.")
 
 
 (defun omnigent-ui-start ()
@@ -432,9 +431,6 @@
   (clrhash omnigent-ui--pull-requests)
   (clrhash omnigent-ui--pull-requests-pending)
   (clrhash omnigent-ui--resource-checked)
-  (clrhash omnigent-ui--workspace-cache)
-  (clrhash omnigent-ui--workspace-pending)
-  (clrhash omnigent-ui--workspace-again)
   (dolist (buffer (buffer-list))
     (with-current-buffer buffer
       (when omnigent-ui--workspace-id
@@ -470,8 +466,7 @@
                    omnigent-ui--selected-session)))
         (setq omnigent-ui--selected-session
               omnigent-conversation-session-id)
-        (omnigent-ui-sessions-render)
-        (omnigent-ui-workspace-refresh)))))
+        (omnigent-ui-sessions-render)))))
 
 (defun omnigent-ui--action-target ()
   "Return the current session ID and display title."
@@ -508,18 +503,11 @@
           (omnigent-conversation--freeze)
           (dolist (widget omnigent-ui--widgets)
             (widget-apply widget :deactivate))))
-      (remhash id omnigent-ui--workspace-cache)
-      (remhash id omnigent-ui--workspace-pending)
-      (remhash id omnigent-ui--workspace-again)
       (remhash id omnigent-ui--pull-requests)
       (remhash id omnigent-ui--pull-requests-pending)
-      (remhash id omnigent-ui--resource-checked)
-      (when-let* ((buffer
-                   (get-buffer
-                    (format "*omnigent-workspace: %s*" id))))
-        (kill-buffer buffer)))))
+      (remhash id omnigent-ui--resource-checked))))
 
-;;; Session resources
+;;; Linked pull requests
 
 (defun omnigent-ui--pull-request-page
     (id token entries &optional after)
@@ -562,12 +550,8 @@
                       (append entries data nil)))))
                (unless (equal
                         prs (gethash id omnigent-ui--pull-requests))
-                 (let ((had-prs
-                        (gethash id omnigent-ui--pull-requests)))
-                   (puthash id prs omnigent-ui--pull-requests)
-                   (unless (eq (null had-prs) (null prs))
-                     (omnigent-ui-sessions-render))
-                   (omnigent-ui--workspace-render id)))))))))))
+                 (puthash id prs omnigent-ui--pull-requests)
+                 (omnigent-ui-sessions-render))))))))))
 
 (defun omnigent-ui--refresh-pull-requests (id)
   "Refresh ID's linked PRs unless a request is already in flight."
@@ -591,131 +575,25 @@
                  (gethash id omnigent-ui--resource-checked 0)))
            (when (or force (>= (- now checked) 30))
              (puthash id now omnigent-ui--resource-checked)
-             (omnigent-ui--refresh-pull-requests id)
-             (omnigent-ui-workspace-refresh id))
+             (omnigent-ui--refresh-pull-requests id))
            (mapc #'visit (omnigent-sessions-children id)))))
        (mapc #'visit (omnigent-sessions-visible))))))
 
-(defun omnigent-ui--workspace-result (id generation token status data)
-  "Cache workspace DATA for ID on successful STATUS from GENERATION and TOKEN."
-  (when (and (= generation omnigent-transport--generation)
-             (eq token (gethash id omnigent-ui--workspace-pending)))
-    (remhash id omnigent-ui--workspace-pending)
-    (when (omnigent-transport-success-p status)
-      (let ((previous (gethash id omnigent-ui--workspace-cache)))
-        (puthash id data omnigent-ui--workspace-cache)
-        (unless (equal previous data)
-          (omnigent-ui--workspace-render id))
-        (unless (eq
-                 (null (alist-get 'changes previous))
-                 (null (alist-get 'changes data)))
-          (omnigent-ui-sessions-render))))
-    (when (gethash id omnigent-ui--workspace-again)
-      (remhash id omnigent-ui--workspace-again)
-      (omnigent-ui-workspace-refresh id))))
-
-(defun omnigent-ui--insert-workspace-item (item label)
-  "Insert a workspace row for ITEM with LABEL."
-  (insert
-   (propertize (concat
-                "  "
-                (replace-regexp-in-string "[\n\r]" " " label) "\n")
-               'omnigent-ui-workspace-item item)))
-
-(defun omnigent-ui--workspace-render (id)
-  "Update ID's open workspace buffer and preserve point on its item."
-  (when-let* ((buffer
-               (get-buffer (format "*omnigent-workspace: %s*" id))))
-    (with-current-buffer buffer
-      (let ((inhibit-read-only t)
-            (item
-             (get-text-property
-              (line-beginning-position) 'omnigent-ui-workspace-item))
-            (prs (gethash id omnigent-ui--pull-requests))
-            (changes
-             (alist-get
-              'changes (gethash id omnigent-ui--workspace-cache))))
-        (erase-buffer)
-        (when prs
-          (insert (propertize "Pull requests\n" 'face 'bold))
-          (dolist (pr prs)
-            (omnigent-ui--insert-workspace-item
-             (cons 'pr (alist-get 'url pr))
-             (mapconcat #'identity
-                        (delq
-                         nil
-                         (list
-                          (format "#%s" (alist-get 'number pr))
-                          (when-let* ((state (alist-get 'state pr)))
-                            (capitalize state))
-                          (alist-get 'title pr)))
-                        "  "))))
-        (when changes
-          (when prs
-            (insert "\n"))
-          (insert (propertize "Workspace changes\n" 'face 'bold))
-          (omnigent-ui--insert-workspace-item
-           '(diff) "[workspace diff]")
-          (dolist (change
-                   (sort (copy-sequence changes)
-                         (lambda (a b)
-                           (string<
-                            (alist-get 'path a)
-                            (alist-get 'path b)))))
-            (let ((path (alist-get 'path change)))
-              (omnigent-ui--insert-workspace-item
-               (cons 'file path)
-               (format "%s  %s"
-                       (pcase (alist-get 'status change)
-                         ("created" "A")
-                         ("deleted" "D")
-                         (_ "M"))
-                       path)))))
-        (unless (or prs changes)
-          (insert "No linked PRs or workspace changes to show.\n"))
-        (goto-char (point-min))
-        (while (and (not (eobp))
-                    (let ((row
-                           (get-text-property
-                            (point) 'omnigent-ui-workspace-item)))
-                      (not
-                       (and row (or (not item) (equal row item))))))
-          (forward-line 1))
-        (when (and (eobp) item)
-          (goto-char (point-min))
-          (while (and (not (eobp))
-                      (not
-                       (get-text-property
-                        (point) 'omnigent-ui-workspace-item)))
-            (forward-line 1)))
-        (when (eobp)
-          (goto-char (point-min)))))))
-
-(defun omnigent-ui--workspace-filename (id path)
-  "Return the filename for PATH in workspace ID."
-  (let* ((buffer (omnigent-sessions-buffer id))
-         (host-id
-          (or (and (buffer-live-p buffer)
-                   (buffer-local-value
-                    'omnigent-conversation-host-id buffer))
-              (alist-get 'host_id (omnigent-sessions-row id))))
-         (root
-          (alist-get
-           'root (gethash id omnigent-ui--workspace-cache))))
-    (omnigent-workspace-local-filename
-     root path (omnigent-workspace-host-mapping host-id))))
-
-(defun omnigent-ui--diff-result (id path status diff)
-  "Display successful DIFF for ID and PATH, leaving old buffers on failure."
+(defun omnigent-ui--diff-result (id target status diff)
+  "Display successful DIFF for ID and TARGET, a PR URL or `:workspace'."
   (when (omnigent-transport-success-p status)
     (if (string-empty-p diff)
         (message "No diff available for %s"
-                 (if (eq path :all)
+                 (if (eq target :workspace)
                      "this workspace"
-                   path))
+                   target))
       (let ((buffer
              (get-buffer-create
-              (format "*omnigent-diff: %s:%s*" id path))))
+              (format "*omnigent-diff: %s:%s*"
+                      id
+                      (if (eq target :workspace)
+                          "workspace"
+                        target)))))
         (with-current-buffer buffer
           (let ((inhibit-read-only t))
             (erase-buffer)
@@ -730,7 +608,8 @@
               (use-local-map map))
             (when-let* ((root
                          (ignore-errors
-                           (omnigent-ui--workspace-filename id ""))))
+                           (omnigent-conversation--default-directory
+                            id t))))
               (setq default-directory (file-name-as-directory root)))
             (setq
              omnigent-ui--workspace-id id
@@ -1428,17 +1307,11 @@ Signal an error if point is not in a foldable block."
   (advice-add 'evil-change :around #'omnigent-ui--evil-change))
 
 (defun omnigent-ui--conversation-event (name data)
-  "Refresh workspace changes on invalidation or terminal session status DATA."
-  (let ((finished
-         (and (equal name "session.status")
-              (member (alist-get 'status data) '("idle" "failed")))))
-    (when finished
-      (omnigent-ui--refresh-pull-requests
-       omnigent-conversation-session-id))
-    (when (or finished
-              (equal name "session.changed_files.invalidated"))
-      (omnigent-ui-workspace-refresh
-       omnigent-conversation-session-id))))
+  "Refresh linked PRs when NAME reports terminal session status in DATA."
+  (when (and (equal name "session.status")
+             (member (alist-get 'status data) '("idle" "failed")))
+    (omnigent-ui--refresh-pull-requests
+     omnigent-conversation-session-id)))
 
 (defun omnigent-ui--token-count (count)
   "Format token COUNT with at most one decimal, rounded up."

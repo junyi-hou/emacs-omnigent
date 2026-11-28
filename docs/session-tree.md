@@ -152,7 +152,7 @@ updates to its row. A removed frame removes its
 row. Treat a `removed` frame as session deletion, even though the server can also
 send it when access is lost. If its conversation buffer is open, freeze it as-is,
 including any draft,
-and make it read-only. Clear its cached PRs and workspace changes. Do not
+and make it read-only. Clear its cached PRs. Do not
 report the deletion or infer it from a list refresh that omits the session. After a conversation buffer closes, retain its row until the next successful
 list refresh; remove it then if it is absent from the fetched list. Reconcile on
 reconnect and manual refresh.

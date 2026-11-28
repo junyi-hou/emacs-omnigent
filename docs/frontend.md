@@ -44,8 +44,8 @@ project’s session rows. `RET` opens the selected session's conversation buffer
 window and keeps the session side window visible. Move point to the
 conversation buffer. Bind `TAB` to one tree toggle command. On a project
 heading, the command folds or unfolds the project. On a session row with
-children, linked PRs, or workspace changes, it folds or unfolds the session's
-branch. Keep point on the row that the user toggles. Open a branch by default
+children or linked PRs, it folds or unfolds the session's branch. Keep point
+on the row that the user toggles. Open a branch by default
 as soon as its first row becomes known. Preserve the user's fold choice across
 refreshes and as more rows appear. Keep fold state independent of whether a
 conversation buffer is open. Press `m` on a session to select a destination
@@ -53,7 +53,7 @@ with completion. Select `[Unassigned]` to remove the
 project assignment. Moving a session changes its server project
 membership. Its workspace stays the same. Follow Treemacs or Neotree
 conventions for other bindings where applicable. Use `a` to toggle archive and
-`d` to delete the session at point. Archiving preserves history. Ask for
+`k` to delete the project or session at point. Archiving preserves history. Ask for
 confirmation before permanent deletion with `y-or-n-p`. The conversation
 commands use `C-c C-a` to toggle archive and `C-c C-d` for Delete.
 
@@ -267,44 +267,34 @@ Reconciliation still scans transcript items to compare rendering inputs. It
 avoids deleting, inserting, and parsing all message text on each update; it does
 not make each update constant-time.
 
-## Workspace buffer
+## Linked pull requests
 
-Show one `[workspace]` row under a session with linked PRs or changed files.
-Keep it at the same indentation as child sessions. The workspace shows only
-the owning session's resources. For a Polly session that delegates work, open
-the workspace of the child that owns the PR.
-
-Press `M-RET` on a session or in its conversation to open its workspace
-buffer. Press `RET` or click the `[workspace]` row for the same action.
-Open the workspace only on request. Reuse one workspace buffer per session
-and preserve point by item when a refresh updates it.
-
-List the PR number, last fetched state, and title under Pull requests.
-Under Workspace changes, show one `[workspace diff]` row followed by changed
-files, sorted by workspace-relative path. Mark created, deleted, and modified
-files with `A`, `D`, and `M`.
-
-| Row | `RET` | `d` |
-|---|---|---|
-| Pull request | Open its URL in the browser | Fetch and display its PR patch |
-| Changed file | Visit the file through its workspace mapping | Fetch and display its workspace diff |
-| `[workspace diff]` | Fetch and display the combined workspace diff | Fetch and display the combined workspace diff |
+Show each linked PR under the session that owns it, at the same indentation
+as child sessions. Show the PR number, the last fetched state in parentheses,
+and the title. Press `RET` or click the row to open the PR in the browser.
+Press `d` on the PR row to fetch and display its patch.
 
 Read linked PRs from `GET /v1/sessions/{id}/pull-requests`. This endpoint
 returns the status last fetched by the server's runner or host. Read the PR
 patch from `GET /v1/sessions/{id}/resources/github/diff?pr_url=...`.
 When the sidebar opens or the session list updates, check the known sessions
 and their known descendants. Limit automatic sidebar checks to one per
-session every 30 seconds. Use `g` in the sidebar or workspace buffer to
-refresh on demand. Refresh PRs and workspace changes when the session stream
-reports terminal status. Refresh workspace changes when the stream reports
-`session.changed_files.invalidated`. Keep cached rows on request failure.
+session every 30 seconds. Use `g` in the sidebar to refresh on demand.
+Refresh PRs when the session stream reports terminal status. Keep cached rows
+on request failure.
 
-Display diffs through Emacs window selection rules. Reuse one diff buffer per
-session and item, and use `omnigent-workspace-diff-mode` to set its mode. Use
-the mapped workspace root as the default directory when available. Show a
-message if the fetch succeeds with an empty patch. Workspace diff data and API
-semantics belong to [workspace-changes.md](workspace-changes.md).
+Display PR diffs through Emacs window selection rules. Reuse one diff buffer
+per session and PR. Use `omnigent-workspace-diff-mode` to set its mode. Use
+the mapped session workspace as the default directory when available. Show a
+message if the fetch succeeds with an empty patch.
+
+## Workspace patches
+
+Bind `C-c C-g` in the conversation and session list to show changes for the
+session. The default command fetches the workspace patch on demand. Use
+`omnigent-workspace-diff-mode` to display the patch in a diff buffer. A custom
+`omnigent-workspace-diff-function` receives the session ID and runs with the
+mapped workspace as its default directory.
 
 ## Nongoals
 
