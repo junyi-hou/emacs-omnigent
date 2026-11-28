@@ -509,10 +509,11 @@ as the workspace on a local execution host."
     (user-error "Current buffer does not visit a file"))
   (let* ((project (project-current nil))
          (workspace
-          (omnigent-sessions--native-workspace
-           (if project
-               (project-root project)
-             default-directory)))
+          (expand-file-name
+           (omnigent-sessions--native-workspace
+            (if project
+                (project-root project)
+              default-directory))))
          (fields (omnigent--create-default-fields))
          (draft (cons omnigent-transport--generation fields)))
     (setf
