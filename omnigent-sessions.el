@@ -1741,13 +1741,12 @@ The caller must obtain confirmation first."
     (insert (make-string indent ?\s))
     (insert-text-button (truncate-string-to-width
                          (replace-regexp-in-string "[\n\r]" " " label)
-                         (max 1 (- width indent)) nil nil "…")
+                         (max 1 (- width indent)) nil nil
+                         (propertize "…" 'face 'link))
                         'action
                         #'omnigent-session--open-resource-button
                         'follow-link
-                        t
-                        'face
-                        'link)
+                        t)
     (insert "\n")
     (add-text-properties
      start (point)
@@ -1831,13 +1830,28 @@ The caller must obtain confirmation first."
        'omnigent-session-attention))
     (unless folded
       (dolist (pr (gethash id omnigent-session--pull-requests))
-        (let ((state (alist-get 'state pr)))
+        (let* ((state (alist-get 'state pr))
+               (status
+                (when state
+                  (downcase state)))
+               (face
+                (pcase status
+                  ("open" 'success)
+                  ("merged" 'omnigent-session-archived)
+                  ("closed" 'error)
+                  (_ 'link))))
           (omnigent-session--insert-resource-row
            id (alist-get 'url pr)
            (concat
-            (format "PR #%s" (alist-get 'number pr))
-            (when state
-              (format " [%s]" (downcase state))))
+            (propertize (format "PR #%s" (alist-get 'number pr))
+                        'face
+                        'link)
+            (when status
+              (concat
+               " "
+               (propertize (format "[%s]" status)
+                           'face
+                           `(:inherit ,face :underline t)))))
            (+ indent 4) line-width project)))
       (dolist (child children)
         (omnigent-session--insert-session-row
