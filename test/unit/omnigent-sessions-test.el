@@ -14,7 +14,7 @@
                           201
                           '((id . "fork") (title . "Fork")))))
               ((symbol-function 'omnigent-sessions-refresh) #'ignore)
-              ((symbol-function 'omnigent-ui-created)
+              ((symbol-function 'omnigent--created)
                (lambda (session) (setq opened session))))
       (with-temp-buffer
         (setq
@@ -62,7 +62,7 @@
                (lambda (&rest _)
                  (ert-fail "Managed fork launched a host runner")))
               ((symbol-function 'omnigent-sessions-refresh) #'ignore)
-              ((symbol-function 'omnigent-ui-created)
+              ((symbol-function 'omnigent--created)
                (lambda (session) (setq opened session))))
       (with-temp-buffer
         (setq
@@ -85,7 +85,7 @@
               ((symbol-function 'omnigent-sessions--error)
                (lambda (action _status &optional _body)
                  (setq reported action)))
-              ((symbol-function 'omnigent-ui-created)
+              ((symbol-function 'omnigent--created)
                (lambda (_session) (ert-fail "Opened failed fork"))))
       (omnigent--fork-launched '((id . "fork")) 400 "failed")
       (should (string-match-p "fork" reported)))))
@@ -123,7 +123,7 @@
         stopped
         posted
         updates)
-    (cl-letf (((symbol-function 'omnigent-ui--action-target)
+    (cl-letf (((symbol-function 'omnigent--action-target)
                (lambda () '("source" . "Old title")))
               ((symbol-function 'omnigent-sessions-side-chat)
                (lambda (id callback)
@@ -158,7 +158,7 @@
                  (push (list id method body) updates)
                  (funcall callback 200 nil)))
               ((symbol-function 'omnigent-sessions-refresh) #'ignore))
-      (omnigent-ui-generate-session-title)
+      (omnigent-generate-session-title)
       (unwind-protect
           (progn
             (funcall snapshot
@@ -392,9 +392,9 @@
               ((symbol-function 'omnigent--create-menu)
                (lambda () (setq menu omnigent--create-draft))))
       (with-temp-buffer
-        (setq major-mode 'omnigent-ui-sessions-mode)
+        (setq major-mode 'omnigent-session-mode)
         (insert
-         (propertize "Project" 'omnigent-ui-project "project-1"))
+         (propertize "Project" 'omnigent-session-project "project-1"))
         (goto-char (point-min))
         (omnigent-sessions-create)
         (should
@@ -405,9 +405,9 @@
         (should
          (equal (alist-get 'project_id (cdr menu)) "project-1"))
         (remove-text-properties
-         (point-min) (point-max) '(omnigent-ui-project nil))
+         (point-min) (point-max) '(omnigent-session-project nil))
         (put-text-property
-         (point-min) (point-max) 'omnigent-ui-session-id "source")
+         (point-min) (point-max) 'omnigent-session-id "source")
         (omnigent-sessions-create '(4))
         (should
          (equal (alist-get 'project_id (cdr menu)) "project-1"))
@@ -423,7 +423,10 @@
         (omnigent--create-submit)
         (should-not (assoc "project_id" payload))
         (put-text-property
-         (point-min) (point-max) 'omnigent-ui-project 'unassigned)
+         (point-min)
+         (point-max)
+         'omnigent-session-project
+         'unassigned)
         (setq payload nil)
         (omnigent-sessions-create)
         (should-not (assoc "project_id" payload))))))

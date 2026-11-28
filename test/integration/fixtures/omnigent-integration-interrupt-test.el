@@ -54,7 +54,7 @@
                           first-reply)
                          (eq
                           (omnigent-integration--session-row-face id)
-                          'omnigent-ui-session-idle))))
+                          'omnigent-session-idle))))
                  (goto-char (point-max))
                  (insert long-prompt)
                  (call-interactively (key-binding (kbd "C-c C-c")))
@@ -66,10 +66,11 @@
                            "section04")
                           (eq
                            (omnigent-integration--session-row-face id)
-                           'omnigent-ui-session-running)
+                           'omnigent-session-running)
                           (member
                            (overlay-get
-                            omnigent-ui--busy-overlay 'before-string)
+                            omnigent-conversation--busy-overlay
+                            'before-string)
                            '("|" "/" "-" "\\")))))
                   (should-not
                    (omnigent-integration--message-position
@@ -80,10 +81,11 @@
                      (and (not buffer-read-only)
                           (eq
                            (omnigent-integration--session-row-face id)
-                           'omnigent-ui-session-idle)
+                           'omnigent-session-idle)
                           (equal
                            (overlay-get
-                            omnigent-ui--busy-overlay 'before-string)
+                            omnigent-conversation--busy-overlay
+                            'before-string)
                            " ")))))
                  (goto-char (point-max))
                  (insert follow-up)

@@ -59,9 +59,10 @@
       (lambda ()
         (and (eq
               (omnigent-integration--session-row-face id)
-              'omnigent-ui-session-running)
+              'omnigent-session-running)
              (member
-              (overlay-get omnigent-ui--busy-overlay 'before-string)
+              (overlay-get
+               omnigent-conversation--busy-overlay 'before-string)
               '("|" "/" "-" "\\"))))))
     (goto-char (point-max))
     (insert follow-up)
@@ -89,9 +90,10 @@
         (and (omnigent-integration--message-position first-reply)
              (eq
               (omnigent-integration--session-row-face id)
-              'omnigent-ui-session-idle)
+              'omnigent-session-idle)
              (equal
-              (overlay-get omnigent-ui--busy-overlay 'before-string)
+              (overlay-get
+               omnigent-conversation--busy-overlay 'before-string)
               " ")))))
     (font-lock-ensure)
     (let ((bold-word
@@ -157,7 +159,7 @@
         (and (omnigent-integration--message-position final-reply)
              (eq
               (omnigent-integration--session-row-face id)
-              'omnigent-ui-session-idle)))))
+              'omnigent-session-idle)))))
     (should-not (omnigent-integration--message-position "[queued] >"))
     (omnigent-integration--check-message-history history)
     (should

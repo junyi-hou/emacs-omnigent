@@ -542,7 +542,7 @@ an `unwind-protect' cleanup clause."
         (goto-char (point-min))
         (when-let* ((match
                      (text-property-search-forward
-                      'omnigent-ui-session-id id t)))
+                      'omnigent-session-id id t)))
           (prop-match-beginning match))))))
 
 (defun omnigent-integration--open-session-row (id)

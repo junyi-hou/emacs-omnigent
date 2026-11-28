@@ -30,8 +30,10 @@ What works:
 - Conversation state, snapshot parsing, and message and interrupt requests
   (`omnigent-conversation.el`).
 
-- An optional session sidebar, streamed plain-text transcripts,
-  collapsed tool and reasoning blocks, and inline elicitation forms (`omnigent-ui.el`).
+- An optional session sidebar (`omnigent-sessions.el`).
+
+- Streamed plain-text transcripts, collapsed tool and reasoning blocks,
+  and inline elicitation forms (`omnigent-conversation.el`).
 
 ## Installation
 
@@ -64,9 +66,9 @@ Install `curl` for session streams and `diff` to display workspace patches.
 
 1. Connect to an existing server with `M-x omnigent-connect`. Alternatively, use `M-x
    omnigent-start-server` for a local server and host.
-2. Run `M-x omnigent-ui-sessions` to show or hide the session list. Use `RET` to open a
-   session, `c` to create one, `g` to refresh, `s` to stop, or `d` to delete after
-   confirmation.
+2. Run `M-x omnigent-session-list` to show or hide the session list. Use `RET` to
+   open a session, `c` to create one, `g` to refresh, `s` to stop, or `d` to delete
+   after confirmation.
 3. Type after `> ` in a conversation. `RET` inserts a newline. `C-c C-c` sends the
    composer; `C-c C-k` interrupts the session. Activate tool and reasoning headings to
    expand or collapse their bodies.
@@ -103,7 +105,7 @@ chat. The source session must have a connected runner. Customize
 #### Generate a session title
 
 Press `C-c C-t` in a conversation to generate a title from recent messages. You can also
-run `M-x omnigent-ui-generate-session-title` with point on a session in the list. The
+run `M-x omnigent-generate-session-title` with point on a session in the list. The
 command uses the bufferless side-chat API and applies the title to the source
 session. See the [side-chat API](docs/conversation-buffer.md#side-chat) for stream and
 turn tracking details.

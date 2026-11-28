@@ -85,7 +85,7 @@
                           first-reply)
                          (eq
                           (omnigent-integration--session-row-face id)
-                          'omnigent-ui-session-idle))))
+                          'omnigent-session-idle))))
                  (goto-char (point-max))
                  (insert second-prompt)
                  (call-interactively (key-binding (kbd "C-c C-c")))
@@ -147,13 +147,14 @@
                          "section24")
                         (eq
                          (omnigent-integration--session-row-face id)
-                         'omnigent-ui-session-idle)))
+                         'omnigent-session-idle)))
                      (+ omnigent-transport--reconnect-min-delay
                         omnigent-transport-connect-timeout))
                     (should
                      (equal
                       (buffer-substring-no-properties
-                       (point-min) omnigent-ui--request-start)
+                       (point-min)
+                       omnigent-conversation--request-start)
                       (mapconcat (lambda (entry)
                                    (concat
                                     (car entry)

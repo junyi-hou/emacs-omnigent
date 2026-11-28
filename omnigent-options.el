@@ -145,43 +145,45 @@ Nil leaves the conversation buffer undisplayed."
     (define-key map (kbd "C-c C-k") #'omnigent-conversation-interrupt)
     (define-key map (kbd "C-c C-r") #'omnigent-conversation-reconnect)
     (define-key map (kbd "C-c C-f") #'omnigent-conversation-fork)
-    (define-key
-     map (kbd "C-c C-t") #'omnigent-ui-generate-session-title)
+    (define-key map (kbd "C-c C-t") #'omnigent-generate-session-title)
     (define-key map (kbd "C-c C-m") #'omnigent-conversation-set-model)
     (define-key
      map (kbd "C-c C-e") #'omnigent-conversation-set-effort)
     (define-key map (kbd "TAB") #'widget-forward)
     (define-key map (kbd "<backtab>") #'widget-backward)
     (define-key map (kbd "C-c C-a") #'omnigent-conversation-archive)
-    (define-key map (kbd "C-c C-d") #'omnigent-ui-delete)
+    (define-key map (kbd "C-c C-d") #'omnigent-delete)
     map)
   "Keymap for `omnigent-conversation-mode'."
   :type 'keymap
   :group 'omnigent)
 
-(defcustom omnigent-ui-sessions-mode-map
+(defcustom omnigent-session-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map special-mode-map)
     (define-key map (kbd "C-c C-g") #'omnigent-workspace-diff)
-    (define-key map (kbd "RET") #'omnigent-ui-sessions-open)
-    (define-key map (kbd "TAB") #'omnigent-ui-toggle-tree)
-    (define-key map (kbd "<tab>") #'omnigent-ui-toggle-tree)
-    (define-key map (kbd "m") #'omnigent-ui-move-session)
-    (define-key map (kbd "u") #'omnigent-ui-undo-session-action)
-    (define-key map (kbd "C-r") #'omnigent-ui-redo-session-action)
-    (define-key map (kbd "/") #'omnigent-ui-find-project)
-    (define-key map (kbd "g") #'omnigent-ui-refresh)
-    (define-key map (kbd "+") #'omnigent-ui-increase-session-limit)
-    (define-key map (kbd "-") #'omnigent-ui-decrease-session-limit)
-    (define-key map (kbd "A") #'omnigent-ui-toggle-archived-sessions)
+    (define-key map (kbd "RET") #'omnigent-session-open-at-point)
+    (define-key map (kbd "TAB") #'omnigent-session-toggle-tree)
+    (define-key map (kbd "<tab>") #'omnigent-session-toggle-tree)
+    (define-key map (kbd "m") #'omnigent-session-move-session)
+    (define-key map (kbd "u") #'omnigent-session-undo-action)
+    (define-key map (kbd "C-r") #'omnigent-session-redo-action)
+    (define-key map (kbd "/") #'omnigent-session-find-project)
+    (define-key map (kbd "g") #'omnigent-session-refresh)
+    (define-key
+     map (kbd "+") #'omnigent-session-increase-session-limit)
+    (define-key
+     map (kbd "-") #'omnigent-session-decrease-session-limit)
+    (define-key
+     map (kbd "A") #'omnigent-session-toggle-archived-sessions)
     (define-key map (kbd "c") #'omnigent-sessions-create)
-    (define-key map (kbd "C") #'omnigent-ui-create-project)
-    (define-key map (kbd "a") #'omnigent-ui-archive-at-point)
-    (define-key map (kbd "d") #'omnigent-ui-pull-request-diff)
-    (define-key map (kbd "k") #'omnigent-ui-delete-at-point)
+    (define-key map (kbd "C") #'omnigent-session-create-project)
+    (define-key map (kbd "a") #'omnigent-session-archive-at-point)
+    (define-key map (kbd "d") #'omnigent-session-pull-request-diff)
+    (define-key map (kbd "k") #'omnigent-session-delete-at-point)
     (define-key map (kbd "C-c C-n") #'omnigent-sessions-create)
     map)
-  "Keymap for `omnigent-ui-sessions-mode'."
+  "Keymap for `omnigent-session-mode'."
   :type 'keymap
   :group 'omnigent)
 

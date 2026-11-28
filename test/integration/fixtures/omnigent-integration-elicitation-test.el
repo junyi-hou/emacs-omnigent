@@ -80,7 +80,7 @@ TITLE is the prompt text.  Send ACTION and, for a question, ANSWER."
                     (lambda (widget)
                       (equal
                        (widget-get widget :field-name) "branch"))
-                    omnigent-ui--widgets)))
+                    omnigent-conversation--widgets)))
               (should field)
               (should
                (omnigent-integration--message-position
@@ -92,7 +92,7 @@ TITLE is the prompt text.  Send ACTION and, for a question, ANSWER."
                  (seq-find
                   (lambda (widget)
                     (eq (widget-get widget :response-action) action))
-                  omnigent-ui--widgets)))
+                  omnigent-conversation--widgets)))
             (should button)
             (should
              (equal

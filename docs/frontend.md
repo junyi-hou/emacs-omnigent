@@ -1,11 +1,11 @@
 # Emacs Frontend Presentation
 
-**Status:** Implemented in `omnigent-ui.el`. Session selection, conversation
-presentation, inline requests, and optional side views follow this v1 design. This
-document owns presentation and window arrangement. [session-tree.md](session-tree.md)
-owns session management, [conversation-buffer.md](conversation-buffer.md) owns
-conversation behavior, and [elicitation.md](elicitation.md) owns request and response
-handling.
+**Status:** Implemented in `omnigent-sessions.el`, `omnigent-conversation.el`, and
+`omnigent.el`. Session selection, conversation presentation, inline requests, and
+optional side views follow this v1 design. This document owns presentation and window
+arrangement. [session-tree.md](session-tree.md) owns session management,
+[conversation-buffer.md](conversation-buffer.md) owns conversation behavior, and
+[elicitation.md](elicitation.md) owns request and response handling.
 
 ## Arrangement
 
@@ -189,11 +189,11 @@ lines retain the first and last 400 lines and show the omitted count. Apply
 both limits deterministically on refresh. Fetching omitted content is deferred;
 mark the constants with a `ponytail:` comment naming that upgrade path.
 
-Faces: `omnigent-ui-prompt` for the composer prompt and message labels,
-`omnigent-ui-reasoning` for reasoning, and `omnigent-ui-error` for error
-headings and interrupt markers. Apply Markdown to ready messages and highlight
-composer text according to [markdown-rendering.md](markdown-rendering.md).  Do
-not add a plan panel in v1.
+Faces: `omnigent-conversation-prompt` for the composer prompt and message labels,
+`omnigent-conversation-reasoning` for reasoning, and `omnigent-conversation-error`
+for error headings and interrupt markers. Apply Markdown to ready messages and
+highlight composer text according to [markdown-rendering.md](markdown-rendering.md).
+Do not add a plan panel in v1.
 
 Show the workspace folder name, role, model, reasoning effort, access mode, and context
 window usage in the conversation header. Do not show the harness or session name in the

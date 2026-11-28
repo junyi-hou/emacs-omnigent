@@ -8,7 +8,7 @@
   (let ((omnigent-server-url "http://old.example")
         reset
         started)
-    (cl-letf (((symbol-function 'omnigent-ui-start)
+    (cl-letf (((symbol-function 'omnigent--start)
                (lambda ()
                  (should reset)
                  (setq started t)))
@@ -54,13 +54,14 @@
             (should (eq callback #'ignore)))))
       (omnigent-transport-list-sessions #'ignore))))
 
-(ert-deftest omnigent-ui-toggle-archived-sessions-refreshes-list ()
+(ert-deftest omnigent-session-toggle-archived-sessions-refreshes-list
+    ()
   "Toggle the archived-session option and refresh the session list."
   (let ((omnigent-fetch-archived-sessions t)
         refreshed)
-    (cl-letf (((symbol-function 'omnigent-ui-refresh)
+    (cl-letf (((symbol-function 'omnigent-session-refresh)
                (lambda () (setq refreshed t))))
-      (omnigent-ui-toggle-archived-sessions))
+      (omnigent-session-toggle-archived-sessions))
     (should-not omnigent-fetch-archived-sessions)
     (should refreshed)))
 
@@ -128,7 +129,7 @@
                    (lambda (_) buffer))
                   ((symbol-function 'process-command)
                    (lambda (_) (car commands)))
-                  ((symbol-function 'omnigent-ui-start) #'ignore)
+                  ((symbol-function 'omnigent--start) #'ignore)
                   ((symbol-function 'omnigent-transport-reset)
                    #'ignore))
           (omnigent-start-server)

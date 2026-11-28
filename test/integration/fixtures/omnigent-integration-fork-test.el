@@ -49,7 +49,7 @@
                            (eq
                             (omnigent-integration--session-row-face
                              source)
-                            'omnigent-ui-session-idle)))))
+                            'omnigent-session-idle)))))
                  (let* ((items
                          (alist-get
                           'data

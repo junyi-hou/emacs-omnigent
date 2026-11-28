@@ -15,9 +15,185 @@
 (require 'omnigent-transport)
 (require 'omnigent-sessions)
 (require 'omnigent-workspace)
-(require 'omnigent-ui)
+(require 'omnigent-conversation)
+(require 'diff-mode)
 
-(add-hook 'omnigent-sessions-open-hook #'omnigent-ui-created)
+(defvar omnigent--idle-timer nil)
+
+(defvar omnigent--changing-windows nil)
+(defvar-local omnigent--workspace-id nil
+  "Session ID for the current diff buffer.")
+
+(defun omnigent--start ()
+  "Load server data and open the session list after connection."
+  (unless omnigent-sessions-updates
+    (omnigent-sessions-start
+     (lambda ()
+       (when (and omnigent-open-session-list-on-connect
+                  (not (get-buffer-window "*omnigent-sessions*")))
+         (omnigent-session-list)))))
+  (unless omnigent--idle-timer
+    (setq omnigent--idle-timer
+          (run-with-idle-timer 10 t #'omnigent-sessions-refresh))))
+
+(defun omnigent--reset ()
+  "Stop frontend timers and discard cached session resources."
+  (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
+    (with-current-buffer buffer
+      (setq
+       omnigent-session--folded-projects nil
+       omnigent-session--folded-sessions nil)))
+  (when (timerp omnigent--idle-timer)
+    (cancel-timer omnigent--idle-timer))
+  (setq
+   omnigent--idle-timer nil
+   omnigent-session--selected-session nil)
+  (clrhash omnigent-session--pull-requests)
+  (clrhash omnigent-session--pull-requests-pending)
+  (clrhash omnigent-session--resource-checked)
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (when omnigent--workspace-id
+        (kill-buffer buffer))))
+  (omnigent-session-render))
+
+(defun omnigent--open (id &optional title)
+  "Open ID with TITLE in a non-side window and select its composer."
+  (let ((window (or (get-mru-window nil nil t) (selected-window))))
+    (when (window-parameter window 'window-side)
+      (setq window (window-main-window)))
+    (with-selected-window window
+      (omnigent-conversation-open id title))
+    (select-window (get-buffer-window (omnigent-sessions-buffer id)))
+    (omnigent--selection)))
+
+(defun omnigent--created (session)
+  "Open the newly created SESSION."
+  (let ((omnigent-conversation--initial-sandbox-status
+         (alist-get 'sandbox_status session)))
+    (omnigent--open (alist-get 'id session)
+                    (alist-get 'title session))))
+
+(defun omnigent--selection (&rest _ignored)
+  "Track the most recently selected conversation, ignoring other buffers."
+  (when (and (not omnigent--changing-windows)
+             (buffer-live-p (window-buffer (selected-window))))
+    (with-current-buffer (window-buffer (selected-window))
+      (when (and (derived-mode-p 'omnigent-conversation-mode)
+                 (not
+                  (equal
+                   omnigent-conversation-session-id
+                   omnigent-session--selected-session)))
+        (setq omnigent-session--selected-session
+              omnigent-conversation-session-id)
+        (omnigent-session-render)))))
+
+(defun omnigent--action-target ()
+  "Return the current session ID and display title."
+  (let* ((id
+          (or (and (derived-mode-p 'omnigent-conversation-mode)
+                   omnigent-conversation-session-id)
+              (omnigent-session--session-id-at-point)))
+         (row (omnigent-sessions-row id)))
+    (unless id
+      (user-error "No session at point"))
+    (when (or (and (derived-mode-p 'omnigent-conversation-mode)
+                   buffer-read-only)
+              (equal (alist-get 'permission_level row) 1)
+              (when-let* ((buffer (omnigent-sessions-buffer id)))
+                (with-current-buffer buffer
+                  buffer-read-only)))
+      (user-error "This session is read-only"))
+    (cons id (or (alist-get 'title row) "Untitled"))))
+
+(defun omnigent--action-result (action title status body)
+  "Report failed ACTION on TITLE with STATUS and BODY diagnostics."
+  (unless (omnigent-transport-success-p status)
+    (message "%s"
+             (omnigent-transport-error-message
+              (format "%s session %s" action title) status body))))
+
+
+(defun omnigent--frame (frame)
+  "Freeze removed sessions and clear their resource caches for FRAME."
+  (when (equal (alist-get 'type frame) "removed")
+    (dolist (id (append (alist-get 'ids frame) nil))
+      (when-let* ((buffer (omnigent-sessions-buffer id)))
+        (with-current-buffer buffer
+          (omnigent-conversation--freeze)
+          (dolist (widget omnigent-conversation--widgets)
+            (widget-apply widget :deactivate))))
+      (remhash id omnigent-session--pull-requests)
+      (remhash id omnigent-session--pull-requests-pending)
+      (remhash id omnigent-session--resource-checked))))
+
+(defun omnigent--session-age (updated-at)
+  "Return a short age label for UPDATED-AT."
+  (when updated-at
+    (condition-case nil
+        (let* ((time
+                (if (numberp updated-at)
+                    (seconds-to-time updated-at)
+                  (date-to-time updated-at)))
+               (seconds
+                (max 0
+                     (floor
+                      (float-time
+                       (time-subtract (current-time) time))))))
+          (cond
+           ((< seconds 60)
+            "<1m")
+           ((< seconds 3600)
+            (format "%dm" (/ seconds 60)))
+           ((< seconds 86400)
+            (format "%dhr" (/ seconds 3600)))
+           ((< seconds 604800)
+            (format "%dd" (/ seconds 86400)))
+           (t
+            (if (>= seconds (* 4 604800))
+                "4w+"
+              (format "%dw" (/ seconds 604800))))))
+      (error
+       "n/a"))))
+
+(defun omnigent--diff-result (id target status diff)
+  "Display successful DIFF for ID and TARGET, a PR URL or `:workspace'."
+  (when (omnigent-transport-success-p status)
+    (if (string-empty-p diff)
+        (message "No diff available for %s"
+                 (if (eq target :workspace)
+                     "this workspace"
+                   target))
+      (let ((buffer
+             (get-buffer-create
+              (format "*omnigent-diff: %s:%s*"
+                      id
+                      (if (eq target :workspace)
+                          "workspace"
+                        target)))))
+        (with-current-buffer buffer
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (insert diff)
+            (funcall omnigent-workspace-diff-mode)
+            (when-let* ((root
+                         (ignore-errors
+                           (omnigent-conversation--default-directory
+                            id
+                            t))))
+              (setq default-directory (file-name-as-directory root)))
+            (setq
+             omnigent--workspace-id id
+             buffer-read-only t)
+            (goto-char (point-min))))
+        (pop-to-buffer buffer)))))
+
+(add-hook 'omnigent-sessions-frame-hook #'omnigent--frame)
+(add-hook 'window-selection-change-functions #'omnigent--selection)
+(add-hook 'window-buffer-change-functions #'omnigent--selection)
+(add-hook 'window-configuration-change-hook #'omnigent--selection)
+
+(add-hook 'omnigent-sessions-open-hook #'omnigent--created)
 
 (defun omnigent-conversation-follow-link (&optional event)
   "Follow the Markdown link at point or at the mouse EVENT."
@@ -32,13 +208,13 @@
 (defun omnigent-conversation-open-block ()
   "Open the fold for the transcript block at point."
   (interactive)
-  (omnigent-ui-fold-at-point t))
+  (omnigent-conversation-fold-at-point t))
 
 ;;;###autoload
 (defun omnigent-conversation-close-block ()
   "Close the fold for the transcript block at point."
   (interactive)
-  (omnigent-ui-fold-at-point nil))
+  (omnigent-conversation-fold-at-point nil))
 
 (defun omnigent--conversation-title (title)
   "Rename the current conversation buffer to TITLE."
@@ -131,9 +307,9 @@ reset session and transport state before selecting the server."
    (copy-sequence omnigent-sessions--buffers))
   (omnigent-sessions-reset)
   (omnigent-transport-reset)
-  (omnigent-ui-reset)
+  (omnigent--reset)
   (setq omnigent-server-url (string-remove-suffix "/" url))
-  (omnigent-ui-start)
+  (omnigent--start)
   (message "Using Omnigent server %s" omnigent-server-url))
 
 ;;;###autoload
@@ -148,14 +324,14 @@ Unsent drafts are lost, but agents continue to run on their execution hosts."
    (copy-sequence omnigent-sessions--buffers))
   (omnigent-sessions-reset)
   (omnigent-transport-reset)
-  (let ((omnigent-ui--changing-windows t))
+  (let ((omnigent--changing-windows t))
     (dolist (frame (frame-list))
       (dolist (window (window-list frame))
         (when (and (window-parameter window 'window-side)
                    (with-current-buffer (window-buffer window)
-                     (derived-mode-p 'omnigent-ui-sessions-mode)))
+                     (derived-mode-p 'omnigent-session-mode)))
           (delete-window window)))))
-  (omnigent-ui-reset)
+  (omnigent--reset)
   (message "Disconnected from Omnigent"))
 
 (defun omnigent--server-url-from-output (buffer)
@@ -276,7 +452,7 @@ Run `omnigent-sessions-change-hook' on success, or the error hook on failure."
   "Create a session using configured and server defaults.
 With a prefix argument EDIT, open the session creation menu."
   (interactive "P")
-  (let* ((id (omnigent-ui--session-id-at-point))
+  (let* ((id (omnigent-session--session-id-at-point))
          (session
           (and id
                (cl-find
@@ -295,8 +471,8 @@ With a prefix argument EDIT, open the session creation menu."
                     'workspace omnigent-conversation-header-data))))
          (project
           (cond
-           ((derived-mode-p 'omnigent-ui-sessions-mode)
-            (or (omnigent-ui--project-at-point)
+           ((derived-mode-p 'omnigent-session-mode)
+            (or (omnigent-session--project-at-point)
                 (omnigent-sessions-project-key session)))
            ((derived-mode-p 'omnigent-conversation-mode)
             (omnigent-sessions-project-key
@@ -483,7 +659,7 @@ When MENU is non-nil, restore the draft after a failed request."
                   (= (car draft) omnigent-transport--generation))
          (let ((project
                 (condition-case nil
-                    (omnigent-ui--read-project "Project: " projects t)
+                    (omnigent--read-project "Project: " projects t)
                   (quit
                    nil))))
            (when (and (eq draft omnigent--create-draft)
@@ -865,7 +1041,7 @@ Call CANCEL when required selection does not complete."
   (unwind-protect
       (omnigent-sessions-refresh)
     (if (omnigent-transport-success-p status)
-        (omnigent-ui-created session)
+        (omnigent--created session)
       (omnigent-sessions--error
        (format "Fork %s created; runner launch failed"
                (alist-get 'id session))
@@ -1461,9 +1637,12 @@ AFTER is the cursor used for the current page."
            (point)
            '(omnigent-attachment-block t rear-nonsticky t))
           (put-text-property
-           start (point) 'font-lock-face 'omnigent-ui-attachment)
+           start
+           (point)
+           'font-lock-face
+           'omnigent-conversation-attachment)
           (put-text-property
-           start (point) 'face 'omnigent-ui-attachment)
+           start (point) 'face 'omnigent-conversation-attachment)
           (let ((pos start))
             (while (< pos (point))
               (let ((next
@@ -1817,7 +1996,7 @@ When SIDE-CHAT is non-nil, skip skill completion discovery."
                   (format "%s (%s) [%s]"
                           (or (alist-get 'title session) "Untitled")
                           (let ((age
-                                 (omnigent-ui--session-age
+                                 (omnigent--session-age
                                   (alist-get 'updated_at session))))
                             (if (and age (not (equal age "n/a")))
                                 (concat age " ago")
@@ -2403,51 +2582,53 @@ When EFFORT is nil, prompt with the current model's supported levels."
    '(("type" . "interrupt"))
    #'omnigent-conversation--interrupted))
 
-(defun omnigent-ui-sessions-open ()
+(defun omnigent-session-open-at-point ()
   "Open the session or linked PR at point."
   (interactive)
   (if-let* ((resource
              (get-text-property
-              (line-beginning-position) 'omnigent-ui-resource)))
+              (line-beginning-position) 'omnigent-session-resource)))
     (browse-url (cdr resource))
-    (let* ((id (omnigent-ui--session-id-at-point))
+    (let* ((id (omnigent-session--session-id-at-point))
            (session (and id (omnigent-sessions-row id))))
       (unless session
         (user-error "No session at point"))
-      (omnigent-ui-open id (alist-get 'title session)))))
+      (omnigent--open id (alist-get 'title session)))))
 
-(defun omnigent-ui--project-heading ()
+(defun omnigent-session--project-heading ()
   "Return the position of the project heading for the current line."
   (save-excursion
     (beginning-of-line)
-    (when (omnigent-ui--session-id-at-point)
-      (while (and (not (bobp)) (not (omnigent-ui--project-at-point)))
+    (when (omnigent-session--session-id-at-point)
+      (while (and (not (bobp))
+                  (not (omnigent-session--project-at-point)))
         (forward-line -1)))
-    (when (omnigent-ui--project-at-point)
+    (when (omnigent-session--project-at-point)
       (point))))
 
-(defun omnigent-ui-toggle-tree ()
+(defun omnigent-session-toggle-tree ()
   "Fold or unfold the project or session branch at point."
   (interactive)
-  (let ((project (omnigent-ui--project-at-point))
-        (id (omnigent-ui--session-id-at-point)))
+  (let ((project (omnigent-session--project-at-point))
+        (id (omnigent-session--session-id-at-point)))
     (cond
      (project
-      (setq omnigent-ui--folded-projects
-            (if (member project omnigent-ui--folded-projects)
-                (delete project omnigent-ui--folded-projects)
-              (cons project omnigent-ui--folded-projects)))
-      (omnigent-ui-sessions-render))
-     ((and id (omnigent-ui--session-branch-p id))
-      (setq omnigent-ui--folded-sessions
-            (if (member id omnigent-ui--folded-sessions)
-                (delete id omnigent-ui--folded-sessions)
-              (cons id omnigent-ui--folded-sessions)))
-      (omnigent-ui-sessions-render)))))
+      (setq omnigent-session--folded-projects
+            (if (member project omnigent-session--folded-projects)
+                (delete project omnigent-session--folded-projects)
+              (cons project omnigent-session--folded-projects)))
+      (omnigent-session-render))
+     ((and id (omnigent-session--session-branch-p id))
+      (setq omnigent-session--folded-sessions
+            (if (member id omnigent-session--folded-sessions)
+                (delete id omnigent-session--folded-sessions)
+              (cons id omnigent-session--folded-sessions)))
+      (omnigent-session-render)))))
 
-(defalias 'omnigent-ui-toggle-project #'omnigent-ui-toggle-tree)
+(defalias
+  'omnigent-session-toggle-project #'omnigent-session-toggle-tree)
 
-(defun omnigent-ui--read-project (prompt projects &optional unassign)
+(defun omnigent--read-project (prompt projects &optional unassign)
   "Read a project from PROJECTS with PROMPT.
 When UNASSIGN is non-nil, offer to remove the project assignment."
   (let* ((generation omnigent-transport--generation)
@@ -2462,71 +2643,71 @@ When UNASSIGN is non-nil, offer to remove the project assignment."
     (when (= generation omnigent-transport--generation)
       (cdr (assoc choice choices)))))
 
-(defun omnigent-ui-find-project ()
+(defun omnigent-session-find-project ()
   "Find a server project and load its sessions in the session list."
   (interactive)
-  (unless (derived-mode-p 'omnigent-ui-sessions-mode)
+  (unless (derived-mode-p 'omnigent-session-mode)
     (user-error "Open the Omnigent session list first"))
   (let ((buffer (current-buffer)))
     (omnigent-sessions-read-projects
      (lambda (projects)
        (when (buffer-live-p buffer)
          (when-let* ((project
-                      (omnigent-ui--read-project
+                      (omnigent--read-project
                        "Find project: " projects))
                      (id (alist-get 'id project)))
            (with-current-buffer buffer
-             (setq omnigent-ui--folded-projects
-                   (delete id omnigent-ui--folded-projects))
+             (setq omnigent-session--folded-projects
+                   (delete id omnigent-session--folded-projects))
              (omnigent-sessions-show-project project)
              (omnigent-sessions-fetch-project
               id
               (or
                (car (gethash id omnigent-sessions--project-lists))
                (max 1 (min 1000 omnigent-transport-session-limit))))
-             (omnigent-ui-sessions-render)
+             (omnigent-session-render)
              (goto-char (point-min))
              (while (and (not (eobp))
                          (not
-                          (equal id (omnigent-ui--project-at-point))))
+                          (equal
+                           id (omnigent-session--project-at-point))))
                (forward-line 1)))))))))
 
-(defvar-local omnigent-ui--session-undo-history nil
+(defvar-local omnigent-session--undo-history nil
   "Undo actions for moves and archive changes in this session list.")
 
-(defvar-local omnigent-ui--session-redo-history nil
+(defvar-local omnigent-session--redo-history nil
   "Redo actions for moves and archive changes in this session list.")
 
-(defvar-local omnigent-ui--session-undo-generation nil
+(defvar-local omnigent-session--undo-generation nil
   "Server generation for this session list's undo and redo history.")
 
-(defvar-local omnigent-ui--session-action-pending nil
+(defvar-local omnigent-session--action-pending nil
   "Non-nil while a move, archive change, undo, or redo is pending.")
 
-(defun omnigent-ui--check-session-action ()
+(defun omnigent-session--check-action ()
   "Reset undo state after a server change and check for a pending action."
   (unless (eql
-           omnigent-ui--session-undo-generation
+           omnigent-session--undo-generation
            omnigent-transport--generation)
     (setq
-     omnigent-ui--session-undo-generation
-     omnigent-transport--generation
-     omnigent-ui--session-undo-history nil
-     omnigent-ui--session-redo-history nil
-     omnigent-ui--session-action-pending nil))
-  (when omnigent-ui--session-action-pending
+     omnigent-session--undo-generation omnigent-transport--generation
+     omnigent-session--undo-history nil
+     omnigent-session--redo-history nil
+     omnigent-session--action-pending nil))
+  (when omnigent-session--action-pending
     (user-error "Wait for the current session change to finish")))
 
-(defun omnigent-ui--run-session-action
+(defun omnigent-session--run-action
     (action request &optional direction)
   "Run REQUEST for ACTION and process its result in the session list.
 For a new change, a successful REQUEST supplies an undo and redo pair.
 When DIRECTION is undo or redo, move the entry between history lists."
-  (omnigent-ui--check-session-action)
+  (omnigent-session--check-action)
   (let ((buffer (current-buffer))
         (generation omnigent-transport--generation)
         dispatched)
-    (setq omnigent-ui--session-action-pending t)
+    (setq omnigent-session--action-pending t)
     (unwind-protect
         (progn
           (funcall
@@ -2535,24 +2716,25 @@ When DIRECTION is undo or redo, move the entry between history lists."
              (when (and (buffer-live-p buffer)
                         (= generation omnigent-transport--generation))
                (with-current-buffer buffer
-                 (setq omnigent-ui--session-action-pending nil)
+                 (setq omnigent-session--action-pending nil)
                  (if (omnigent-transport-success-p status)
                      (pcase direction
                        ('undo
-                        (push (pop omnigent-ui--session-undo-history)
-                              omnigent-ui--session-redo-history)
+                        (push (pop
+                               omnigent-session--undo-history)
+                              omnigent-session--redo-history)
                         (message
                          "Session change undone. Press C-r to redo"))
                        ('redo
-                        (push (pop omnigent-ui--session-redo-history)
-                              omnigent-ui--session-undo-history)
+                        (push (pop
+                               omnigent-session--redo-history)
+                              omnigent-session--undo-history)
                         (message
                          "Session change redone. Press u to undo"))
                        (_
                         (when body
-                          (push
-                           body omnigent-ui--session-undo-history)
-                          (setq omnigent-ui--session-redo-history nil)
+                          (push body omnigent-session--undo-history)
+                          (setq omnigent-session--redo-history nil)
                           (message "%s complete. Press u to undo"
                                    action))))
                    (message "%s"
@@ -2562,39 +2744,37 @@ When DIRECTION is undo or redo, move the entry between history lists."
       (unless dispatched
         (when (buffer-live-p buffer)
           (with-current-buffer buffer
-            (setq omnigent-ui--session-action-pending nil)))))))
+            (setq omnigent-session--action-pending nil)))))))
 
-(defun omnigent-ui-undo-session-action ()
+(defun omnigent-session-undo-action ()
   "Undo the latest move or archive change in this session list."
   (interactive)
-  (unless (derived-mode-p 'omnigent-ui-sessions-mode)
+  (unless (derived-mode-p 'omnigent-session-mode)
     (user-error "Open the Omnigent session list first"))
-  (omnigent-ui--check-session-action)
-  (unless omnigent-ui--session-undo-history
+  (omnigent-session--check-action)
+  (unless omnigent-session--undo-history
     (user-error "No session change to undo"))
-  (omnigent-ui--run-session-action "Undo session change"
-                                   (caar
-                                    omnigent-ui--session-undo-history)
-                                   'undo))
+  (omnigent-session--run-action
+   "Undo session change" (caar omnigent-session--undo-history)
+   'undo))
 
-(defun omnigent-ui-redo-session-action ()
+(defun omnigent-session-redo-action ()
   "Redo the latest undone move or archive change in this session list."
   (interactive)
-  (unless (derived-mode-p 'omnigent-ui-sessions-mode)
+  (unless (derived-mode-p 'omnigent-session-mode)
     (user-error "Open the Omnigent session list first"))
-  (omnigent-ui--check-session-action)
-  (unless omnigent-ui--session-redo-history
+  (omnigent-session--check-action)
+  (unless omnigent-session--redo-history
     (user-error "No session change to redo"))
-  (omnigent-ui--run-session-action "Redo session change"
-                                   (cdar
-                                    omnigent-ui--session-redo-history)
-                                   'redo))
+  (omnigent-session--run-action
+   "Redo session change" (cdar omnigent-session--redo-history)
+   'redo))
 
-(defun omnigent-ui-move-session ()
+(defun omnigent-session-move-session ()
   "Move the session at point to a server project."
   (interactive)
-  (omnigent-ui--check-session-action)
-  (let ((id (omnigent-ui--session-id-at-point))
+  (omnigent-session--check-action)
+  (let ((id (omnigent-session--session-id-at-point))
         (buffer (current-buffer)))
     (unless id
       (user-error "No session at point"))
@@ -2602,7 +2782,7 @@ When DIRECTION is undo or redo, move the entry between history lists."
      (lambda (projects)
        (when-let* (((buffer-live-p buffer))
                    (destination
-                    (omnigent-ui--read-project
+                    (omnigent--read-project
                      "Move session to: " projects
                      t))
                    ((buffer-live-p buffer)))
@@ -2611,7 +2791,7 @@ When DIRECTION is undo or redo, move the entry between history lists."
                   (if (eq destination 'unassigned)
                       ""
                     (alist-get 'id destination))))
-             (omnigent-ui--run-session-action
+             (omnigent-session--run-action
               "Move session"
               (lambda (done)
                 (omnigent-transport-get-session
@@ -2648,21 +2828,21 @@ When DIRECTION is undo or redo, move the entry between history lists."
                                      body))))))))))))))))))
 
 (define-derived-mode
- omnigent-ui-sessions-mode
+ omnigent-session-mode
  special-mode
  "Omnigent Sessions"
  "Major mode for the Omnigent session list."
  (setq-local truncate-lines t))
 
 ;;;###autoload
-(defun omnigent-ui-sessions ()
+(defun omnigent-session-list ()
   "Show or hide the Omnigent session list in a left side window."
   (interactive)
   (let ((buffer (get-buffer-create "*omnigent-sessions*")))
     (with-current-buffer buffer
-      (unless (derived-mode-p 'omnigent-ui-sessions-mode)
-        (omnigent-ui-sessions-mode)))
-    (omnigent-ui-sessions-render)
+      (unless (derived-mode-p 'omnigent-session-mode)
+        (omnigent-session-mode)))
+    (omnigent-session-render)
     (if-let* ((window (get-buffer-window buffer)))
       (delete-window window)
       (display-buffer-in-side-window
@@ -2671,22 +2851,23 @@ When DIRECTION is undo or redo, move the entry between history lists."
         '((side . left) (slot . -1))
         (when omnigent-side-window-width
           `((window-width . ,omnigent-side-window-width)))))
-      (omnigent-ui--refresh-resources))))
+      (omnigent-session--refresh-resources))))
 
-(defun omnigent-ui-refresh ()
+(defun omnigent-session-refresh ()
   "Refresh the session tree and its PR rows."
   (interactive)
   (omnigent-sessions-refresh)
-  (omnigent-ui--refresh-resources t)
+  (omnigent-session--refresh-resources t)
   (dolist (entry omnigent-sessions--buffers)
     (omnigent-sessions-refresh-children (car entry))))
 
-(defun omnigent-ui--adjust-project-limit (amount)
+(defun omnigent-session--adjust-project-limit (amount)
   "Change the fetch limit for the project at point by AMOUNT."
-  (let* ((heading (omnigent-ui--project-heading))
+  (let* ((heading (omnigent-session--project-heading))
          (key
           (and heading
-               (get-text-property heading 'omnigent-ui-project))))
+               (get-text-property
+                heading 'omnigent-session-project))))
     (unless key
       (user-error "No project at point"))
     (unless (or (eq key 'unassigned)
@@ -2709,28 +2890,28 @@ When DIRECTION is undo or redo, move the entry between history lists."
         (omnigent-sessions-fetch-project key limit))
       (message "Project session limit: %d" limit))))
 
-(defun omnigent-ui-increase-session-limit (amount)
+(defun omnigent-session-increase-session-limit (amount)
   "Increase the current project's fetch limit by AMOUNT."
   (interactive "p")
-  (omnigent-ui--adjust-project-limit amount))
+  (omnigent-session--adjust-project-limit amount))
 
-(defun omnigent-ui-decrease-session-limit (amount)
+(defun omnigent-session-decrease-session-limit (amount)
   "Decrease the current project's fetch limit by AMOUNT."
   (interactive "p")
-  (omnigent-ui--adjust-project-limit (- amount)))
+  (omnigent-session--adjust-project-limit (- amount)))
 
-(defun omnigent-ui-toggle-archived-sessions ()
+(defun omnigent-session-toggle-archived-sessions ()
   "Toggle archived sessions in the list and refresh the session list."
   (interactive)
   (setq omnigent-fetch-archived-sessions
         (not omnigent-fetch-archived-sessions))
-  (omnigent-ui-refresh)
+  (omnigent-session-refresh)
   (message "Archived sessions %s"
            (if omnigent-fetch-archived-sessions
                "enabled"
              "disabled")))
 
-(defun omnigent-ui-create-project ()
+(defun omnigent-session-create-project ()
   "Prompt for a name and create a server project."
   (interactive)
   (let ((generation omnigent-transport--generation)
@@ -2741,12 +2922,12 @@ When DIRECTION is undo or redo, move the entry between history lists."
       (user-error "Server changed during project creation"))
     (omnigent-sessions-create-project name)))
 
-(defun omnigent-ui-rename-project ()
+(defun omnigent-session-rename-project ()
   "Rename the project heading at point in the session buffer."
   (interactive)
-  (unless (derived-mode-p 'omnigent-ui-sessions-mode)
+  (unless (derived-mode-p 'omnigent-session-mode)
     (user-error "Use this command in the session buffer"))
-  (let* ((id (omnigent-ui--project-at-point))
+  (let* ((id (omnigent-session--project-at-point))
          (project
           (cl-find
            id
@@ -2775,20 +2956,20 @@ When DIRECTION is undo or redo, move the entry between history lists."
              (omnigent-sessions--error "Rename project" status body)))
          `(("name" . ,new-name)))))))
 
-(defun omnigent-ui-rename-at-point ()
+(defun omnigent-session-rename-at-point ()
   "Rename the project or session at point in the session buffer."
   (interactive)
-  (unless (derived-mode-p 'omnigent-ui-sessions-mode)
+  (unless (derived-mode-p 'omnigent-session-mode)
     (user-error "Use this command in the session buffer"))
   (call-interactively
-   (if (omnigent-ui--project-at-point)
-       #'omnigent-ui-rename-project
-     #'omnigent-ui-rename-session)))
+   (if (omnigent-session--project-at-point)
+       #'omnigent-session-rename-project
+     #'omnigent-rename-session)))
 
-(defun omnigent-ui-delete-project ()
+(defun omnigent-session-delete-project ()
   "Delete the project heading at point after confirmation."
   (interactive)
-  (let ((id (omnigent-ui--project-at-point))
+  (let ((id (omnigent-session--project-at-point))
         (generation omnigent-transport--generation))
     (unless (stringp id)
       (user-error "No server project at point"))
@@ -2809,44 +2990,44 @@ When DIRECTION is undo or redo, move the entry between history lists."
           (user-error "Server changed during project deletion"))
         (omnigent-sessions-delete-project id)))))
 
-(defun omnigent-ui-delete-at-point ()
+(defun omnigent-session-delete-at-point ()
   "Delete the project or session at point."
   (interactive)
   (call-interactively
-   (if (omnigent-ui--project-at-point)
-       #'omnigent-ui-delete-project
-     #'omnigent-ui-delete)))
+   (if (omnigent-session--project-at-point)
+       #'omnigent-session-delete-project
+     #'omnigent-delete)))
 
-(defun omnigent-ui-archive-at-point ()
+(defun omnigent-session-archive-at-point ()
   "Toggle archive on the session at point."
   (interactive)
-  (when (omnigent-ui--project-at-point)
+  (when (omnigent-session--project-at-point)
     (user-error "The server does not support archiving projects"))
-  (omnigent-ui-archive))
+  (omnigent-archive))
 
-(defun omnigent-ui-archive ()
+(defun omnigent-archive ()
   "Toggle the selected session's archived state without deleting its history."
   (interactive)
-  (pcase-let* ((`(,id . ,title) (omnigent-ui--action-target))
+  (pcase-let* ((`(,id . ,title) (omnigent--action-target))
                (buffer (current-buffer))
                (session (omnigent-sessions-row id))
                (next-id
-                (when (and (derived-mode-p 'omnigent-ui-sessions-mode)
+                (when (and (derived-mode-p 'omnigent-session-mode)
                            (not (eq (alist-get 'archived session) t)))
                   (save-excursion
                     (while (get-text-property
                             (line-beginning-position)
-                            'omnigent-ui-resource)
+                            'omnigent-session-resource)
                       (forward-line -1))
                     (forward-line 1)
                     (or (get-text-property
-                         (point) 'omnigent-ui-session-id)
+                         (point) 'omnigent-session-id)
                         (progn
                           (forward-line -2)
                           (get-text-property
-                           (point) 'omnigent-ui-session-id)))))))
-    (if (derived-mode-p 'omnigent-ui-sessions-mode)
-        (omnigent-ui--run-session-action
+                           (point) 'omnigent-session-id)))))))
+    (if (derived-mode-p 'omnigent-session-mode)
+        (omnigent-session--run-action
          "Toggle archive"
          (lambda (done)
            (omnigent-sessions-toggle-archive
@@ -2856,14 +3037,16 @@ When DIRECTION is undo or redo, move the entry between history lists."
                          (omnigent-transport-success-p status)
                          (buffer-live-p buffer))
                 (with-current-buffer buffer
-                  (when (equal id (omnigent-ui--session-id-at-point))
+                  (when (equal
+                         id (omnigent-session--session-id-at-point))
                     (goto-char (point-min))
-                    (while (and
-                            (not (eobp))
-                            (not
-                             (equal
-                              next-id
-                              (omnigent-ui--session-id-at-point))))
+                    (while
+                        (and
+                         (not (eobp))
+                         (not
+                          (equal
+                           next-id
+                           (omnigent-session--session-id-at-point))))
                       (forward-line 1))
                     (when (eobp)
                       (goto-char (point-min))))))
@@ -2888,13 +3071,13 @@ When DIRECTION is undo or redo, move the entry between history lists."
       (omnigent-sessions-toggle-archive
        id
        (lambda (status body)
-         (omnigent-ui--action-result
+         (omnigent--action-result
           "Toggle archive" title status body))))))
 
-(defun omnigent-ui-rename-session ()
+(defun omnigent-rename-session ()
   "Change the title of the current session or the session at point."
   (interactive)
-  (pcase-let* ((`(,id . ,title) (omnigent-ui--action-target))
+  (pcase-let* ((`(,id . ,title) (omnigent--action-target))
                (new-title (read-string "Session title: " title)))
     (unless (equal title new-title)
       (omnigent-transport--request
@@ -2902,14 +3085,14 @@ When DIRECTION is undo or redo, move the entry between history lists."
        (lambda (status body)
          (if (omnigent-transport-success-p status)
              (omnigent-sessions-refresh)
-           (omnigent-ui--action-result "Rename" title status body)))
+           (omnigent--action-result "Rename" title status body)))
        `(("title" . ,new-title))))))
 
-(defun omnigent-ui-generate-session-title ()
+(defun omnigent-generate-session-title ()
   "Generate a title for the current session or the session at point.
 Use a private side chat on the source runner to read the conversation."
   (interactive)
-  (pcase-let ((`(,id . ,title) (omnigent-ui--action-target)))
+  (pcase-let ((`(,id . ,title) (omnigent--action-target)))
     (message "Generating title...")
     (omnigent-side-chat-ask
      id
@@ -2924,11 +3107,11 @@ Use a private side chat on the source runner to read the conversation."
               (string-trim body))))
     (cond
      ((not new-title)
-      (omnigent-ui--action-result
+      (omnigent--action-result
        "Generate title for" title status body))
      ((or (string-empty-p new-title)
           (string-match-p "[[:cntrl:]]" new-title))
-      (omnigent-ui--action-result
+      (omnigent--action-result
        "Generate title for"
        title
        nil
@@ -2942,7 +3125,7 @@ Use a private side chat on the source runner to read the conversation."
                (when (equal (current-message) "Generating title...")
                  (message nil))
                (omnigent-sessions-refresh))
-           (omnigent-ui--action-result
+           (omnigent--action-result
             "Rename" title patch-status patch-body)))
        `(("title" . ,new-title)))))))
 
@@ -3101,10 +3284,10 @@ Call ON-SEND, if non-nil, when the fork is ready to submit the question."
        (error
         (finish nil (error-message-string err)))))))
 
-(defun omnigent-ui-delete ()
+(defun omnigent-delete ()
   "Delete the selected session and its descendants after confirmation."
   (interactive)
-  (pcase-let ((`(,id . ,title) (omnigent-ui--action-target)))
+  (pcase-let ((`(,id . ,title) (omnigent--action-target)))
     (when
         (y-or-n-p
          (format
@@ -3112,15 +3295,15 @@ Call ON-SEND, if non-nil, when the fork is ready to submit the question."
           title))
       (omnigent-sessions-delete
        id
-       (apply-partially #'omnigent-ui--action-result
-                        "Delete" title)))))
+       (apply-partially #'omnigent--action-result "Delete" title)))))
 
-(defun omnigent-ui-pull-request-diff ()
+(defun omnigent-session-pull-request-diff ()
   "Fetch and display the diff for the linked PR at point."
   (interactive)
   (pcase-let ((`(,id . ,url)
                (or (get-text-property
-                    (line-beginning-position) 'omnigent-ui-resource)
+                    (line-beginning-position)
+                    'omnigent-session-resource)
                    (user-error "No pull request at point")))
               (buffer (current-buffer))
               (generation omnigent-transport--generation))
@@ -3135,13 +3318,13 @@ Call ON-SEND, if non-nil, when the fork is ready to submit the question."
                   (buffer-live-p buffer)
                   (cl-find
                    url
-                   (gethash id omnigent-ui--pull-requests)
+                   (gethash id omnigent-session--pull-requests)
                    :key (lambda (pr) (alist-get 'url pr))
                    :test #'equal))
          (if (and (omnigent-transport-success-p status)
                   (listp body)
                   (stringp (alist-get 'patch body)))
-             (omnigent-ui--diff-result
+             (omnigent--diff-result
               id url status (alist-get 'patch body))
            (message "%s"
                     (omnigent-transport-error-message
@@ -3151,7 +3334,7 @@ Call ON-SEND, if non-nil, when the fork is ready to submit the question."
   "Return the conversation's session ID or the session ID at point."
   (or (if (derived-mode-p 'omnigent-conversation-mode)
           omnigent-conversation-session-id
-        (omnigent-ui--session-id-at-point))
+        (omnigent-session--session-id-at-point))
       (user-error "No session at point")))
 
 (defun omnigent-workspace-diff ()
@@ -3204,7 +3387,7 @@ Call ON-SEND, if non-nil, when the fork is ready to submit the question."
                             result)
                  (when (buffer-live-p diff-buffer)
                    (with-current-buffer diff-buffer
-                     (setq omnigent-ui--workspace-id id)))))))))))))
+                     (setq omnigent--workspace-id id)))))))))))))
 
 (provide 'omnigent)
 ;;; omnigent.el ends here

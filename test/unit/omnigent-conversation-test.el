@@ -1662,13 +1662,14 @@
           opened)
       (insert "Review")
       (omnigent--attachment-set '("src/a.el"))
-      (omnigent-ui--markdown-apply (point-min) (point-max) nil)
+      (omnigent-conversation--markdown-apply
+       (point-min) (point-max) nil)
       (goto-char (point-min))
       (search-forward "Attached (files)")
       (should
        (eq
         (get-text-property (1- (point)) 'face)
-        'omnigent-ui-attachment))
+        'omnigent-conversation-attachment))
       (search-forward "src/a.el")
       (let ((button (button-at (1- (point)))))
         (should button)

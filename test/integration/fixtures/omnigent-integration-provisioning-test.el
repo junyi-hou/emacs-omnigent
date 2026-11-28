@@ -26,8 +26,9 @@
 
 (defun omnigent-integration--sandbox-display ()
   "Return the displayed sandbox status in the current conversation."
-  (when (overlayp omnigent-ui--sandbox-overlay)
-    (overlay-get omnigent-ui--sandbox-overlay 'before-string)))
+  (when (overlayp omnigent-conversation--sandbox-overlay)
+    (overlay-get
+     omnigent-conversation--sandbox-overlay 'before-string)))
 
 (ert-deftest omnigent-integration-managed-provisioning ()
   "Queue a message in a managed session before the local launcher is ready."

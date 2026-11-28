@@ -1,9 +1,9 @@
-;;; omnigent-ui-test.el --- Frontend tests -*- lexical-binding: t; -*-
+;;; omnigent-buffers-test.el --- Frontend tests -*- lexical-binding: t; -*-
 
 (require 'ert)
 (require 'omnigent)
 
-(ert-deftest omnigent-ui-session-age-uses-short-time-units ()
+(ert-deftest omnigent-session-age-uses-short-time-units ()
   "Show session ages from less than a minute to four weeks or more."
   (let* ((updated-at (encode-time 0 0 0 1 1 2025 t))
          (now (time-add updated-at (seconds-to-time (* 14 86400))))
@@ -13,41 +13,38 @@
     (cl-letf (((symbol-function 'current-time) (lambda () now)))
       (should
        (equal
-        (omnigent-ui--session-age
-         (funcall timestamp updated-at))
-        "2w"))
+        (omnigent--session-age (funcall timestamp updated-at)) "2w"))
       (should
        (equal
-        (omnigent-ui--session-age
+        (omnigent--session-age
          (funcall timestamp
                   (time-subtract now (seconds-to-time (* 3 86400)))))
         "3d"))
       (should
        (equal
-        (omnigent-ui--session-age
+        (omnigent--session-age
          (funcall timestamp
                   (time-subtract now (seconds-to-time (* 2 3600)))))
         "2hr"))
       (should
        (equal
-        (omnigent-ui--session-age
+        (omnigent--session-age
          (funcall timestamp (time-subtract now (seconds-to-time 59))))
         "<1m"))
       (should
        (equal
-        (omnigent-ui--session-age
+        (omnigent--session-age
          (funcall timestamp (time-subtract now (seconds-to-time 60))))
         "1m"))
       (should
        (equal
-        (omnigent-ui--session-age
+        (omnigent--session-age
          (funcall timestamp
                   (time-subtract now (seconds-to-time (* 4 604800)))))
         "4w+"))
-      (should (equal (omnigent-ui--session-age "invalid") "n/a")))))
+      (should (equal (omnigent--session-age "invalid") "n/a")))))
 
-(ert-deftest
-    omnigent-ui-session-render-truncates-title-to-window-width
+(ert-deftest omnigent-session-render-truncates-title-to-window-width
     ()
   "Keep a long session title on one line before its age label."
   (let ((omnigent-sessions
@@ -57,19 +54,19 @@
         (omnigent-sessions-truncated nil))
     (unwind-protect
         (with-current-buffer (get-buffer-create "*omnigent-sessions*")
-          (omnigent-ui-sessions-mode)
+          (omnigent-session-mode)
           (cl-letf (((symbol-function 'frame-width)
                      (lambda (&rest _) 16))
-                    ((symbol-function 'omnigent-ui--session-age)
+                    ((symbol-function 'omnigent--session-age)
                      (lambda (_) "2d")))
-            (omnigent-ui-sessions-render))
+            (omnigent-session-render))
           (should
            (equal
             (buffer-string) "▾ Unassigned\n  A very lon… 2d\n")))
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 
-(ert-deftest omnigent-ui-session-render-shows-only-project-ellipsis ()
+(ert-deftest omnigent-session-render-shows-only-project-ellipsis ()
   "Show one marker when only the project fetch identifies more rows."
   (let ((omnigent-sessions '(((id . "a") (title . "First"))))
         (omnigent-sessions-projects nil)
@@ -78,22 +75,21 @@
          (make-hash-table :test 'equal)))
     (unwind-protect
         (with-current-buffer (get-buffer-create "*omnigent-sessions*")
-          (omnigent-ui-sessions-mode)
-          (omnigent-ui-sessions-render)
+          (omnigent-session-mode)
+          (omnigent-session-render)
           (should-not (string-match-p "[.][.][.]" (buffer-string)))
           (puthash
            'unassigned
            (list 1 omnigent-sessions t)
            omnigent-sessions--project-lists)
-          (omnigent-ui-sessions-render)
+          (omnigent-session-render)
           (should (string-suffix-p "\n  ...\n" (buffer-string)))
           (should
            (= (how-many "^ *[.][.][.]$" (point-min) (point-max)) 1))
           (should-not (get-text-property (- (point-max) 4) 'face)))
       (kill-buffer "*omnigent-sessions*"))))
 
-(ert-deftest omnigent-ui-session-render-checks-unassigned-pagination
-    ()
+(ert-deftest omnigent-session-render-checks-unassigned-pagination ()
   "Show the Unassigned marker after its initial pagination check."
   (let ((omnigent-sessions nil)
         (omnigent-sessions-projects nil)
@@ -103,11 +99,11 @@
         (omnigent-sessions--project-more
          (make-hash-table :test 'equal))
         (omnigent-sessions--buffers nil)
-        (omnigent-sessions-change-hook '(omnigent-ui-sessions-render))
+        (omnigent-sessions-change-hook '(omnigent-session-render))
         callback)
     (unwind-protect
         (with-current-buffer (get-buffer-create "*omnigent-sessions*")
-          (omnigent-ui-sessions-mode)
+          (omnigent-session-mode)
           (cl-letf (((symbol-function
                       'omnigent-transport-list-sessions)
                      (lambda (fn project limit)
@@ -126,7 +122,7 @@
             (should (string-suffix-p "\n  ...\n" (buffer-string)))))
       (kill-buffer "*omnigent-sessions*"))))
 
-(ert-deftest omnigent-ui-session-render-preserves-selection ()
+(ert-deftest omnigent-session-render-preserves-selection ()
   "Render statuses and attention while preserving the selected session."
   (let ((omnigent-sessions
          '(((id . "a")
@@ -151,8 +147,8 @@
      omnigent-sessions--project-lists)
     (unwind-protect
         (with-current-buffer (get-buffer-create "*omnigent-sessions*")
-          (omnigent-ui-sessions-mode)
-          (omnigent-ui-sessions-render)
+          (omnigent-session-mode)
+          (omnigent-session-render)
           (goto-char (point-min))
           (search-forward "! First")
           (beginning-of-line)
@@ -160,13 +156,13 @@
           (should
            (eq
             (get-text-property (+ (point) 2) 'face)
-            'omnigent-ui-session-attention))
+            'omnigent-session-attention))
           (should
            (eq
             (get-text-property (+ (point) 4) 'face)
-            'omnigent-ui-session-running))
-          (omnigent-ui-sessions-render)
-          (should (equal (omnigent-ui--session-id-at-point) "a"))
+            'omnigent-session-running))
+          (omnigent-session-render)
+          (should (equal (omnigent-session--session-id-at-point) "a"))
           (should
            (equal
             (mapcar
@@ -176,7 +172,7 @@
                   (goto-char (point-min))
                   (search-forward (alist-get 'title session))
                   (line-beginning-position))
-                'omnigent-ui-session-id))
+                'omnigent-session-id))
              omnigent-sessions)
             '("a" "b" "archived")))
           (should
@@ -192,15 +188,15 @@
              (and (looking-at "  [.][.][.]$")
                   (eq
                    (get-text-property (+ (point) 2) 'face)
-                   'omnigent-ui-session-archived)))))
+                   'omnigent-session-archived)))))
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 
 
-(defmacro omnigent-ui-test--conversation (&rest body)
+(defmacro omnigent-conversation-test--buffer (&rest body)
   "Run BODY in an isolated conversation with no network or process activity."
   (declare (indent 0) (debug t))
-  `(let ((omnigent-ui--selected-session nil))
+  `(let ((omnigent-session--selected-session nil))
      (cl-letf (((symbol-function
                  'omnigent-transport-start-session-stream)
                 (lambda (&rest _) nil)))
@@ -213,14 +209,14 @@
           buffer-read-only nil)
          ,@body))))
 
-(ert-deftest omnigent-ui-btw-opens-side-chat ()
+(ert-deftest omnigent-conversation-btw-opens-side-chat ()
   "Open a side chat for /btw and send its question when supplied."
   (dolist (question '(nil "What changed?"))
     (with-temp-buffer
       (let ((side (current-buffer))
             opened
             sent)
-        (omnigent-ui-test--conversation
+        (omnigent-conversation-test--buffer
           (cl-letf (((symbol-function
                       'omnigent-conversation-side-chat)
                      (lambda (callback)
@@ -239,9 +235,11 @@
             (should opened)
             (should (equal sent question))))))))
 
-(ert-deftest omnigent-ui-side-chat-question-waits-for-connection ()
+(ert-deftest
+    omnigent-conversation-side-chat-question-waits-for-connection
+    ()
   "Keep the question in the composer until the side chat can send it."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (let (requests)
       (cl-letf (((symbol-function
                   'omnigent-transport-post-session-event)
@@ -267,16 +265,16 @@
            omnigent-conversation--prompt-start (point-max))
           "/literal question"))))))
 
-(ert-deftest omnigent-ui-conversation-header-tracks-session-data ()
+(ert-deftest omnigent-conversation-header-tracks-session-data ()
   "Show snapshot settings and update them from partial stream events."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (should (string-prefix-p " unknown | unknown" header-line-format))
     (should
      (eq (get-text-property 0 'face header-line-format) 'diff-header))
     (should
      (equal
       (mapcar
-       #'omnigent-ui--token-count
+       #'omnigent-conversation--token-count
        '(10 1000 1001 1200 1000000 1050001))
       '("10" "1k" "1.1k" "1.2k" "1m" "1.1m")))
     (omnigent-conversation--snapshot
@@ -340,12 +338,12 @@
      '((response . ((usage . ((total_tokens . 512)))))))
     (should (string-match-p "512 / 4.1k (12%%)" header-line-format))))
 
-(ert-deftest omnigent-ui-message-label-faces ()
+(ert-deftest omnigent-conversation-message-label-faces ()
   "Use the prompt face for user and agent labels."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (let ((outputs (make-hash-table :test 'equal)))
       (let ((user-start (point-max)))
-        (omnigent-ui--item
+        (omnigent-conversation--item
          "user"
          '((type . "message")
            (role . "user")
@@ -355,62 +353,65 @@
           (let ((inhibit-read-only t))
             (erase-buffer))
           (let ((agent-start (point)))
-            (omnigent-ui--item
+            (omnigent-conversation--item
              "agent"
              '((type . "message")
                (role . "assistant")
                (agent_name . "codex-native-ui")
                (content . "Hello"))
              outputs)
-            (should (eq user-face 'omnigent-ui-prompt))
+            (should (eq user-face 'omnigent-conversation-prompt))
             (should
              (eq
               (get-text-property agent-start 'face)
-              'omnigent-ui-prompt))))))))
+              'omnigent-conversation-prompt))))))))
 
-(ert-deftest omnigent-ui-prompt-busy-indicator ()
+(ert-deftest omnigent-conversation-prompt-busy-indicator ()
   "Animate the prompt while a response is active and stop when it ends."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (unwind-protect
         (progn
           (should
            (equal
             (overlay-get
-             omnigent-ui--busy-overlay 'before-string)
+             omnigent-conversation--busy-overlay 'before-string)
             " "))
           (omnigent-conversation--event
            "response.created" '((response . ((id . "response")))))
-          (should (timerp omnigent-ui--busy-timer))
+          (should (timerp omnigent-conversation--busy-timer))
           (omnigent-conversation--event
            "response.output_text.delta" '((delta . "streaming")))
-          (omnigent-ui--transcript-render)
+          (omnigent-conversation--transcript-render)
           (should
-           (= (overlay-start omnigent-ui--busy-overlay)
-              (marker-position omnigent-ui--composer-label)))
+           (= (overlay-start omnigent-conversation--busy-overlay)
+              (marker-position
+               omnigent-conversation--composer-label)))
           (should
            (equal
             (overlay-get
-             omnigent-ui--busy-overlay 'before-string)
+             omnigent-conversation--busy-overlay 'before-string)
             "|"))
-          (omnigent-ui--busy-tick (current-buffer))
+          (omnigent-conversation--busy-tick (current-buffer))
           (should
            (equal
             (overlay-get
-             omnigent-ui--busy-overlay 'before-string)
+             omnigent-conversation--busy-overlay 'before-string)
             "/"))
           (omnigent-conversation--event
            "response.completed" '((response . ((id . "response")))))
-          (should-not omnigent-ui--busy-timer)
+          (should-not omnigent-conversation--busy-timer)
           (should
            (equal
             (overlay-get
-             omnigent-ui--busy-overlay 'before-string)
+             omnigent-conversation--busy-overlay 'before-string)
             " ")))
-      (omnigent-ui--busy-stop))))
+      (omnigent-conversation--busy-stop))))
 
-(ert-deftest omnigent-ui-busy-indicator-survives-steering-delivery ()
+(ert-deftest
+    omnigent-conversation-busy-indicator-survives-steering-delivery
+    ()
   "Keep animating when a steering message finishes delivery during a turn."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (unwind-protect
         (progn
           (omnigent-conversation--event
@@ -420,58 +421,63 @@
            "response.created" '((response . ((id . "delivery")))))
           (omnigent-conversation--event
            "response.completed" '((response . ((id . "delivery")))))
-          (should (timerp omnigent-ui--busy-timer))
+          (should (timerp omnigent-conversation--busy-timer))
           (should-not
            (equal
             (overlay-get
-             omnigent-ui--busy-overlay 'before-string)
+             omnigent-conversation--busy-overlay 'before-string)
             " "))
           (omnigent-conversation--event
            "session.status"
            '((status . "idle") (response_id . "native")))
-          (should-not omnigent-ui--busy-timer))
-      (omnigent-ui--busy-stop))))
+          (should-not omnigent-conversation--busy-timer))
+      (omnigent-conversation--busy-stop))))
 
-(ert-deftest omnigent-ui-busy-indicator-survives-follow-up-completion
+(ert-deftest
+    omnigent-conversation-busy-indicator-survives-follow-up-completion
     ()
   "Keep animating after a follow-up while the session is still running."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--event
      "session.status" '((status . "running")))
-    (should (timerp omnigent-ui--busy-timer))
+    (should (timerp omnigent-conversation--busy-timer))
     (omnigent-conversation--event
      "response.created" '((response . ((id . "follow-up")))))
-    (should (timerp omnigent-ui--busy-timer))
+    (should (timerp omnigent-conversation--busy-timer))
     (omnigent-conversation--event
      "response.completed" '((response . ((id . "follow-up")))))
-    (should (timerp omnigent-ui--busy-timer))
-    (omnigent-ui--busy-tick (current-buffer))
+    (should (timerp omnigent-conversation--busy-timer))
+    (omnigent-conversation--busy-tick (current-buffer))
     (should-not
      (equal
-      (overlay-get omnigent-ui--busy-overlay 'before-string) " "))
+      (overlay-get
+       omnigent-conversation--busy-overlay 'before-string)
+      " "))
     (omnigent-conversation--event
      "session.status" '((status . "idle")))
-    (should-not omnigent-ui--busy-timer)))
+    (should-not omnigent-conversation--busy-timer)))
 
-(ert-deftest omnigent-ui-busy-indicator-recovers-session-status ()
+(ert-deftest
+    omnigent-conversation-busy-indicator-recovers-session-status
+    ()
   "Restore the prompt animation from the session snapshot."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (let ((snapshot
            '((items . [])
              (pending_inputs . [])
              (pending_elicitations . []))))
       (omnigent-conversation--snapshot
        200 (cons '(status . "running") snapshot))
-      (should (timerp omnigent-ui--busy-timer))
+      (should (timerp omnigent-conversation--busy-timer))
       (omnigent-conversation--snapshot
        200 (cons '(status . "idle") snapshot))
-      (should-not omnigent-ui--busy-timer))))
+      (should-not omnigent-conversation--busy-timer))))
 
 (ert-deftest
-    omnigent-ui-busy-indicator-ignores-late-session-list-update
+    omnigent-conversation-busy-indicator-ignores-late-session-list-update
     ()
   "Keep the prompt idle when the session list reports running after a turn."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (let ((omnigent-sessions
            '(((id . "conv_test") (status . "idle"))))
           (omnigent-sessions--buffers
@@ -480,18 +486,20 @@
       (omnigent-conversation--event
        "session.status"
        '((status . "running") (response_id . "turn")))
-      (should (timerp omnigent-ui--busy-timer))
+      (should (timerp omnigent-conversation--busy-timer))
       (omnigent-conversation--event
        "session.status" '((status . "idle") (response_id . "turn")))
-      (should-not omnigent-ui--busy-timer)
+      (should-not omnigent-conversation--busy-timer)
       (omnigent-sessions--frame
        '((type . "changed")
          (items . [((id . "conv_test") (status . "running"))])))
-      (should-not omnigent-ui--busy-timer))))
+      (should-not omnigent-conversation--busy-timer))))
 
-(ert-deftest omnigent-ui-sandbox-progress-recovers-and-clears ()
+(ert-deftest
+    omnigent-conversation-sandbox-progress-recovers-and-clears
+    ()
   "Render snapshot and live sandbox progress without writing transcript items."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (let ((snapshot
            '((items . [])
              (pending_inputs . [])
@@ -500,29 +508,32 @@
       (omnigent-conversation--snapshot
        200 (cons '(sandbox_status (stage . "cloning")) snapshot))
       (should-not buffer-read-only)
-      (should (timerp omnigent-ui--busy-timer))
+      (should (timerp omnigent-conversation--busy-timer))
       (should
        (string-match-p
         "Cloning repositories"
-        (overlay-get omnigent-ui--sandbox-overlay 'before-string)))
+        (overlay-get
+         omnigent-conversation--sandbox-overlay 'before-string)))
       (omnigent-conversation--event
        "session.sandbox_status" '((stage . "action_required")))
       (should buffer-read-only)
-      (should-not omnigent-ui--busy-timer)
+      (should-not omnigent-conversation--busy-timer)
       (omnigent-conversation--event
        "session.sandbox_status"
        '((stage . "failed") (error . "Provider unavailable")))
       (should buffer-read-only)
-      (should-not omnigent-ui--busy-timer)
+      (should-not omnigent-conversation--busy-timer)
       (should
        (string-match-p
         "Provider unavailable"
-        (overlay-get omnigent-ui--sandbox-overlay 'before-string)))
+        (overlay-get
+         omnigent-conversation--sandbox-overlay 'before-string)))
       (omnigent-conversation--event
        "session.sandbox_status" '((stage . "ready")))
       (should-not buffer-read-only)
       (should-not
-       (overlay-get omnigent-ui--sandbox-overlay 'before-string))
+       (overlay-get
+        omnigent-conversation--sandbox-overlay 'before-string))
       (should-not omnigent-conversation--order)
       (should
        (equal
@@ -530,13 +541,12 @@
          omnigent-conversation--prompt-start (point-max))
         "draft")))))
 
-(ert-deftest omnigent-ui-undo-and-redo-move-and-archive ()
+(ert-deftest omnigent-session-undo-and-redo-move-and-archive ()
   "Undo and redo a move and a mixed archive branch in order."
   (with-temp-buffer
-    (omnigent-ui-sessions-mode)
+    (omnigent-session-mode)
     (let ((inhibit-read-only t))
-      (insert
-       (propertize "Parent\n" 'omnigent-ui-session-id "parent")))
+      (insert (propertize "Parent\n" 'omnigent-session-id "parent")))
     (goto-char (point-min))
     (let ((omnigent-sessions '(((id . "parent") (title . "Parent"))))
           (states
@@ -590,16 +600,16 @@
                      (funcall done 200 nil))))
                 ((symbol-function 'omnigent-sessions-refresh)
                  #'ignore))
-        (omnigent-ui-move-session)
+        (omnigent-session-move-session)
         (should (equal project "project"))
-        (omnigent-ui-archive-at-point)
+        (omnigent-session-archive-at-point)
         (should
          (seq-every-p (lambda (entry) (eq (cdr entry) t)) states))
         (setq fail-archive-write t)
         (call-interactively (key-binding (kbd "u")))
-        (should (= (length omnigent-ui--session-undo-history) 2))
+        (should (= (length omnigent-session--undo-history) 2))
         (setq fail-archive-write nil)
-        (omnigent-ui-undo-session-action)
+        (omnigent-session-undo-action)
         (should
          (equal
           states
@@ -607,40 +617,40 @@
             ("active" . :json-false)
             ("archived" . t))))
         (should (equal project "project"))
-        (omnigent-ui-undo-session-action)
+        (omnigent-session-undo-action)
         (should (equal project ""))
         (should-error
-         (omnigent-ui-undo-session-action)
+         (omnigent-session-undo-action)
          :type 'user-error)
         (call-interactively (key-binding (kbd "C-r")))
         (should (equal project "project"))
         (setq fail-archive-write t)
-        (omnigent-ui-redo-session-action)
-        (should (= (length omnigent-ui--session-redo-history) 1))
+        (omnigent-session-redo-action)
+        (should (= (length omnigent-session--redo-history) 1))
         (setq fail-archive-write nil)
-        (omnigent-ui-redo-session-action)
+        (omnigent-session-redo-action)
         (should
          (seq-every-p (lambda (entry) (eq (cdr entry) t)) states))
         (should-error
-         (omnigent-ui-redo-session-action)
+         (omnigent-session-redo-action)
          :type 'user-error)
-        (omnigent-ui-undo-session-action)
+        (omnigent-session-undo-action)
         (should (eq (cdr (assoc "active" states)) :json-false))
-        (omnigent-ui-archive-at-point)
+        (omnigent-session-archive-at-point)
         (should-error
-         (omnigent-ui-redo-session-action)
+         (omnigent-session-redo-action)
          :type 'user-error)
-        (omnigent-ui-undo-session-action)
+        (omnigent-session-undo-action)
         (let ((omnigent-transport--generation
                (1+ omnigent-transport--generation)))
           (should-error
-           (omnigent-ui-redo-session-action)
+           (omnigent-session-redo-action)
            :type 'user-error)
           (should-error
-           (omnigent-ui-undo-session-action)
+           (omnigent-session-undo-action)
            :type 'user-error))))))
 
-(ert-deftest omnigent-ui-session-archive-and-delete-commands ()
+(ert-deftest omnigent-session-archive-and-delete-commands ()
   "Archive the selected session and require confirmation for permanent deletion."
   (dolist (conversation '(nil t))
     (with-temp-buffer
@@ -648,9 +658,8 @@
           (setq
            major-mode 'omnigent-conversation-mode
            omnigent-conversation-session-id "target")
-        (setq major-mode 'omnigent-ui-sessions-mode)
-        (insert
-         (propertize "Target\n" 'omnigent-ui-session-id "target"))
+        (setq major-mode 'omnigent-session-mode)
+        (insert (propertize "Target\n" 'omnigent-session-id "target"))
         (goto-char (point-min)))
       (let ((omnigent-sessions
              '(((id . "target") (title . "Target"))))
@@ -676,17 +685,17 @@
                       (string-match-p
                        "Permanently delete session Target" prompt))
                      confirmation)))
-          (omnigent-ui-archive)
+          (omnigent-archive)
           (should (equal archived "target"))
-          (omnigent-ui-delete)
+          (omnigent-delete)
           (should-not deleted)
           (setq confirmation t)
-          (omnigent-ui-delete)
+          (omnigent-delete)
           (should (equal deleted "target")))))))
 
-(ert-deftest omnigent-ui-conversation-user-permission ()
+(ert-deftest omnigent-conversation-user-permission ()
   "Freeze read-only sessions and restore editing when permission increases."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (insert "unsent draft")
     (omnigent-conversation--snapshot
      200
@@ -699,8 +708,8 @@
     (should-error (insert "more") :type 'buffer-read-only)
     (should-error (omnigent-conversation-send) :type 'user-error)
     (should-error (omnigent-conversation-interrupt) :type 'user-error)
-    (should-error (omnigent-ui-archive) :type 'user-error)
-    (should-error (omnigent-ui-delete) :type 'user-error)
+    (should-error (omnigent-archive) :type 'user-error)
+    (should-error (omnigent-delete) :type 'user-error)
     (omnigent-conversation--snapshot
      200
      '((permission_level . 2)
@@ -722,10 +731,11 @@
        (pending_elicitations . [])))
     (should (string-prefix-p " unknown [M] |" header-line-format))))
 
-(ert-deftest omnigent-ui-transcript-stream-preserves-composer-and-fold
+(ert-deftest
+    omnigent-conversation-transcript-stream-preserves-composer-and-fold
     ()
   "Render streamed blocks without replacing input or opening collapsed folds."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (insert "draft\ncontinued")
     (let ((position (point)))
       (omnigent-conversation--event
@@ -750,7 +760,7 @@
       (goto-char (point-min))
       (forward-line 1)
       (should (invisible-p (point)))
-      (omnigent-ui--fold-button (button-at (point-min)))
+      (omnigent-conversation--fold-button (button-at (point-min)))
       (goto-char (point-min))
       (forward-line 1)
       (should-not (invisible-p (point)))
@@ -764,9 +774,9 @@
       (should-not (invisible-p (point)))
       (should-error (delete-char 1) :type 'text-read-only))))
 
-(ert-deftest omnigent-ui-fold-commands-use-block-at-point ()
+(ert-deftest omnigent-conversation-fold-commands-use-block-at-point ()
   "Open and close the fold that contains point."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--event
      "response.output_item.added"
      '((item
@@ -784,9 +794,9 @@
     (forward-line 1)
     (should (invisible-p (point)))))
 
-(ert-deftest omnigent-ui-fold-commands-work-at-indicator ()
+(ert-deftest omnigent-conversation-fold-commands-work-at-indicator ()
   "Open and close a fold when point is on its indicator."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--event
      "response.output_item.added"
      '((item
@@ -801,21 +811,24 @@
     (goto-char (point-min))
     (should (eq (char-after) ?▶))))
 
-(ert-deftest omnigent-ui-fold-face-survives-fontification ()
+(ert-deftest omnigent-conversation-fold-face-survives-fontification ()
   "Keep the fold marker face when fontification removes its explicit face."
   (with-temp-buffer
-    (let ((omnigent-ui--folds (make-hash-table :test 'equal)))
-      (omnigent-ui--fold "fold" "Heading" "Body"))
+    (let ((omnigent-conversation--folds
+           (make-hash-table :test 'equal)))
+      (omnigent-conversation--fold "fold" "Heading" "Body"))
     (remove-text-properties (point-min) (point-max) '(face nil))
     (should
      (eq
-      (get-char-property (point-min) 'face) 'omnigent-ui-fold-marker))
+      (get-char-property (point-min) 'face)
+      'omnigent-conversation-fold-marker))
     (should-not
-     (face-attribute 'omnigent-ui-fold-marker :underline nil t))))
+     (face-attribute 'omnigent-conversation-fold-marker :underline
+                     nil t))))
 
-(ert-deftest omnigent-ui-fold-spacing-and-no-ellipsis ()
+(ert-deftest omnigent-conversation-fold-spacing-and-no-ellipsis ()
   "Keep visible blank lines between items with either fold state."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--snapshot
      200
      '((items
@@ -830,12 +843,12 @@
          ((id . "error") (type . "error") (text . "failed"))])
        (pending_inputs . []) (pending_elicitations . [])))
     (dolist (open '(nil t))
-      (puthash "first" open omnigent-ui--folds)
-      (puthash "second" open omnigent-ui--folds)
-      (omnigent-ui--transcript)
+      (puthash "first" open omnigent-conversation--folds)
+      (puthash "second" open omnigent-conversation--folds)
+      (omnigent-conversation--transcript)
       (let ((position (point-min))
             visible)
-        (while (< position omnigent-ui--request-start)
+        (while (< position omnigent-conversation--request-start)
           (if (invisible-p position)
               (should (eq (invisible-p position) t))
             (push (char-after position) visible))
@@ -849,9 +862,9 @@
              "▶ Thinking\n\n▶ Thinking\n\n")
            "You:\nhello\n\nError:\nfailed\n\n")))))))
 
-(ert-deftest omnigent-ui-tool-output-merges-and-bounds ()
+(ert-deftest omnigent-conversation-tool-output-merges-and-bounds ()
   "Merge tool outputs into one fold and apply both deterministic size limits."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--event
      "response.output_item.done"
      '((item
@@ -876,14 +889,14 @@
            (text
             (mapconcat #'identity (cons line (make-list 1100 "short"))
                        "\n"))
-           (bounded (omnigent-ui--bounded-output text)))
+           (bounded (omnigent-conversation--bounded-output text)))
       (should (string-match-p "32600 characters omitted" bounded))
       (should (string-match-p "301 lines omitted" bounded))
       (should (= (length (split-string bounded "\n")) 801)))))
 
-(ert-deftest omnigent-ui-tool-headings-cover-pi-harness ()
+(ert-deftest omnigent-conversation-tool-headings-cover-pi-harness ()
   "Render concise headings for Pi tool names bash, read, and edit."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (dolist (tool
              '(("bash" . "{\"command\":\"ls -la\"}")
                ("read" . "{\"path\":\"src/a.el\"}")
@@ -914,32 +927,36 @@
       (should (string-match-p "read src/a.el" text))
       (should (= 3 (how-many "▶ " (point-min) (point-max)))))))
 
-(ert-deftest omnigent-ui-shell-heading-unwraps-quoted-login-shell ()
+(ert-deftest
+    omnigent-conversation-shell-heading-unwraps-quoted-login-shell
+    ()
   "Strip /bin/zsh, -lc, and shell quotes from the tool heading."
   (should
    (equal
-    (omnigent-ui--unwrap-shell-command
+    (omnigent-conversation--unwrap-shell-command
      "/bin/zsh -lc \"rg -n pattern\\; echo done\"")
     "rg -n pattern\\; echo done"))
   (should
    (equal
-    (omnigent-ui--unwrap-shell-command
+    (omnigent-conversation--unwrap-shell-command
      "/bin/zsh -lc \"echo one\" \"echo two\"")
     "echo one\" \"echo two"))
   (should
    (equal
-    (omnigent-ui--unwrap-shell-command
+    (omnigent-conversation--unwrap-shell-command
      "/bin/zsh -lc \"unbalanced quote")
     "/bin/zsh -lc \"unbalanced quote"))
   (should
    (equal
-    (omnigent-ui--unwrap-shell-command
+    (omnigent-conversation--unwrap-shell-command
      "/bin/zsh -lc \"echo \\\"\"'foo\"")
     "echo \\\"\"'foo")))
 
-(ert-deftest omnigent-ui-inline-forms-survive-output-and-failure ()
+(ert-deftest
+    omnigent-conversation-inline-forms-survive-output-and-failure
+    ()
   "Keep field edits and composer text while streaming and a resolve is pending."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (insert "composer")
     (omnigent-conversation--event
      "response.elicitation_request"
@@ -957,13 +974,13 @@
     (let* ((field
             (cl-find
              "name"
-             omnigent-ui--widgets
+             omnigent-conversation--widgets
              :key
              (lambda (widget) (widget-get widget :field-name))
              :test #'equal))
            callback)
       (widget-value-set field "Alice")
-      (omnigent-ui--field-notify field)
+      (omnigent-conversation--field-notify field)
       (omnigent-conversation--event
        "response.output_item.done"
        '((item
@@ -1003,9 +1020,10 @@
          omnigent-conversation--prompt-start (point-max))
         "composer suffix")))))
 
-(ert-deftest omnigent-ui-secret-stays-out-of-text-and-undo ()
+(ert-deftest omnigent-conversation-secret-stays-out-of-text-and-undo
+    ()
   "Read a secret into the draft without retaining clear text in buffer or undo."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (buffer-enable-undo)
     (omnigent-conversation--event
      "response.elicitation_request"
@@ -1023,13 +1041,13 @@
     (let ((field
            (cl-find
             "token"
-            omnigent-ui--widgets
+            omnigent-conversation--widgets
             :key
             (lambda (widget) (widget-get widget :field-name))
             :test #'equal)))
       (cl-letf (((symbol-function 'read-passwd)
                  (lambda (&rest _) "sensitive-value")))
-        (omnigent-ui--secret field)))
+        (omnigent-conversation--secret field)))
     (should
      (equal
       (gethash
@@ -1040,10 +1058,11 @@
      (string-match-p
       "sensitive-value" (format "%S" buffer-undo-list)))))
 
-(ert-deftest omnigent-ui-requests-arrive-in-order-without-moving-point
+(ert-deftest
+    omnigent-conversation-requests-arrive-in-order-without-moving-point
     ()
   "Keep pending requests oldest first and retain the point inside the composer."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (insert "draft")
     (dolist (id '("first" "second"))
       (omnigent-conversation--event
@@ -1061,9 +1080,10 @@
      (string-match-p
       "first\n\n.*\n\n# Question\n\n> second" (buffer-string)))))
 
-(ert-deftest omnigent-ui-schema-validation-shows-all-errors ()
+(ert-deftest omnigent-conversation-schema-validation-shows-all-errors
+    ()
   "Display every invalid field and select the first invalid field."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--event
      "response.elicitation_request"
      '((elicitation_id . "q")
@@ -1080,25 +1100,26 @@
     (let ((submit
            (cl-find
             'accept
-            omnigent-ui--widgets
+            omnigent-conversation--widgets
             :key
             (lambda (widget) (widget-get widget :response-action)))))
-      (omnigent-ui--submit-widget submit)
+      (omnigent-conversation--submit-widget submit)
       (should (= (how-many "Required" (point-min) (point-max)) 2))
       (should
        (= (point)
           (widget-get
            (cl-find
             "first"
-            omnigent-ui--widgets
+            omnigent-conversation--widgets
             :key
             (lambda (widget) (widget-get widget :field-name))
             :test #'equal)
            :from))))))
 
-(ert-deftest omnigent-ui-questions-other-and-multiple-values ()
+(ert-deftest omnigent-conversation-questions-other-and-multiple-values
+    ()
   "Use question IDs and transmit editable Other answers and multiple choices."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--event
      "response.elicitation_request"
      '((elicitation_id . "q")
@@ -1127,12 +1148,12 @@
       (let ((field
              (cl-find
               (car entry)
-              omnigent-ui--widgets
+              omnigent-conversation--widgets
               :key
               (lambda (widget) (widget-get widget :field-name))
               :test #'equal)))
         (widget-value-set field (cdr entry))
-        (omnigent-ui--field-notify field)))
+        (omnigent-conversation--field-notify field)))
     (should-not (omnigent-conversation-elicitation-validate "q"))
     (let (payload)
       (cl-letf (((symbol-function 'omnigent-transport--request)
@@ -1143,9 +1164,11 @@
         (should (equal (gethash "choice" content) "Custom"))
         (should (equal (gethash "many" content) ["A" "B"]))))))
 
-(ert-deftest omnigent-ui-external-url-has-no-response-actions ()
+(ert-deftest
+    omnigent-conversation-external-url-has-no-response-actions
+    ()
   "Render external URLs as links and internal approval URLs as actions."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--event
      "response.elicitation_request"
      '((elicitation_id . "external")
@@ -1154,21 +1177,21 @@
      (cl-some
       (lambda (widget)
         (widget-get widget :response-action))
-      omnigent-ui--widgets))
+      omnigent-conversation--widgets))
     (omnigent-conversation--event
      "response.elicitation_request"
      '((elicitation_id . "approval")
        (params . ((url . "/approve/id")))))
-    (goto-char omnigent-ui--request-start)
+    (goto-char omnigent-conversation--request-start)
     (should
      (search-forward "# Approval required\n\n[Approve] [Decline]"
-                     omnigent-ui--pending-start t))))
+                     omnigent-conversation--pending-start t))))
 
 (ert-deftest
-    omnigent-ui-approval-card-renders-structured-command-details
+    omnigent-conversation-approval-card-renders-structured-command-details
     ()
   "Render command details as Markdown and keep the response buttons active."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--event
      "response.elicitation_request"
      '((elicitation_id . "command")
@@ -1181,38 +1204,40 @@
          (reason . "First line\nSecond line")
          (command . "printf '%s' value")
          (cwd . "/work tree")))))
-    (goto-char omnigent-ui--request-start)
+    (goto-char omnigent-conversation--request-start)
     (should
      (looking-at-p
       (regexp-quote
        (concat
         "# Approval required\n\n> First line\n> Second line\n\n"
         "```\nprintf '%s' value\n```\n\n> cwd: `/work tree`\n\n[Approve] [Decline]"))))
-    (should (get-text-property (point) 'omnigent-ui-markdown-done))
+    (should
+     (get-text-property (point) 'omnigent-conversation-markdown-done))
     (should (equal (get-text-property (point) 'line-prefix) "   "))
     (should (equal (get-text-property (point) 'wrap-prefix) "   "))
     (should-not
      (re-search-forward
       "internal-policy\\|internal-phase\\|raw-preview"
-      omnigent-ui--pending-start t))
+      omnigent-conversation--pending-start t))
     (should
      (equal
       (mapcar
        (lambda (widget)
          (widget-get widget :response-action))
-       omnigent-ui--widgets)
+       omnigent-conversation--widgets)
       '(decline accept)))))
 
 (ert-deftest
-    omnigent-ui-composer-continuation-indentation-is-display-only
+    omnigent-conversation-composer-continuation-indentation-is-display-only
     ()
   "Indent both explicit and visual continuations without changing sent text."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (should
      (= (+ (string-width
-            (overlay-get omnigent-ui--busy-overlay 'before-string))
+            (overlay-get
+             omnigent-conversation--busy-overlay 'before-string))
            (- omnigent-conversation--prompt-start
-              omnigent-ui--composer-label))
+              omnigent-conversation--composer-label))
         3))
     (insert "first\nsecond")
     (should
@@ -1234,26 +1259,26 @@
        omnigent-conversation--prompt-start 'wrap-prefix)
       "   "))))
 
-(ert-deftest omnigent-ui-diff-reuses-buffer-and-keeps-it-on-failure ()
+(ert-deftest omnigent-diff-reuses-buffer-and-keeps-it-on-failure ()
   "Reuse successful diff buffers and leave existing contents on failed fetch."
   (save-window-excursion
     (let (buffer)
       (unwind-protect
           (progn
-            (omnigent-ui--diff-result
+            (omnigent--diff-result
              "diff-test" "file" 200 "first diff\n")
             (setq buffer (current-buffer))
             (should (derived-mode-p 'diff-mode))
-            (omnigent-ui--diff-result "diff-test" "file" 500 "bad")
+            (omnigent--diff-result "diff-test" "file" 500 "bad")
             (should (equal (buffer-string) "first diff\n"))
-            (omnigent-ui--diff-result
+            (omnigent--diff-result
              "diff-test" "file" 200 "new diff\n")
             (should (eq buffer (current-buffer)))
             (should (equal (buffer-string) "new diff\n")))
         (when (buffer-live-p buffer)
           (kill-buffer buffer))))))
 
-(ert-deftest omnigent-ui-workspace-diff-keymaps ()
+(ert-deftest omnigent-workspace-diff-keymaps ()
   "Run the patch handler in the session diff buffer from both keymaps."
   (let ((omnigent-sessions
          '(((id . "diff-test")
@@ -1271,14 +1296,14 @@
                  (lambda (id callback)
                    (should (equal id "diff-test"))
                    (funcall callback 200 "workspace patch"))))
-        (omnigent-ui-test--conversation
+        (omnigent-conversation-test--buffer
           (setq omnigent-conversation-session-id "diff-test")
           (call-interactively (key-binding (kbd "C-c C-g"))))
         (unwind-protect
             (with-current-buffer (get-buffer-create
                                   "*omnigent-sessions*")
-              (omnigent-ui-sessions-mode)
-              (omnigent-ui-sessions-render)
+              (omnigent-session-mode)
+              (omnigent-session-render)
               (goto-char (point-min))
               (should (search-forward "Diff test" nil t))
               (call-interactively (key-binding (kbd "C-c C-g"))))
@@ -1297,13 +1322,12 @@
          "/workspace/"
          "*omnigent-diff: diff-test:workspace*"))))))
 
-(ert-deftest
-    omnigent-ui-workspace-diff-fetches-and-displays-server-patch
+(ert-deftest omnigent-workspace-diff-fetches-and-displays-server-patch
     ()
   "Display the patch from the changed path and file contents returned by the server."
   (let (paths
         displayed)
-    (omnigent-ui-test--conversation
+    (omnigent-conversation-test--buffer
       (cl-letf (((symbol-function 'omnigent-transport--request)
                  (lambda (_id method path callback &optional _)
                    (should (equal method "GET"))
@@ -1328,11 +1352,11 @@
         (should (buffer-live-p displayed))
         (unwind-protect
             (with-current-buffer displayed
-              (should (equal omnigent-ui--workspace-id "conv_test"))
+              (should (equal omnigent--workspace-id "conv_test"))
               (should (string-search "-old\n+new\n" (buffer-string))))
           (kill-buffer displayed))))))
 
-(ert-deftest omnigent-ui-workspace-diff-directory ()
+(ert-deftest omnigent-workspace-diff-directory ()
   "Use the mapped workspace root for the diff buffer."
   (save-window-excursion
     (let ((omnigent-sessions
@@ -1344,8 +1368,7 @@
           buffer)
       (unwind-protect
           (progn
-            (omnigent-ui--diff-result
-             "mapping" "src/file" 200 "diff\n")
+            (omnigent--diff-result "mapping" "src/file" 200 "diff\n")
             (setq buffer (current-buffer))
             (should
              (equal
@@ -1353,11 +1376,11 @@
         (when (buffer-live-p buffer)
           (kill-buffer buffer))))))
 
-(ert-deftest omnigent-ui-session-list-opens-on-first-connection ()
+(ert-deftest omnigent-session-list-opens-on-first-connection ()
   "Open the session list only after the first successful connection."
   (save-window-excursion
     (let ((omnigent-sessions-updates nil)
-          (omnigent-ui--idle-timer nil)
+          (omnigent--idle-timer nil)
           (omnigent-open-session-list-on-connect t)
           opened)
       (unwind-protect
@@ -1372,22 +1395,22 @@
                       'omnigent-sessions-refresh-projects)
                      #'ignore)
                     ((symbol-function 'run-with-idle-timer) #'ignore))
-            (omnigent-ui-start)
+            (omnigent--start)
             (should-not (get-buffer-window "*omnigent-sessions*"))
             (funcall opened)
             (should (get-buffer-window "*omnigent-sessions*"))
-            (omnigent-ui-sessions)
+            (omnigent-session-list)
             (should-not (get-buffer-window "*omnigent-sessions*"))
             (funcall opened)
             (should-not (get-buffer-window "*omnigent-sessions*")))
         (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
           (kill-buffer buffer))))))
 
-(ert-deftest omnigent-ui-session-list-stays-closed-when-disabled ()
+(ert-deftest omnigent-session-list-stays-closed-when-disabled ()
   "Keep the session list closed when automatic opening is disabled."
   (save-window-excursion
     (let ((omnigent-sessions-updates nil)
-          (omnigent-ui--idle-timer nil)
+          (omnigent--idle-timer nil)
           (omnigent-open-session-list-on-connect nil)
           opened)
       (cl-letf (((symbol-function
@@ -1400,13 +1423,13 @@
                 ((symbol-function 'omnigent-sessions-refresh-projects)
                  #'ignore)
                 ((symbol-function 'run-with-idle-timer) #'ignore))
-        (omnigent-ui-start)
+        (omnigent--start)
         (funcall opened)
         (should-not (get-buffer-window "*omnigent-sessions*"))))))
 
-(ert-deftest omnigent-ui-idle-timer-stops-on-reset ()
+(ert-deftest omnigent-idle-timer-stops-on-reset ()
   "Start one ten-second idle timer even with hidden views and cancel on reset."
-  (let ((omnigent-ui--idle-timer nil)
+  (let ((omnigent--idle-timer nil)
         (omnigent-sessions-updates 'updates)
         (calls 0)
         canceled)
@@ -1421,34 +1444,34 @@
                (lambda (timer) (eq timer 'timer)))
               ((symbol-function 'cancel-timer)
                (lambda (timer) (setq canceled timer))))
-      (omnigent-ui-start)
-      (omnigent-ui-start)
+      (omnigent--start)
+      (omnigent--start)
       (should (= calls 1))
-      (omnigent-ui-reset)
+      (omnigent--reset)
       (should (eq canceled 'timer))
-      (should-not omnigent-ui--idle-timer))))
+      (should-not omnigent--idle-timer))))
 
-(ert-deftest omnigent-ui-selected-title-keeps-state-face ()
+(ert-deftest omnigent-session-selected-title-keeps-state-face ()
   "Add bold to the selected title without losing its archived state face."
   (let ((omnigent-sessions
          '(((id . "selected")
             (title . "Title")
             (archived . t)
             (status . "running"))))
-        (omnigent-ui--selected-session "selected")
+        (omnigent-session--selected-session "selected")
         (omnigent-sessions-truncated nil))
     (unwind-protect
         (with-current-buffer (get-buffer-create "*omnigent-sessions*")
-          (omnigent-ui-sessions-mode)
-          (omnigent-ui-sessions-render)
+          (omnigent-session-mode)
+          (omnigent-session-render)
           (should
            (equal
             (get-text-property
              (1- (search-forward "Title")) 'face)
-            '(bold omnigent-ui-session-archived))))
+            '(bold omnigent-session-archived))))
       (kill-buffer "*omnigent-sessions*"))))
 
-(ert-deftest omnigent-ui-side-window-size ()
+(ert-deftest omnigent-session-side-window-size ()
   "Pass the configured width to the session side window."
   (let ((omnigent-side-window-width 32)
         action)
@@ -1456,29 +1479,29 @@
         (cl-letf (((symbol-function 'display-buffer-in-side-window)
                    (lambda (_buffer settings)
                      (setq action settings))))
-          (omnigent-ui-sessions)
+          (omnigent-session-list)
           (should (equal (alist-get 'window-width action) 32)))
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 
-(ert-deftest omnigent-ui-open-keeps-session-side-window ()
+(ert-deftest omnigent-open-keeps-session-side-window ()
   "Open the selected conversation in the main window, leaving sessions visible."
   (save-window-excursion
     (let ((omnigent-sessions
            '(((id . "side-test") (title . "Side test"))))
           (omnigent-sessions--buffers nil)
-          (omnigent-ui--selected-session nil)
+          (omnigent-session--selected-session nil)
           buffer)
       (cl-letf (((symbol-function
                   'omnigent-transport-start-session-stream)
                  (lambda (&rest _) nil)))
         (unwind-protect
             (progn
-              (omnigent-ui-sessions)
+              (omnigent-session-list)
               (select-window
                (get-buffer-window "*omnigent-sessions*"))
               (forward-line 1)
-              (omnigent-ui-sessions-open)
+              (omnigent-session-open-at-point)
               (setq buffer (current-buffer))
               (should (derived-mode-p 'omnigent-conversation-mode))
               (should-not
@@ -1489,9 +1512,10 @@
           (when (get-buffer "*omnigent-sessions*")
             (kill-buffer "*omnigent-sessions*")))))))
 
-(ert-deftest omnigent-ui-incoming-request-keeps-field-point ()
+(ert-deftest omnigent-conversation-incoming-request-keeps-field-point
+    ()
   "Preserve edited field text and its cursor offset when another request arrives."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--event
      "response.elicitation_request"
      '((elicitation_id . "first")
@@ -1504,12 +1528,12 @@
     (let ((field
            (cl-find
             "name"
-            omnigent-ui--widgets
+            omnigent-conversation--widgets
             :key
             (lambda (widget) (widget-get widget :field-name))
             :test #'equal)))
       (widget-value-set field "Alice")
-      (omnigent-ui--field-notify field)
+      (omnigent-conversation--field-notify field)
       (goto-char (+ (widget-get field :from) 2)))
     (omnigent-conversation--event
      "response.elicitation_request"
@@ -1517,23 +1541,24 @@
     (let ((field
            (cl-find
             "name"
-            omnigent-ui--widgets
+            omnigent-conversation--widgets
             :key
             (lambda (widget) (widget-get widget :field-name))
             :test #'equal)))
       (should (= (point) (+ (widget-get field :from) 2)))
       (should (equal (widget-value field) "Alice")))))
 
-(ert-deftest omnigent-ui-stream-final-keeps-expanded-provisional-fold
+(ert-deftest
+    omnigent-conversation-stream-final-keeps-expanded-provisional-fold
     ()
   "Retain a user-expanded fold when the final server item adopts its stable ID."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--event
      "response.in_progress" '((response . ((id . "turn")))))
     (omnigent-conversation--event
      "response.reasoning_text.delta" '((delta . "think")))
-    (omnigent-ui--transcript-flush (current-buffer))
-    (omnigent-ui--fold-button (button-at (point-min)))
+    (omnigent-conversation--transcript-flush (current-buffer))
+    (omnigent-conversation--fold-button (button-at (point-min)))
     (omnigent-conversation--event
      "response.output_item.done"
      '((item
@@ -1542,19 +1567,19 @@
          (type . "reasoning")
          (content . "thinking")
          (response_id . "turn")))))
-    (omnigent-ui--transcript-flush (current-buffer))
-    (should (gethash "final" omnigent-ui--folds))
+    (omnigent-conversation--transcript-flush (current-buffer))
+    (should (gethash "final" omnigent-conversation--folds))
     (goto-char (point-min))
     (forward-line 1)
     (should-not (invisible-p (point)))))
 
-(ert-deftest omnigent-ui-session-resources-follow-their-session-fold
-    ()
+(ert-deftest omnigent-session-resources-follow-their-session-fold ()
   "Add resources to the owning branch and preserve its fold through updates."
   (let ((omnigent-sessions '(((id . "parent") (title . "Polly"))))
         (omnigent-sessions--children (make-hash-table :test 'equal))
-        (omnigent-ui--pull-requests (make-hash-table :test 'equal))
-        (omnigent-ui--pull-requests-pending
+        (omnigent-session--pull-requests
+         (make-hash-table :test 'equal))
+        (omnigent-session--pull-requests-pending
          (make-hash-table :test 'equal))
         (url "https://github.com/example/project/pull/42")
         request
@@ -1565,10 +1590,10 @@
      omnigent-sessions--children)
     (unwind-protect
         (with-current-buffer (get-buffer-create "*omnigent-sessions*")
-          (omnigent-ui-sessions-mode)
-          (omnigent-ui-sessions-render)
+          (omnigent-session-mode)
+          (omnigent-session-render)
           (should (search-forward "Implement fix" nil t))
-          (should-not (omnigent-ui--session-branch-p "child"))
+          (should-not (omnigent-session--session-branch-p "child"))
           (cl-letf (((symbol-function 'omnigent-transport--request)
                      (lambda (id method path callback &optional _)
                        (should
@@ -1578,7 +1603,7 @@
                            "GET"
                            "/v1/sessions/child/pull-requests")))
                        (setq request callback))))
-            (omnigent-ui--refresh-pull-requests "child")
+            (omnigent-session--refresh-pull-requests "child")
             (funcall request
                      200
                      `((data
@@ -1617,7 +1642,7 @@
                         (number . 43)
                         (state . "OPEN")
                         (title . "Second fix"))]))))))
-            (omnigent-ui--refresh-pull-requests "child"))
+            (omnigent-session--refresh-pull-requests "child"))
           (should
            (looking-at-p
             (concat (regexp-quote "      PR #42 [merged]") "$")))
@@ -1627,35 +1652,36 @@
              (looking-at-p
               (concat (regexp-quote "      PR #43 [open]") "$"))))
           (forward-line -1)
-          (omnigent-ui-toggle-tree)
-          (omnigent-ui-sessions-render)
+          (omnigent-session-toggle-tree)
+          (omnigent-session-render)
           (should (looking-at "    ▸ Implement fix"))
           (should-not (search-forward "#42" nil t))
-          (omnigent-ui-toggle-tree)
+          (omnigent-session-toggle-tree)
           (should (search-forward "PR #42 [merged]" nil t)))
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 
-(ert-deftest omnigent-ui-session-pr-diff ()
+(ert-deftest omnigent-session-pr-diff ()
   "Use the owning session on a PR row and fetch the PR patch with d."
-  (let ((omnigent-ui--pull-requests (make-hash-table :test 'equal))
+  (let ((omnigent-session--pull-requests
+         (make-hash-table :test 'equal))
         (omnigent-sessions '(((id . "items") (title . "Fix parser"))))
         (url "https://github.com/example/project/pull/42")
         displayed)
     (puthash
      "items"
      `(((url . ,url) (number . 42)))
-     omnigent-ui--pull-requests)
+     omnigent-session--pull-requests)
     (unwind-protect
         (with-current-buffer (get-buffer-create "*omnigent-sessions*")
-          (omnigent-ui-sessions-mode)
-          (omnigent-ui-sessions-render)
+          (omnigent-session-mode)
+          (omnigent-session-render)
           (should (search-forward "#42" nil t))
           (should
            (equal (omnigent-workspace--session-at-point) "items"))
           (should
            (equal
-            (omnigent-ui--action-target) '("items" . "Fix parser")))
+            (omnigent--action-target) '("items" . "Fix parser")))
           (cl-letf
               (((symbol-function 'omnigent-transport--request)
                 (lambda (id method path callback &optional _)
@@ -1667,7 +1693,7 @@
                      "/v1/sessions/items/resources/github/diff?pr_url="
                      (url-hexify-string url))))
                   (funcall callback 200 '((patch . "PR patch")))))
-               ((symbol-function 'omnigent-ui--diff-result)
+               ((symbol-function 'omnigent--diff-result)
                 (lambda (id target status patch)
                   (setq displayed (list id target status patch)))))
             (call-interactively (key-binding (kbd "d")))
@@ -1675,33 +1701,37 @@
              (equal displayed (list "items" url 200 "PR patch")))))
       (kill-buffer "*omnigent-sessions*"))))
 
-(ert-deftest omnigent-ui-removal-freezes-draft-and-rejects-late-prs ()
+(ert-deftest omnigent-removal-freezes-draft-and-rejects-late-prs ()
   "Freeze a removed session and discard its pending PR response."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (insert "keep draft")
     (let ((omnigent-sessions--buffers
            (list (cons "conv_test" (current-buffer))))
-          (omnigent-ui--pull-requests (make-hash-table :test 'equal))
-          (omnigent-ui--pull-requests-pending
+          (omnigent-session--pull-requests
+           (make-hash-table :test 'equal))
+          (omnigent-session--pull-requests-pending
            (make-hash-table :test 'equal))
           callback)
       (cl-letf (((symbol-function 'omnigent-transport--request)
                  (lambda (_id _method _path cb &optional _)
                    (setq callback cb))))
-        (omnigent-ui--refresh-pull-requests "conv_test"))
-      (omnigent-ui--frame '((type . "removed") (ids . ["conv_test"])))
+        (omnigent-session--refresh-pull-requests "conv_test"))
+      (omnigent--frame '((type . "removed") (ids . ["conv_test"])))
       (should buffer-read-only)
       (should-error (omnigent-conversation-send) :type 'user-error)
       (should (string-suffix-p "keep draft" (buffer-string)))
       (funcall callback
                200
                '((data . [((url . "https://example.com/pr"))])))
-      (should-not (gethash "conv_test" omnigent-ui--pull-requests)))))
+      (should-not
+       (gethash "conv_test" omnigent-session--pull-requests)))))
 
-(ert-deftest omnigent-ui-send-uses-server-state-not-session-status ()
+(ert-deftest
+    omnigent-conversation-send-uses-server-state-not-session-status
+    ()
   "Display queued input for every session status and commit it exactly once."
   (dolist (status '("idle" "running" "waiting" "failed" nil))
-    (omnigent-ui-test--conversation
+    (omnigent-conversation-test--buffer
       (let ((omnigent-sessions
              `(((id . "conv_test") (status . ,status)))))
         (insert "sent message")
@@ -1717,17 +1747,19 @@
         (should
          (string-match-p
           "\\[queued\\] > sent message" (buffer-string)))
-        (omnigent-ui-test--consume "committed" "sent message"
-                                   "pending")
-        (omnigent-ui-test--consume "committed" "sent message"
-                                   "pending")
+        (omnigent-conversation-test--consume
+         "committed" "sent message"
+         "pending")
+        (omnigent-conversation-test--consume
+         "committed" "sent message"
+         "pending")
         (should-not omnigent-conversation--pending-inputs)
         (should (equal omnigent-conversation--order '("committed")))
         (should (= (how-many "You:" (point-min) (point-max)) 1))))))
 
-(ert-deftest omnigent-ui-snapshot-hides-resource-events ()
+(ert-deftest omnigent-conversation-snapshot-hides-resource-events ()
   "Do not render resource events as empty agent messages after refresh."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--snapshot
      200
      '((items
@@ -1740,16 +1772,17 @@
           (role . "user")
           (content . "Hello"))])
        (pending_inputs . []) (pending_elicitations . [])))
-    (omnigent-ui--transcript-render)
+    (omnigent-conversation--transcript-render)
     (should
      (equal
       (buffer-substring-no-properties
-       (point-min) omnigent-ui--request-start)
+       (point-min) omnigent-conversation--request-start)
       "You:\nHello\n\n"))))
 
-(ert-deftest omnigent-ui-transcript-renders-error-messages ()
+(ert-deftest omnigent-conversation-transcript-renders-error-messages
+    ()
   "Show committed diagnostic messages and live error text in the transcript."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--snapshot
      200
      '((items
@@ -1760,16 +1793,18 @@
        (pending_inputs . []) (pending_elicitations . [])))
     (omnigent-conversation--event
      "response.error" '((error . "Live stream error.")))
-    (omnigent-ui--transcript-render)
+    (omnigent-conversation--transcript-render)
     (should
      (equal
       (buffer-substring-no-properties
-       (point-min) omnigent-ui--request-start)
+       (point-min) omnigent-conversation--request-start)
       "Error:\nModel unavailable.\n\nError:\nLive stream error.\n\n"))))
 
-(ert-deftest omnigent-ui-scrolled-transcript-keeps-reading-position ()
+(ert-deftest
+    omnigent-conversation-scrolled-transcript-keeps-reading-position
+    ()
   "Preserve point by item ID when transcript output is refreshed above the composer."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--snapshot
      200
      '((items
@@ -1786,7 +1821,7 @@
     (let ((offset
            (- (point)
               (previous-single-property-change
-               (point) 'omnigent-ui-item-id))))
+               (point) 'omnigent-conversation-item-id))))
       (omnigent-conversation--snapshot
        200
        '((items
@@ -1800,17 +1835,19 @@
          (pending_inputs . []) (pending_elicitations . [])))
       (should
        (equal
-        (get-text-property (point) 'omnigent-ui-item-id) "second"))
+        (get-text-property
+         (point) 'omnigent-conversation-item-id)
+        "second"))
       (should
        (= offset
           (- (point)
              (previous-single-property-change
-              (point) 'omnigent-ui-item-id)))))))
+              (point) 'omnigent-conversation-item-id)))))))
 
-(ert-deftest omnigent-ui-initial-history-shows-context ()
+(ert-deftest omnigent-conversation-initial-history-shows-context ()
   "Show recent history above the composer when a session first loads."
   (save-window-excursion
-    (omnigent-ui-test--conversation
+    (omnigent-conversation-test--buffer
       (switch-to-buffer (current-buffer))
       (omnigent-conversation--snapshot
        200
@@ -1822,12 +1859,13 @@
              ,(mapconcat #'number-to-string (number-sequence 1 100)
                          "\n")))])
          (pending_inputs . []) (pending_elicitations . [])))
-      (should (< (window-start) omnigent-ui--composer-label))
-      (should omnigent-ui--history-positioned))))
+      (should
+       (< (window-start) omnigent-conversation--composer-label))
+      (should omnigent-conversation--history-positioned))))
 
-(ert-deftest omnigent-ui-history-reserves-prompt-columns ()
+(ert-deftest omnigent-conversation-history-reserves-prompt-columns ()
   "Align history text and fold indicators with the composer."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--snapshot
      200
      '((items
@@ -1846,9 +1884,11 @@
     (should (equal (get-text-property (point) 'line-prefix) "   "))
     (should (equal (get-text-property (point) 'wrap-prefix) "   "))))
 
-(ert-deftest omnigent-ui-transcript-shortened-item-keeps-point ()
+(ert-deftest
+    omnigent-conversation-transcript-shortened-item-keeps-point
+    ()
   "Keep point inside its transcript item when that item becomes shorter."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--snapshot
      200
      '((items
@@ -1867,12 +1907,16 @@
        (pending_inputs . []) (pending_elicitations . [])))
     (should
      (equal
-      (get-text-property (point) 'omnigent-ui-item-id) "first"))))
+      (get-text-property
+       (point) 'omnigent-conversation-item-id)
+      "first"))))
 
-(ert-deftest omnigent-ui-transcript-does-not-recenter-reading-point ()
+(ert-deftest
+    omnigent-conversation-transcript-does-not-recenter-reading-point
+    ()
   "Preserve the view for transcript and composer point without forced recentering."
   (save-window-excursion
-    (omnigent-ui-test--conversation
+    (omnigent-conversation-test--buffer
       (set-window-buffer (selected-window) (current-buffer))
       (omnigent-conversation--snapshot
        200
@@ -1888,14 +1932,15 @@
                      (lambda (&rest _) (point-max)))
                     ((symbol-function 'recenter)
                      (lambda (&rest _) (setq recentered t))))
-            (omnigent-ui--transcript))
+            (omnigent-conversation--transcript))
           (should-not recentered)
           (should (= (point) position))
           (should (= (window-start) start)))))))
 
-(ert-deftest omnigent-ui-composer-line-start-stays-in-input ()
+(ert-deftest omnigent-conversation-composer-line-start-stays-in-input
+    ()
   "Keep line-start motion and deletion inside the editable composer."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (insert "first\nsecond")
     (goto-char (+ omnigent-conversation--prompt-start 2))
     (beginning-of-line)
@@ -1909,11 +1954,11 @@
     (should
      (equal
       (buffer-substring-no-properties
-       omnigent-ui--composer-label
+       omnigent-conversation--composer-label
        omnigent-conversation--prompt-start)
       "> "))))
 
-(ert-deftest omnigent-ui-composer-evil-line-edits ()
+(ert-deftest omnigent-conversation-composer-evil-line-edits ()
   "Keep the prompt protected while Evil changes or deletes composer lines."
   (require 'evil)
   (dolist (case
@@ -1931,7 +1976,7 @@
              ("first\nsecond" "Cnew <escape>" "new\nsecond")))
     (ert-info
      ((format "Input and keys: %S" case))
-     (omnigent-ui-test--conversation
+     (omnigent-conversation-test--buffer
        (save-window-excursion
          (switch-to-buffer (current-buffer))
          (omnigent-conversation--snapshot
@@ -1954,16 +1999,18 @@
                (should
                 (equal
                  (buffer-substring-no-properties
-                  omnigent-ui--composer-label
+                  omnigent-conversation--composer-label
                   omnigent-conversation--prompt-start)
                  "> "))
                (goto-char (point-min))
                (should-error (delete-char 1) :type 'text-read-only))
            (evil-local-mode -1)))))))
 
-(ert-deftest omnigent-ui-rejected-edit-does-not-lock-composer ()
+(ert-deftest
+    omnigent-conversation-rejected-edit-does-not-lock-composer
+    ()
   "A rejected transcript edit must not install widget-only editing on the composer."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--event
      "response.output_item.done"
      '((item . ((id . "a") (content . "protected")))))
@@ -1974,9 +2021,9 @@
     (insert "still editable")
     (should (string-suffix-p "still editable" (buffer-string)))))
 
-(ert-deftest omnigent-ui-real-field-edit-updates-draft ()
+(ert-deftest omnigent-conversation-real-field-edit-updates-draft ()
   "Normal field typing must update request state without explicit notification."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--event
      "response.elicitation_request"
      '((elicitation_id . "q")
@@ -1989,7 +2036,7 @@
     (let ((field
            (cl-find
             "name"
-            omnigent-ui--widgets
+            omnigent-conversation--widgets
             :key
             (lambda (widget) (widget-get widget :field-name))
             :test #'equal)))
@@ -2001,7 +2048,8 @@
          "name" (omnigent-conversation-elicitation-draft "q"))
         "typed")))))
 
-(defun omnigent-ui-test--consume (id text &optional pending-id meta)
+(defun omnigent-conversation-test--consume
+    (id text &optional pending-id meta)
   "Deliver consumption of ID with TEXT, optional PENDING-ID and META flag."
   (omnigent-conversation--event
    "session.input.consumed"
@@ -2012,13 +2060,13 @@
        (data
         . ((role . "user") (content . ,text) (is_meta . ,meta))))))))
 
-(ert-deftest omnigent-ui-hides-sub-agent-notices ()
+(ert-deftest omnigent-conversation-hides-sub-agent-notices ()
   "Hide sub-agent notices from live events and snapshots."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (let
         ((notice
           "[System: sub-agent pi/inspect-upstream-mock-deps finished (completed) — 1 result waiting in inbox. Call sys_read_inbox to collect.]"))
-      (omnigent-ui-test--consume "live" notice)
+      (omnigent-conversation-test--consume "live" notice)
       (should-not (string-match-p "You:\n" (buffer-string)))
       (should-not
        (string-match-p (regexp-quote notice) (buffer-string)))
@@ -2037,16 +2085,16 @@
             (role . "user")
             (content . "[System: example]"))])
          (pending_inputs . []) (pending_elicitations . [])))
-      (omnigent-ui--transcript-render)
+      (omnigent-conversation--transcript-render)
       (should
        (equal
         (buffer-substring-no-properties
-         (point-min) omnigent-ui--request-start)
+         (point-min) omnigent-conversation--request-start)
         "You:\n[System: example]\n\n")))))
 
-(ert-deftest omnigent-ui-pending-order-forms-and-draft ()
+(ert-deftest omnigent-conversation-pending-order-forms-and-draft ()
   "Keep output, forms, queued input and composer separate."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (let ((next 0))
       (cl-letf (((symbol-function
                   'omnigent-transport-post-session-event)
@@ -2077,7 +2125,7 @@
       "\\[queued\\] > first\n\n\\[queued\\] > second\n\n> draft"
       (buffer-string)))
     (should (= (point) (point-max)))
-    (goto-char omnigent-ui--pending-start)
+    (goto-char omnigent-conversation--pending-start)
     (should-error (insert "edit") :type 'text-read-only)
     (run-hooks 'post-command-hook)
     (should
@@ -2090,13 +2138,14 @@
     (should
      (string-match-p
       "output\n\n\\[queued\\] > first" (buffer-string)))
-    (omnigent-ui-test--consume "first" "first" "1")
+    (omnigent-conversation-test--consume "first" "first" "1")
     (should (= (length omnigent-conversation--pending-inputs) 1))))
 
-(ert-deftest omnigent-ui-new-transcript-items-stay-above-queued-inputs
+(ert-deftest
+    omnigent-conversation-new-transcript-items-stay-above-queued-inputs
     ()
   "Keep new transcript items above queued input."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--event
      "response.created" '((response . ((id . "active")))))
     (cl-letf (((symbol-function
@@ -2112,26 +2161,28 @@
      '((elicitation_id . "q") (params . ((message . "Question")))))
     (omnigent-conversation--event
      "response.output_text.delta" '((delta . "current message")))
-    (omnigent-ui--transcript-flush (current-buffer))
+    (omnigent-conversation--transcript-flush (current-buffer))
     (should
-     (= (overlay-start omnigent-ui--busy-overlay)
-        (marker-position omnigent-ui--composer-label)))
-    (should (overlay-get omnigent-ui--busy-overlay 'before-string))
+     (= (overlay-start omnigent-conversation--busy-overlay)
+        (marker-position omnigent-conversation--composer-label)))
+    (should
+     (overlay-get omnigent-conversation--busy-overlay 'before-string))
     (should
      (< (string-match "Agent:\ncurrent message" (buffer-string))
         (string-match "\\[queued\\] > queued" (buffer-string))))))
 
-(ert-deftest omnigent-ui-consumption-before-post-response ()
+(ert-deftest omnigent-conversation-consumption-before-post-response ()
   "Do not recreate consumed input when its POST acknowledgement arrives late."
   (dolist (pending-id '(nil "pending"))
-    (omnigent-ui-test--conversation
+    (omnigent-conversation-test--buffer
       (let (callback)
         (insert "same")
         (cl-letf (((symbol-function
                     'omnigent-transport-post-session-event)
                    (lambda (_id _event cb) (setq callback cb))))
           (omnigent-conversation-send))
-        (omnigent-ui-test--consume "committed" "same" pending-id)
+        (omnigent-conversation-test--consume "committed" "same"
+                                             pending-id)
         (insert " suffix")
         (with-temp-buffer
           (funcall callback
@@ -2146,16 +2197,17 @@
           " suffix"))
         (should (= (how-many "You:" (point-min) (point-max)) 1))))))
 
-(ert-deftest omnigent-ui-snapshot-is-authoritative-for-pending-input
+(ert-deftest
+    omnigent-conversation-snapshot-is-authoritative-for-pending-input
     ()
   "Replace local input records, then ignore already-recovered FIFO consumption."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (insert "draft")
     (setq omnigent-conversation--pending-inputs
           '(((state . queued) (content . "local"))))
     (dolist (cleared-id '("pending-a" nil))
       (setq omnigent-conversation--loading t)
-      (omnigent-ui-test--consume "a" "same" cleared-id)
+      (omnigent-conversation-test--consume "a" "same" cleared-id)
       (omnigent-conversation--snapshot
        200
        '((items
@@ -2177,7 +2229,8 @@
       (should
        (= (how-many "\\[queued\\] > same" (point-min) (point-max))
           1)))
-    (omnigent-ui-test--consume "unrelated" "other" "unknown-id")
+    (omnigent-conversation-test--consume "unrelated" "other"
+                                         "unknown-id")
     (should (= (length omnigent-conversation--pending-inputs) 1))
     (omnigent-conversation--snapshot
      200
@@ -2194,29 +2247,33 @@
        omnigent-conversation--prompt-start (point-max))
       "draft"))))
 
-(ert-deftest omnigent-ui-fifo-skips-markers-and-keeps-identical-inputs
+(ert-deftest
+    omnigent-conversation-fifo-skips-markers-and-keeps-identical-inputs
     ()
   "Only new user consumption can remove one eligible FIFO input."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (setq omnigent-conversation--pending-inputs
           (list
            (list '(state . queued) '(content . "same"))
            (list '(state . queued) '(content . "same"))))
-    (omnigent-ui-test--consume "meta" "injected context" nil t)
-    (omnigent-ui-test--consume "marker" "[System: task completed]")
+    (omnigent-conversation-test--consume "meta" "injected context"
+                                         nil
+                                         t)
+    (omnigent-conversation-test--consume
+     "marker" "[System: task completed]")
     (should (= (length omnigent-conversation--pending-inputs) 2))
-    (omnigent-ui-test--consume "a" "same")
+    (omnigent-conversation-test--consume "a" "same")
     (should (= (length omnigent-conversation--pending-inputs) 1))
-    (omnigent-ui-test--consume "a" "same")
+    (omnigent-conversation-test--consume "a" "same")
     (should (= (length omnigent-conversation--pending-inputs) 1))
-    (omnigent-ui-test--consume "b" "same")
+    (omnigent-conversation-test--consume "b" "same")
     (should-not omnigent-conversation--pending-inputs)
     (should
      (equal
       omnigent-conversation--order '("meta" "marker" "a" "b")))))
 
 (ert-deftest
-    omnigent-ui-send-outcomes-and-late-response-after-snapshot
+    omnigent-conversation-send-outcomes-and-late-response-after-snapshot
     ()
   "Trust response IDs, retain uncertain drafts and do not restore superseded input."
   (dolist (response
@@ -2226,7 +2283,7 @@
              (403 (detail . "Denied"))
              (nil)
              (500)))
-    (omnigent-ui-test--conversation
+    (omnigent-conversation-test--buffer
       (insert "message")
       (let ((requests 0))
         (cl-letf (((symbol-function
@@ -2265,7 +2322,7 @@
                  (not (eq (alist-get 'denied (cdr response)) t)))
             ""
           "message")))))
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (let (callback)
       (insert "message")
       (cl-letf (((symbol-function
@@ -2280,9 +2337,9 @@
       (funcall callback 202 '((queued . t) (pending_id . "old")))
       (should-not omnigent-conversation--pending-inputs))))
 
-(ert-deftest omnigent-ui-interrupt-refresh-buffers-events ()
+(ert-deftest omnigent-conversation-interrupt-refresh-buffers-events ()
   "Refresh after interruption without losing later buffered consumption events."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (let ((buffer (current-buffer))
           (reads 0))
       (setq omnigent-conversation--stream
@@ -2305,7 +2362,7 @@
         ;; An interrupt queued during initial recovery starts another snapshot.
         (setq omnigent-conversation--loading t)
         (omnigent-conversation--event "session.interrupted" nil)
-        (omnigent-ui-test--consume "b" "queued" "pending-b")
+        (omnigent-conversation-test--consume "b" "queued" "pending-b")
         (omnigent-conversation--snapshot
          200
          '((pending_inputs
@@ -2325,9 +2382,9 @@
       (setf (omnigent-stream-stopped omnigent-conversation--stream)
             t))))
 
-(ert-deftest omnigent-ui-send-hook-errors-and-raw-failure ()
+(ert-deftest omnigent-conversation-send-hook-errors-and-raw-failure ()
   "Dispatch despite observer errors and retain a draft on a raw transport failure."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (insert "draft")
     (let ((omnigent-conversation-change-hook
            (list (lambda () (error "Frontend failed"))))
@@ -2350,7 +2407,8 @@
         (should (string-suffix-p "draft" (buffer-string)))
         (should (= (length warnings) 2))))))
 
-(ert-deftest omnigent-ui-invalid-pending-snapshot-keeps-visible-state
+(ert-deftest
+    omnigent-conversation-invalid-pending-snapshot-keeps-visible-state
     ()
   "Reject malformed queue arrays or identifiers without deleting visible input."
   (dolist (pending
@@ -2358,7 +2416,7 @@
              "invalid"
              [((content . "missing id"))]
              [((pending_id . "id"))]))
-    (omnigent-ui-test--conversation
+    (omnigent-conversation-test--buffer
       (insert "draft")
       (omnigent-conversation--snapshot
        200
@@ -2379,11 +2437,12 @@
        (string-match-p "\\[queued\\] > queued" (buffer-string)))
       (should (string-suffix-p "draft" (buffer-string))))))
 
-(ert-deftest omnigent-ui-select-model-and-effort-from-session-catalog
+(ert-deftest
+    omnigent-conversation-select-model-and-effort-from-session-catalog
     ()
   "Fetch choices asynchronously and patch the selected model or its effort."
   (dolist (setting '(model effort))
-    (omnigent-ui-test--conversation
+    (omnigent-conversation-test--buffer
       (let (loaded
             prompted
             request)
@@ -2436,79 +2495,81 @@
                  '(("model_override" . "second"))
                '(("reasoning_effort" . "high")))))))))))
 
-(provide 'omnigent-ui-test)
-;;; omnigent-ui-test.el ends here
+(provide 'omnigent-buffers-test)
+;;; omnigent-buffers-test.el ends here
 
-(ert-deftest omnigent-ui-transcript-updates-only-changed-blocks ()
+(ert-deftest
+    omnigent-conversation-transcript-updates-only-changed-blocks
+    ()
   "Preserve old text properties while appending and replacing individual items."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (dotimes (index 2000)
       (omnigent-conversation--put-item
        `((id . ,(format "item-%d" index))
          (type . "message")
          (content . "unchanged"))))
-    (omnigent-ui--transcript-render)
+    (omnigent-conversation--transcript-render)
     (let ((inhibit-read-only t))
       (put-text-property 1 2 'omnigent-test-retained t))
     (let ((calls 0)
-          (render (symbol-function 'omnigent-ui--item)))
-      (cl-letf (((symbol-function 'omnigent-ui--item)
+          (render (symbol-function 'omnigent-conversation--item)))
+      (cl-letf (((symbol-function 'omnigent-conversation--item)
                  (lambda (&rest arguments)
                    "Count item renders with ARGUMENTS."
                    (cl-incf calls)
                    (apply render arguments))))
         (omnigent-conversation--put-item
          '((id . "new") (type . "message") (content . "new text")))
-        (omnigent-ui--transcript-render)
+        (omnigent-conversation--transcript-render)
         (should (= calls 1))
         (setf (alist-get
                'content (gethash "new" omnigent-conversation--items))
               "updated text")
-        (omnigent-ui--transcript-render)
+        (omnigent-conversation--transcript-render)
         (should (= calls 2))
-        (omnigent-ui--transcript-render)
+        (omnigent-conversation--transcript-render)
         (should (= calls 2))
         (should (get-text-property 1 'omnigent-test-retained))
         (goto-char (point-min))
         (should (search-forward "updated text" nil t))))))
 
 (ert-deftest
-    omnigent-ui-transcript-reconciles-reordered-and-removed-items
+    omnigent-conversation-transcript-reconciles-reordered-and-removed-items
     ()
   "Reconcile snapshot removals and reordering without duplicate text."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (dolist (id '("a" "b" "c"))
       (omnigent-conversation--put-item
        `((id . ,id) (type . "message") (content . ,id))))
-    (omnigent-ui--transcript-render)
+    (omnigent-conversation--transcript-render)
     (remhash "b" omnigent-conversation--items)
     (setq omnigent-conversation--order '("c" "a"))
-    (omnigent-ui--transcript-render)
+    (omnigent-conversation--transcript-render)
     (should
      (equal
       (buffer-substring-no-properties
-       (point-min) omnigent-ui--request-start)
+       (point-min) omnigent-conversation--request-start)
       "Agent:\nc\n\nAgent:\na\n\n"))
-    (should (= (hash-table-count omnigent-ui--blocks) 2))
-    (omnigent-ui--transcript-render)
+    (should (= (hash-table-count omnigent-conversation--blocks) 2))
+    (omnigent-conversation--transcript-render)
     (should
      (equal
       (buffer-substring-no-properties
-       (point-min) omnigent-ui--request-start)
+       (point-min) omnigent-conversation--request-start)
       "Agent:\nc\n\nAgent:\na\n\n"))))
 
-(ert-deftest omnigent-ui-markdown-opens-transcript-links ()
+(ert-deftest omnigent-conversation-markdown-opens-transcript-links ()
   "Open a rendered agent link with RET or a mouse click."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (omnigent-conversation--put-item
      '((id . "link")
        (type . "message")
        (content . "[Example](https://example.com)")))
-    (omnigent-ui--transcript-render)
+    (omnigent-conversation--transcript-render)
     (goto-char (point-min))
     (search-forward "Example")
     (backward-char)
-    (omnigent-ui--markdown-fontify (point-min) (point-max))
+    (omnigent-conversation--markdown-fontify (point-min) (point-max))
     (let ((link-position (point))
           (link-map (get-text-property (point) 'keymap))
           opened)
@@ -2529,29 +2590,34 @@
        (equal
         opened '("https://example.com" "https://example.com"))))))
 
-(ert-deftest omnigent-ui-markdown-waits-for-message-completion ()
+(ert-deftest
+    omnigent-conversation-markdown-waits-for-message-completion
+    ()
   "Keep active text plain and render completed text only when requested."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (setq
      omnigent-conversation--response-id "response"
      omnigent-conversation--section-id "active")
     (omnigent-conversation--put-item
      '((id . "active") (type . "message") (content . "**bold**")))
-    (omnigent-ui--transcript-render)
+    (omnigent-conversation--transcript-render)
     (goto-char (point-min))
     (search-forward "**bold**")
     (should-not
-     (get-text-property (- (point) 5) 'omnigent-ui-markdown))
+     (get-text-property
+      (- (point) 5) 'omnigent-conversation-markdown))
     (setq omnigent-conversation--section-id "next")
-    (omnigent-ui--transcript-render)
+    (omnigent-conversation--transcript-render)
     (goto-char (point-min))
     (search-forward "**bold**")
     (let ((begin (- (point) 8)))
-      (should (get-text-property begin 'omnigent-ui-markdown))
+      (should
+       (get-text-property begin 'omnigent-conversation-markdown))
       (should-not
-       (get-text-property begin 'omnigent-ui-markdown-done))
-      (omnigent-ui--markdown-fontify begin (+ begin 2))
-      (should (get-text-property begin 'omnigent-ui-markdown-done))
+       (get-text-property begin 'omnigent-conversation-markdown-done))
+      (omnigent-conversation--markdown-fontify begin (+ begin 2))
+      (should
+       (get-text-property begin 'omnigent-conversation-markdown-done))
       (should (get-text-property begin 'invisible))
       (should
        (equal
@@ -2559,7 +2625,8 @@
          begin (+ begin 8))
         "**bold**"))
       (let ((calls 0))
-        (cl-letf (((symbol-function 'omnigent-ui--markdown-apply)
+        (cl-letf (((symbol-function
+                    'omnigent-conversation--markdown-apply)
                    (lambda (&rest _arguments)
                      "Count unnecessary repeat renders."
                      (cl-incf calls))))
@@ -2570,39 +2637,46 @@
              'content
              (gethash "active" omnigent-conversation--items))
             "**corrected**")
-      (omnigent-ui--transcript-render)
+      (omnigent-conversation--transcript-render)
       (should-not
-       (get-text-property begin 'omnigent-ui-markdown-done))
-      (omnigent-ui--markdown-fontify begin (+ begin 2))
-      (should (get-text-property begin 'omnigent-ui-markdown-done)))))
+       (get-text-property begin 'omnigent-conversation-markdown-done))
+      (omnigent-conversation--markdown-fontify begin (+ begin 2))
+      (should
+       (get-text-property
+        begin 'omnigent-conversation-markdown-done)))))
 
-(ert-deftest omnigent-ui-markdown-composer-preserves-edits ()
+(ert-deftest omnigent-conversation-markdown-composer-preserves-edits
+    ()
   "Highlight composer text and invalidate properties after an edit."
-  (omnigent-ui-test--conversation
+  (omnigent-conversation-test--buffer
     (insert "**draft**")
     (let ((begin
            (marker-position omnigent-conversation--prompt-start)))
-      (omnigent-ui--markdown-fontify begin (point-max))
+      (omnigent-conversation--markdown-fontify begin (point-max))
       (should (get-text-property (+ begin 2) 'face))
       (should-not (get-text-property begin 'invisible))
-      (should (get-text-property begin 'omnigent-ui-markdown-done))
+      (should
+       (get-text-property begin 'omnigent-conversation-markdown-done))
       (goto-char (point-max))
       (insert " more")
       (should-not
-       (get-text-property begin 'omnigent-ui-markdown-done))
-      (omnigent-ui--markdown-fontify begin (point-max))
+       (get-text-property begin 'omnigent-conversation-markdown-done))
+      (omnigent-conversation--markdown-fontify begin (point-max))
       (should
        (equal
         (buffer-substring-no-properties
          begin (point-max))
         "**draft** more")))))
 
-(ert-deftest omnigent-ui-markdown-colon-prose-is-not-metadata ()
+(ert-deftest
+    omnigent-conversation-markdown-colon-prose-is-not-metadata
+    ()
   "Keep first-paragraph colon prose free of implicit document metadata faces."
   (dolist (hide '(nil t))
     (with-temp-buffer
       (insert "for kind: subscription\n\n**bold** and `code`\n")
-      (omnigent-ui--markdown-apply (point-min) (point-max) hide)
+      (omnigent-conversation--markdown-apply
+       (point-min) (point-max) hide)
       (should-not (get-text-property (point-min) 'face))
       (goto-char (point-min))
       (search-forward "subscription")
@@ -2613,7 +2687,7 @@
       (should (get-text-property (1- (point)) 'face)))))
 
 (ert-deftest
-    omnigent-ui-child-branches-default-open-and-preserve-folds
+    omnigent-session-child-branches-default-open-and-preserve-folds
     ()
   "Display nested branches and move child attention to a folded ancestor."
   (let ((omnigent-sessions '(((id . "parent") (title . "Parent"))))
@@ -2622,11 +2696,12 @@
         (buffer (get-buffer-create "*omnigent-sessions*")))
     (unwind-protect
         (with-current-buffer buffer
-          (omnigent-ui-sessions-mode)
-          (omnigent-ui-sessions-render)
+          (omnigent-session-mode)
+          (omnigent-session-render)
           (forward-line 1)
-          (omnigent-ui-toggle-tree)
-          (should (equal (omnigent-ui--session-id-at-point) "parent"))
+          (omnigent-session-toggle-tree)
+          (should
+           (equal (omnigent-session--session-id-at-point) "parent"))
           (puthash
            "parent"
            '(((id . "child")
@@ -2640,17 +2715,18 @@
               (parent_session_id . "child")
               (pending_elicitations_count . 1)))
            omnigent-sessions--children)
-          (omnigent-ui-sessions-render)
+          (omnigent-session-render)
           (should
            (string-match-p "^      ! Grandchild" (buffer-string)))
-          (omnigent-ui-toggle-tree)
-          (should (equal (omnigent-ui--session-id-at-point) "parent"))
+          (omnigent-session-toggle-tree)
+          (should
+           (equal (omnigent-session--session-id-at-point) "parent"))
           (should (string-match-p "▸ ! Parent" (buffer-string)))
           (should-not (string-match-p "Grandchild" (buffer-string)))
           (setq omnigent-sessions--watched-ids nil)
-          (omnigent-ui-sessions-render)
+          (omnigent-session-render)
           (should (string-match-p "▸ Parent" (buffer-string)))
-          (omnigent-ui-toggle-tree)
+          (omnigent-session-toggle-tree)
           (should
            (string-match-p "^      Grandchild" (buffer-string))))
       (kill-buffer buffer))))

@@ -14,7 +14,7 @@
       (while (and (not (eobp))
                   (not
                    (and (get-text-property
-                         (point) 'omnigent-ui-project)
+                         (point) 'omnigent-session-project)
                         (string-suffix-p
                          name
                          (buffer-substring-no-properties
@@ -100,7 +100,7 @@
                    (omnigent-integration--project-heading project))))
                (let* ((project-id
                        (get-text-property
-                        (point) 'omnigent-ui-project))
+                        (point) 'omnigent-session-project))
                       (id
                        (omnigent-integration--mock-session run title))
                       (session
@@ -114,7 +114,8 @@
                   (omnigent-integration--project-heading project))
                  (cl-letf (((symbol-function 'read-string)
                             (lambda (&rest _) renamed-project)))
-                   (call-interactively #'omnigent-ui-rename-at-point))
+                   (call-interactively
+                    #'omnigent-session-rename-at-point))
                  (omnigent-integration--wait
                   (lambda ()
                     (omnigent-integration--project-heading
@@ -156,7 +157,8 @@
                    (omnigent-integration--management-key "+"))
                  (cl-letf (((symbol-function 'read-string)
                             (lambda (&rest _) renamed-title)))
-                   (call-interactively #'omnigent-ui-rename-at-point))
+                   (call-interactively
+                    #'omnigent-session-rename-at-point))
                  (omnigent-integration--session-fields
                   id `((title . ,renamed-title)))
                  (omnigent-integration--management-key "g")
@@ -216,7 +218,7 @@
                  (omnigent-integration--wait
                   (lambda ()
                     (memq
-                     'omnigent-ui-session-archived
+                     'omnigent-session-archived
                      (ensure-list
                       (omnigent-integration--session-row-face id)))))
                  (omnigent-integration--management-key "u")

@@ -158,10 +158,10 @@
                             (eq
                              (omnigent-integration--session-row-face
                               parent)
-                             'omnigent-ui-session-running)
+                             'omnigent-session-running)
                             (member
                              (overlay-get
-                              omnigent-ui--busy-overlay
+                              omnigent-conversation--busy-overlay
                               'before-string)
                              '("|" "/" "-" "\\")))))))
                      (omnigent-integration--polly-release
@@ -184,7 +184,7 @@
                                  (eq
                                   (omnigent-integration--session-row-face
                                    id)
-                                  'omnigent-ui-session-running))
+                                  'omnigent-session-running))
                               id))))))
                      (save-selected-window
                        (select-window
@@ -218,27 +218,28 @@
                         ("Polly's spinner advances while the child is running")
                         (let ((frame
                                (overlay-get
-                                omnigent-ui--busy-overlay
+                                omnigent-conversation--busy-overlay
                                 'before-string))
                               (frames '("|" "/" "-" "\\")))
                           (should (member frame frames))
                           (omnigent-integration--wait
                            (lambda ()
-                             (let ((next
-                                    (overlay-get
-                                     omnigent-ui--busy-overlay
-                                     'before-string)))
+                             (let
+                                 ((next
+                                   (overlay-get
+                                    omnigent-conversation--busy-overlay
+                                    'before-string)))
                                (should (member next frames))
                                (should
                                 (eq
                                  (omnigent-integration--session-row-face
                                   parent)
-                                 'omnigent-ui-session-running))
+                                 'omnigent-session-running))
                                (should
                                 (eq
                                  (omnigent-integration--session-row-face
                                   child)
-                                 'omnigent-ui-session-running))
+                                 'omnigent-session-running))
                                (not (equal next frame))))))))
                      (let ((child-buffer
                             (omnigent-integration--open-session-row
@@ -257,7 +258,7 @@
                              (eq
                               (omnigent-integration--session-row-face
                                child)
-                              'omnigent-ui-session-idle))))
+                              'omnigent-session-idle))))
                          (should-not
                           (omnigent-integration--message-position
                            parent-reply))))
@@ -276,10 +277,10 @@
                             (eq
                              (omnigent-integration--session-row-face
                               parent)
-                             'omnigent-ui-session-idle)
+                             'omnigent-session-idle)
                             (equal
                              (overlay-get
-                              omnigent-ui--busy-overlay
+                              omnigent-conversation--busy-overlay
                               'before-string)
                              " ")))))
                        (omnigent-integration--post-json

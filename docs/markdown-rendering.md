@@ -1,7 +1,7 @@
 # Markdown Rendering Design
 
-**Status:** Implemented in `omnigent-ui.el`. This document defines when message
-text is ready for Markdown and how the frontend applies Markdown properties.
+**Status:** Implemented in `omnigent-conversation.el`. This document defines when
+message text is ready for Markdown and how the frontend applies Markdown properties.
 [frontend.md](frontend.md) owns layout and folds.
 [conversation-buffer.md](conversation-buffer.md) owns transcript state and event
 reconciliation.

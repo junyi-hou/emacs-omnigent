@@ -1,12 +1,12 @@
-;;; omnigent-sessions.el --- Session list state -*- lexical-binding: t; -*-
+;;; omnigent-sessions.el --- Session list and server actions -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; Session list state and server actions.  Presentation and conversation
-;; buffers are separate components.
+;; Maintain and display the session list.  Manage server actions.
 
 ;;; Code:
 
 (require 'cl-lib)
+(require 'button)
 (require 'seq)
 (require 'omnigent-transport)
 (require 'omnigent-workspace)
@@ -1474,6 +1474,445 @@ CALLBACK receives the HTTP status and response body.
 The caller must obtain confirmation first."
   (omnigent-sessions--mutate-subtree
    id #'omnigent-transport-delete-session t callback))
+
+;;; Session list presentation
+
+(defvar omnigent-session--selected-session nil
+  "ID of the most recently selected conversation for the session list.")
+
+(defface omnigent-session-running '((t :inherit warning))
+  "Face for running sessions."
+  :group 'omnigent)
+(defface omnigent-session-waiting
+  '((t :inherit font-lock-warning-face))
+  "Face for waiting sessions."
+  :group 'omnigent)
+(defface omnigent-session-failed '((t :inherit error))
+  "Face for failed sessions."
+  :group 'omnigent)
+(defface omnigent-session-idle '((t :inherit default))
+  "Face for idle sessions."
+  :group 'omnigent)
+(defface omnigent-session-archived '((t :inherit shadow))
+  "Face for archived sessions."
+  :group 'omnigent)
+(defface omnigent-session-attention '((t :inherit warning))
+  "Face for the pending elicitation marker."
+  :group 'omnigent)
+(defface omnigent-session-project
+  '((t :inherit font-lock-keyword-face :weight normal))
+  "Face for project headings."
+  :group 'omnigent)
+
+(defun omnigent-session--session-face (session)
+  "Return the face for SESSION."
+  (cond
+   ((eq (alist-get 'archived session) t)
+    'omnigent-session-archived)
+   ((or (equal (alist-get 'status session) "running")
+        (and (not (alist-get 'status session))
+             (eq (alist-get 'busy session) t)))
+    'omnigent-session-running)
+   ((equal (alist-get 'status session) "waiting")
+    'omnigent-session-waiting)
+   ((or (equal (alist-get 'status session) "failed")
+        (and (not (alist-get 'status session))
+             (equal
+              (alist-get 'current_task_status session) "failed")))
+    'omnigent-session-failed)
+   (t
+    'omnigent-session-idle)))
+
+(defun omnigent-session--session-id-at-point ()
+  "Return the session ID for the session or linked PR at point."
+  (let ((start (line-beginning-position)))
+    (or (get-text-property start 'omnigent-session-id)
+        (car (get-text-property start 'omnigent-session-resource)))))
+
+(defvar-local omnigent-session--folded-projects nil)
+
+(defvar-local omnigent-session--folded-sessions nil
+  "Session IDs whose child rows are folded.")
+
+(defun omnigent-session--session-pending-p (session)
+  "Return non-nil if SESSION has a current pending elicitation."
+  (let ((count (alist-get 'pending_elicitations_count session)))
+    (and (numberp count)
+         (> count 0)
+         (or (not (alist-get 'parent_session_id session))
+             (member
+              (alist-get 'id session)
+              omnigent-sessions--watched-ids)))))
+
+(defun omnigent-session--descendant-pending-p (session)
+  "Return non-nil if a descendant of SESSION has a pending elicitation."
+  (seq-some
+   (lambda (child)
+     (or (omnigent-session--session-pending-p child)
+         (omnigent-session--descendant-pending-p child)))
+   (omnigent-sessions-children (alist-get 'id session))))
+
+(defun omnigent-session--project-at-point ()
+  "Return the project key on the heading at point."
+  (get-text-property
+   (line-beginning-position) 'omnigent-session-project))
+
+(defun omnigent-session-render ()
+  "Render the session list and preserve point on the current row."
+  (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
+    (with-current-buffer buffer
+      (let* ((resource
+              (get-text-property
+               (line-beginning-position) 'omnigent-session-resource))
+             (id (omnigent-session--session-id-at-point))
+             (project
+              (or (omnigent-session--project-at-point)
+                  (get-text-property
+                   (line-beginning-position)
+                   'omnigent-session-project-id)))
+             (inhibit-read-only t)
+             (sessions
+              (sort (copy-sequence (omnigent-sessions-visible))
+                    (lambda (a b)
+                      (let ((left-archived
+                             (eq (alist-get 'archived a) t))
+                            (right-archived
+                             (eq (alist-get 'archived b) t))
+                            (left (alist-get 'updated_at a))
+                            (right (alist-get 'updated_at b)))
+                        (if (not (eq left-archived right-archived))
+                            (not left-archived)
+                          (if (and (numberp left) (numberp right))
+                              (> left right)
+                            (string>
+                             (format "%s" (or left ""))
+                             (format "%s" (or right ""))))))))))
+        (erase-buffer)
+        (let ((line-width
+               (if-let* ((window (get-buffer-window buffer t)))
+                 (window-body-width window)
+                 (frame-width))))
+          (let ((groups (make-hash-table :test 'equal))
+                (keys
+                 (mapcar
+                  (lambda (row) (alist-get 'id row))
+                  omnigent-sessions-projects)))
+            (dolist (session sessions)
+              (let ((key (omnigent-sessions-project-key session)))
+                (push session (gethash key groups))
+                (unless (or (eq key 'unassigned) (member key keys))
+                  (setq keys (append keys (list key))))))
+            (dolist (key
+                     (append
+                      (cl-remove-if-not
+                       (lambda (key)
+                         (or (gethash key groups)
+                             (gethash
+                              key omnigent-sessions--project-lists)))
+                       keys)
+                      (when (or (gethash 'unassigned groups)
+                                (gethash
+                                 'unassigned
+                                 omnigent-sessions--project-lists))
+                        '(unassigned))))
+              (let ((folded
+                     (member key omnigent-session--folded-projects))
+                    last-session
+                    (name
+                     (if (eq key 'unassigned)
+                         "Unassigned"
+                       (or (alist-get
+                            'name
+                            (cl-find
+                             key
+                             omnigent-sessions-projects
+                             :key
+                             (lambda (row) (alist-get 'id row))
+                             :test #'equal))
+                           key))))
+                (insert
+                 (propertize
+                  (concat
+                   (if folded
+                       "▸ "
+                     "▾ ")
+                   (if (and folded
+                            (seq-some
+                             #'omnigent-session--descendant-pending-p
+                             (gethash key groups)))
+                       (propertize "! "
+                                   'face 'omnigent-session-attention)
+                     "")
+                   (replace-regexp-in-string "[\n\r]" " " name) "\n")
+                  'omnigent-session-project
+                  key
+                  'face
+                  'omnigent-session-project))
+                (unless folded
+                  (dolist (session (nreverse (gethash key groups)))
+                    (setq last-session session)
+                    (omnigent-session--insert-session-row
+                     session line-width 1 key))
+                  (when (if-let*
+                            ((entry
+                              (gethash
+                               key omnigent-sessions--project-lists)))
+                          (nth 2 entry)
+                          (eq
+                           (gethash
+                            key omnigent-sessions--project-more)
+                           t))
+                    (insert
+                     (propertize "  ...\n"
+                                 'face
+                                 (when (eq
+                                        (alist-get
+                                         'archived last-session)
+                                        t)
+                                   'omnigent-session-archived)))))))))
+        (goto-char (point-min))
+        (when resource
+          (while (and (not (eobp))
+                      (not
+                       (equal
+                        resource
+                        (get-text-property
+                         (point) 'omnigent-session-resource))))
+            (forward-line 1))
+          (when (eobp)
+            (setq resource nil)
+            (goto-char (point-min))))
+        (when (and (not resource) (or id project))
+          (while (and (not (eobp))
+                      (not
+                       (if id
+                           (equal
+                            id
+                            (omnigent-session--session-id-at-point))
+                         (equal
+                          project
+                          (omnigent-session--project-at-point)))))
+            (forward-line 1))
+          (when (eobp)
+            (goto-char (point-min))
+            (when project
+              (while (and (not (eobp))
+                          (not
+                           (equal
+                            project
+                            (omnigent-session--project-at-point))))
+                (forward-line 1))
+              (when (eobp)
+                (goto-char (point-min))))))))))
+
+(defvar omnigent-session--pull-requests (make-hash-table :test 'equal)
+  "Linked pull requests by session ID.")
+
+(defun omnigent-session--session-branch-p (id)
+  "Return non-nil when ID has child sessions or linked PRs."
+  (or (omnigent-sessions-children id)
+      (gethash id omnigent-session--pull-requests)))
+
+(defun omnigent-session--open-resource-button (button)
+  "Open the session resource represented by BUTTON."
+  (save-excursion
+    (goto-char (button-start button))
+    (omnigent-session-open-at-point)))
+
+(defun omnigent-session--insert-resource-row
+    (id target label indent width project)
+  "Insert LABEL for ID and TARGET at INDENT within WIDTH under PROJECT."
+  (let ((start (point)))
+    (insert (make-string indent ?\s))
+    (insert-text-button (truncate-string-to-width
+                         (replace-regexp-in-string "[\n\r]" " " label)
+                         (max 1 (- width indent)) nil nil "…")
+                        'action
+                        #'omnigent-session--open-resource-button
+                        'follow-link
+                        t
+                        'face
+                        'link)
+    (insert "\n")
+    (add-text-properties
+     start (point)
+     (list
+      'omnigent-session-resource
+      (cons id target)
+      'omnigent-session-project-id
+      project))))
+
+(defun omnigent-session--insert-session-row
+    (session line-width depth project)
+  "Insert SESSION and its unfolded rows within LINE-WIDTH at DEPTH in PROJECT."
+  (let* ((start (point))
+         (id (alist-get 'id session))
+         (children (omnigent-sessions-children id))
+         (branch (omnigent-session--session-branch-p id))
+         (folded (member id omnigent-session--folded-sessions))
+         (indent (* 2 depth))
+         (pending
+          (or (omnigent-session--session-pending-p session)
+              (and folded
+                   (omnigent-session--descendant-pending-p session))))
+         (prefix-width
+          (+ indent
+             (if branch
+                 2
+               0)
+             (if pending
+                 2
+               0)))
+         (title (alist-get 'title session))
+         (updated-at
+          (omnigent--session-age (alist-get 'updated_at session)))
+         (title
+          (if (and (stringp title) (not (string-empty-p title)))
+              (replace-regexp-in-string "[\n\r]" " " title)
+            "Untitled")))
+    (insert (make-string indent ?\s))
+    (when branch
+      (insert
+       (if folded
+           "▸ "
+         "▾ ")))
+    (when pending
+      (insert "! "))
+    (insert
+     (truncate-string-to-width
+      title
+      (max 1
+           (- line-width prefix-width
+              (if updated-at
+                  (+ 1 (string-width updated-at))
+                0)))
+      nil nil "…"))
+    (when updated-at
+      (insert
+       (propertize " "
+                   'display
+                   `(space
+                     :align-to (- right ,(string-width updated-at)))))
+      (insert updated-at))
+    (insert "\n")
+    (add-text-properties
+     start (point)
+     (list
+      'omnigent-session-id
+      (alist-get 'id session)
+      'omnigent-session-project-id
+      project
+      'face
+      (omnigent-session--session-face session)))
+    (when (equal
+           (alist-get 'id session) omnigent-session--selected-session)
+      (add-face-text-property
+       (+ start prefix-width) (1- (point)) 'bold))
+    (when pending
+      (put-text-property
+       (+ start prefix-width -2)
+       (+ start prefix-width -1)
+       'face
+       'omnigent-session-attention))
+    (unless folded
+      (dolist (pr (gethash id omnigent-session--pull-requests))
+        (let ((state (alist-get 'state pr)))
+          (omnigent-session--insert-resource-row
+           id (alist-get 'url pr)
+           (concat
+            (format "PR #%s" (alist-get 'number pr))
+            (when state
+              (format " [%s]" (downcase state))))
+           (+ indent 2) line-width project)))
+      (dolist (child children)
+        (omnigent-session--insert-session-row
+         child line-width (1+ depth) project)))))
+
+
+;;; Connection and selection
+
+(defvar omnigent-session--pull-requests-pending
+  (make-hash-table :test 'equal))
+(defvar omnigent-session--resource-checked
+  (make-hash-table :test 'equal))
+
+(defun omnigent-session--pull-request-page
+    (id token entries &optional after)
+  "Fetch ID's PR page after AFTER, accumulating ENTRIES for TOKEN."
+  (omnigent-transport--request
+   id "GET"
+   (omnigent-transport--session-path
+    id
+    (concat
+     "/pull-requests"
+     (when after
+       (concat "?after=" (url-hexify-string after)))))
+   (lambda (status body)
+     (when (eq
+            token
+            (gethash id omnigent-session--pull-requests-pending))
+       (let ((data (alist-get 'data body))
+             (cursor (alist-get 'last_id body)))
+         (if (and (omnigent-transport-success-p status)
+                  (vectorp data)
+                  (eq (alist-get 'has_more body) t)
+                  (stringp cursor)
+                  (not (equal cursor after)))
+             (omnigent-session--pull-request-page id token
+                                                  (append
+                                                   entries data nil)
+                                                  cursor)
+           (remhash id omnigent-session--pull-requests-pending)
+           (when (and (omnigent-transport-success-p status)
+                      (vectorp data)
+                      (not (eq (alist-get 'has_more body) t)))
+             (let ((prs
+                    (cl-remove-if-not
+                     (lambda (pr)
+                       (let ((url (alist-get 'url pr)))
+                         (and (stringp url)
+                              (string-match-p "\\`https?://" url))))
+                     (mapcar
+                      (lambda (pr)
+                        (mapcar
+                         (lambda (key) (assq key pr))
+                         '(url number state)))
+                      (append entries data nil)))))
+               (unless (equal
+                        prs
+                        (gethash id omnigent-session--pull-requests))
+                 (puthash id prs omnigent-session--pull-requests)
+                 (omnigent-session-render))))))))))
+
+(defun omnigent-session--refresh-pull-requests (id)
+  "Refresh ID's linked PRs unless a request is already in flight."
+  (unless (gethash id omnigent-session--pull-requests-pending)
+    (let ((token (make-symbol "pull-requests")))
+      (puthash id token omnigent-session--pull-requests-pending)
+      (condition-case nil
+          (omnigent-session--pull-request-page id token nil)
+        (error
+         (remhash id omnigent-session--pull-requests-pending))))))
+
+(defun omnigent-session--refresh-resources (&optional force)
+  "Refresh resources for sessions in the open sidebar, immediately if FORCE."
+  (when (get-buffer-window "*omnigent-sessions*" t)
+    (let ((now (float-time)))
+      (cl-labels
+       ((visit
+         (row)
+         (let* ((id (alist-get 'id row))
+                (checked
+                 (gethash id omnigent-session--resource-checked 0)))
+           (when (or force (>= (- now checked) 30))
+             (puthash id now omnigent-session--resource-checked)
+             (omnigent-session--refresh-pull-requests id))
+           (mapc #'visit (omnigent-sessions-children id)))))
+       (mapc #'visit (omnigent-sessions-visible))))))
+
+(add-hook 'omnigent-sessions-change-hook #'omnigent-session-render)
+(add-hook
+ 'omnigent-sessions-change-hook #'omnigent-session--refresh-resources)
 
 (provide 'omnigent-sessions)
 ;;; omnigent-sessions.el ends here
