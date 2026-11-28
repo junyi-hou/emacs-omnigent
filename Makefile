@@ -1,6 +1,5 @@
 EMACS ?= emacs
 OMNIGENT_REPO ?= $(CURDIR)/.tools/omnigent-upstream
-INTEGRATION_TEST_FILES ?= $(wildcard test/integration/fixtures/*-test.el)
 ELISP_AUTOFMT ?= $(HOME)/.emacs.d/elpaca/sources/emacs-elisp-autofmt/elisp-autofmt-cmd.py
 
 .PHONY: test test-deps integration-deps unit-test integration-test format
@@ -42,7 +41,7 @@ integration-test:
 	  --eval '(require (quote package))' \
 	  --eval '(setq package-user-dir (expand-file-name ".tools/test-elpa"))' \
 	  --eval '(package-initialize)' \
-	  -L . -L test/integration $(addprefix -l ,$(INTEGRATION_TEST_FILES)) -f ert-run-tests-batch-and-exit
+	  -L . -L test/integration $(addprefix -l ,$(wildcard test/integration/fixtures/*-test.el)) -f ert-run-tests-batch-and-exit
 
 format:
 	$(ELISP_AUTOFMT) $(wildcard *.el .*.el test/unit/*.el test/integration/*.el test/integration/fixtures/*.el)
