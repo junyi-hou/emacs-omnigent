@@ -1661,6 +1661,82 @@
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 
+(ert-deftest
+    omnigent-session-pr-status-refreshes-without-session-updates
+    ()
+  "Update the cached PR state on a timer while the sidebar is visible."
+  (let ((omnigent-session--pull-requests
+         (make-hash-table :test 'equal))
+        (omnigent-session--pull-requests-pending
+         (make-hash-table :test 'equal))
+        (omnigent-session--resource-checked
+         (make-hash-table :test 'equal))
+        (omnigent-session--resource-timer nil)
+        (now 100)
+        (visible t)
+        (state "open")
+        tick
+        cancelled)
+    (cl-letf (((symbol-function 'get-buffer-window)
+               (lambda (&rest _) visible))
+              ((symbol-function 'float-time)
+               (lambda (&optional _) now))
+              ((symbol-function 'omnigent-sessions-visible)
+               (lambda () '(((id . "test")))))
+              ((symbol-function 'omnigent-sessions-children) #'ignore)
+              ((symbol-function 'omnigent-session-render) #'ignore)
+              ((symbol-function 'run-at-time)
+               (lambda (delay repeat callback)
+                 (should (= delay repeat 30))
+                 (should-not tick)
+                 (setq tick callback)
+                 'resource-timer))
+              ((symbol-function 'cancel-timer)
+               (lambda (timer)
+                 (should (eq timer 'resource-timer))
+                 (setq cancelled t)))
+              ((symbol-function 'omnigent-transport--request)
+               (lambda (_id _method _path callback &optional _)
+                 (funcall callback
+                          200
+                          `((data
+                             .
+                             [((url . "https://example.com/pr/42")
+                               (number . 42) (state . ,state))]))))))
+      (omnigent-session--refresh-resources)
+      (setq
+       state "merged"
+       now 101)
+      (omnigent-session--refresh-resources)
+      (should
+       (equal
+        (alist-get
+         'state
+         (car (gethash "test" omnigent-session--pull-requests)))
+        "open"))
+      (setq now 130)
+      (should tick)
+      (funcall tick)
+      (should
+       (equal
+        (alist-get
+         'state
+         (car (gethash "test" omnigent-session--pull-requests)))
+        "merged"))
+      (setq
+       visible nil
+       now 160
+       state "closed")
+      (funcall tick)
+      (should cancelled)
+      (should-not omnigent-session--resource-timer)
+      (should
+       (equal
+        (alist-get
+         'state
+         (car (gethash "test" omnigent-session--pull-requests)))
+        "merged")))))
+
 (ert-deftest omnigent-session-pr-status-faces ()
   "Apply the status face to the full clickable PR label."
   (let ((omnigent-session--pull-requests

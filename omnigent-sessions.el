@@ -1861,6 +1861,18 @@ Use FACE for the full button label."
 (defvar omnigent-session--resource-checked
   (make-hash-table :test 'equal))
 
+(defconst omnigent-session--resource-refresh-interval 30
+  "Minimum seconds between automatic sidebar PR checks for a session.")
+
+(defvar omnigent-session--resource-timer nil
+  "Timer that refreshes PRs while the sidebar is visible.")
+
+(defun omnigent-session--stop-resource-timer ()
+  "Stop the sidebar PR refresh timer."
+  (when omnigent-session--resource-timer
+    (cancel-timer omnigent-session--resource-timer)
+    (setq omnigent-session--resource-timer nil)))
+
 (defun omnigent-session--pull-request-page
     (id token entries &optional after)
   "Fetch ID's PR page after AFTER, accumulating ENTRIES for TOKEN."
@@ -1921,7 +1933,14 @@ Use FACE for the full button label."
 
 (defun omnigent-session--refresh-resources (&optional force)
   "Refresh resources for sessions in the open sidebar, immediately if FORCE."
-  (when (get-buffer-window "*omnigent-sessions*" t)
+  (if (not (get-buffer-window "*omnigent-sessions*" t))
+      (omnigent-session--stop-resource-timer)
+    (unless omnigent-session--resource-timer
+      (setq omnigent-session--resource-timer
+            (run-at-time
+             omnigent-session--resource-refresh-interval
+             omnigent-session--resource-refresh-interval
+             #'omnigent-session--refresh-resources)))
     (let ((now (float-time)))
       (cl-labels
        ((visit
@@ -1929,7 +1948,9 @@ Use FACE for the full button label."
          (let* ((id (alist-get 'id row))
                 (checked
                  (gethash id omnigent-session--resource-checked 0)))
-           (when (or force (>= (- now checked) 30))
+           (when (or force
+                     (>= (- now checked)
+                         omnigent-session--resource-refresh-interval))
              (puthash id now omnigent-session--resource-checked)
              (omnigent-session--refresh-pull-requests id))
            (mapc #'visit (omnigent-sessions-children id)))))
