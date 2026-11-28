@@ -310,7 +310,11 @@
                    (with-temp-buffer
                      (setq
                       buffer-file-name file
-                      default-directory (file-name-directory file))
+                      default-directory
+                      (concat
+                       "~/"
+                       (file-relative-name (file-name-directory file)
+                                           (expand-file-name "~/"))))
                      (let ((omnigent-sessions-open-hook
                             (list
                              (lambda

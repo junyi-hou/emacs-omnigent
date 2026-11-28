@@ -511,17 +511,17 @@
                    (should
                     (equal
                      (alist-get 'workspace fields)
-                     (or root default-directory)))
+                     (expand-file-name (or root default-directory))))
                    (should-not (assq 'project_id fields))
                    (should-not (alist-get 'git fields))))))
       (with-temp-buffer
-        (setq default-directory "/repo/subdir/")
+        (setq default-directory "~/repo/subdir/")
         (should-error
          (omnigent-sessions-create-from-file)
          :type 'user-error)
         (setq
          buffer-file-name "/repo/subdir/file"
-         root "/repo/")
+         root "~/repo/")
         (omnigent-sessions-create-from-file)
         (setq root nil)
         (omnigent-sessions-create-from-file)))))
