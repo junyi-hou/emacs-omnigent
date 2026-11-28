@@ -1735,18 +1735,20 @@ The caller must obtain confirmation first."
     (omnigent-session-open-at-point)))
 
 (defun omnigent-session--insert-resource-row
-    (id target label indent width project)
-  "Insert LABEL for ID and TARGET at INDENT within WIDTH under PROJECT."
+    (id target label indent width project face)
+  "Insert LABEL for ID and TARGET at INDENT within WIDTH under PROJECT.
+Use FACE for the full button label."
   (let ((start (point)))
     (insert (make-string indent ?\s))
     (insert-text-button (truncate-string-to-width
                          (replace-regexp-in-string "[\n\r]" " " label)
-                         (max 1 (- width indent)) nil nil
-                         (propertize "…" 'face 'link))
+                         (max 1 (- width indent)) nil nil "…")
                         'action
                         #'omnigent-session--open-resource-button
                         'follow-link
-                        t)
+                        t
+                        'face
+                        face)
     (insert "\n")
     (add-text-properties
      start (point)
@@ -1843,16 +1845,10 @@ The caller must obtain confirmation first."
           (omnigent-session--insert-resource-row
            id (alist-get 'url pr)
            (concat
-            (propertize (format "PR #%s" (alist-get 'number pr))
-                        'face
-                        'link)
+            (format "PR #%s" (alist-get 'number pr))
             (when status
-              (concat
-               " "
-               (propertize (format "[%s]" status)
-                           'face
-                           `(:inherit ,face :underline t)))))
-           (+ indent 4) line-width project)))
+              (format " [%s]" status)))
+           (+ indent 4) line-width project face)))
       (dolist (child children)
         (omnigent-session--insert-session-row
          child line-width (1+ depth) project)))))
