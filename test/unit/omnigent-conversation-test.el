@@ -1763,6 +1763,47 @@
         (kill-buffer source)
         (kill-buffer target)))))
 
+(ert-deftest omnigent-attach-file-to-session-resolves-symlinks ()
+  "Attach a nested file when the file and workspace paths use symlinks."
+  (let* ((directory (make-temp-file "omnigent-attach-" t))
+         (root (expand-file-name "project" directory))
+         (workspace (expand-file-name "workspace" directory))
+         (file (expand-file-name "src/a.el" root))
+         (alias (expand-file-name "alias.el" directory)))
+    (unwind-protect
+        (save-window-excursion
+          (with-temp-buffer
+            (let ((target (current-buffer)))
+              (make-directory (file-name-directory file) t)
+              (write-region "" nil file nil 'silent)
+              (make-symbolic-link root workspace)
+              (make-symbolic-link file alias)
+              (setq-local omnigent-conversation--prompt-start
+                          (copy-marker (point-min)))
+              (switch-to-buffer target)
+              (cl-letf (((symbol-function 'omnigent-sessions-visible)
+                         (lambda ()
+                           `(((id . "session")
+                              (host_id . "host")
+                              (workspace . ,workspace)))))
+                        ((symbol-function
+                          'omnigent-workspace-host-mapping)
+                         (lambda (_) 'local))
+                        ((symbol-function 'completing-read)
+                         (lambda (_prompt table &rest _)
+                           (car (all-completions "" table))))
+                        ((symbol-function
+                          'omnigent--conversation-buffer)
+                         (lambda (&rest _) target)))
+                (dolist (name (list file alias))
+                  (with-temp-buffer
+                    (setq buffer-file-name name)
+                    (omnigent-attach-file-to-session))
+                  (should
+                   (equal (omnigent--attachment-paths) '("src/a.el")))
+                  (omnigent--attachment-set nil))))))
+      (delete-directory directory t))))
+
 (provide 'omnigent-conversation-test)
 ;;; omnigent-conversation-test.el ends here
 (ert-deftest

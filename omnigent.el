@@ -1958,23 +1958,33 @@ When SIDE-CHAT is non-nil, skip skill completion discovery."
              (root (alist-get 'workspace session))
              (host (alist-get 'host_id session)))
         (when (and (stringp root) (stringp host) (stringp id))
-          (let ((mapped
+          (let ((path
                  (condition-case nil
-                     (omnigent-workspace-local-filename
-                      root "" (omnigent-workspace-host-mapping host))
+                     (let ((directory
+                            (file-name-as-directory
+                             (omnigent-workspace-local-filename
+                              root ""
+                              (omnigent-workspace-host-mapping
+                               host)))))
+                       (cond
+                        ((string-prefix-p directory file)
+                         (substring file (length directory)))
+                        ((equal
+                          (file-remote-p directory)
+                          (file-remote-p file))
+                         (let ((resolved-directory
+                                (file-name-as-directory
+                                 (file-truename directory)))
+                               (resolved-file (file-truename file)))
+                           (when (string-prefix-p
+                                  resolved-directory resolved-file)
+                             (substring resolved-file
+                                        (length
+                                         resolved-directory)))))))
                    (error
                     nil))))
-            (when (and mapped
-                       (string-prefix-p
-                        (file-name-as-directory mapped) file))
-              (push (cons
-                     session
-                     (concat
-                      (substring file
-                                 (length
-                                  (file-name-as-directory mapped)))
-                      range))
-                    matches))))))
+            (when path
+              (push (cons session (concat path range)) matches))))))
     (unless matches
       (user-error "No session workspace contains this file"))
     (setq matches
