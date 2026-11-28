@@ -270,9 +270,9 @@ not make each update constant-time.
 ## Linked pull requests
 
 Show each linked PR under the session that owns it, at the same indentation
-as child sessions. Show the PR number, the last fetched state in parentheses,
-and the title. Press `RET` or click the row to open the PR in the browser.
-Press `d` on the PR row to fetch and display its patch.
+as child sessions. Use the format `PR #42 [open]` and omit the brackets when
+the status is unavailable. Press `RET` or click the row to open the PR in
+the browser.  Press `d` on the PR row to fetch and display its patch.
 
 Read linked PRs from `GET /v1/sessions/{id}/pull-requests`. This endpoint
 returns the status last fetched by the server's runner or host. Read the PR

@@ -383,10 +383,9 @@
           (omnigent-ui--insert-resource-row
            id (alist-get 'url pr)
            (concat
-            (format "#%s" (alist-get 'number pr))
+            (format "PR #%s" (alist-get 'number pr))
             (when state
-              (format " (%s)" (downcase state)))
-            " " (alist-get 'title pr))
+              (format " [%s]" (downcase state))))
            (+ indent 2) line-width project)))
       (dolist (child children)
         (omnigent-ui--insert-session-row
@@ -546,7 +545,7 @@
                       (lambda (pr)
                         (mapcar
                          (lambda (key) (assq key pr))
-                         '(url number state title)))
+                         '(url number state)))
                       (append entries data nil)))))
                (unless (equal
                         prs (gethash id omnigent-ui--pull-requests))

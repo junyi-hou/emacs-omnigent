@@ -1586,7 +1586,9 @@
                           (title . "Parser fix"))]))))
           (should (looking-at "    ▾ Implement fix"))
           (forward-line 1)
-          (should (looking-at-p "      #42 (open) Parser fix"))
+          (should
+           (looking-at-p
+            (concat (regexp-quote "      PR #42 [open]") "$")))
           (cl-letf (((symbol-function 'browse-url)
                      (lambda (target &rest _) (setq opened target))))
             (button-activate (button-at (+ (point) 6)))
@@ -1613,17 +1615,21 @@
                         (state . "OPEN")
                         (title . "Second fix"))]))))))
             (omnigent-ui--refresh-pull-requests "child"))
-          (should (looking-at-p "      #42 (merged) Parser fix"))
+          (should
+           (looking-at-p
+            (concat (regexp-quote "      PR #42 [merged]") "$")))
           (save-excursion
             (forward-line 1)
-            (should (looking-at-p "      #43 (open) Second fix")))
+            (should
+             (looking-at-p
+              (concat (regexp-quote "      PR #43 [open]") "$"))))
           (forward-line -1)
           (omnigent-ui-toggle-tree)
           (omnigent-ui-sessions-render)
           (should (looking-at "    ▸ Implement fix"))
           (should-not (search-forward "#42" nil t))
           (omnigent-ui-toggle-tree)
-          (should (search-forward "#42 (merged)" nil t)))
+          (should (search-forward "PR #42 [merged]" nil t)))
       (when-let* ((buffer (get-buffer "*omnigent-sessions*")))
         (kill-buffer buffer)))))
 
